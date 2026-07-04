@@ -2,6 +2,7 @@
 
 import sys
 import urllib.request
+from pathlib import Path
 
 
 def main():
@@ -12,11 +13,17 @@ def main():
 
     sec_url = sys.argv[1]
 
-    print("CRT SEC Downloader v1.0")
+    print("CRT SEC Downloader v1.1")
     print()
     print("Downloading:")
     print(sec_url)
-    print()
+
+    root = Path(__file__).resolve().parents[1]
+    output_dir = root / "raw" / "sec"
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    filename = sec_url.split("/")[-1]
+    target = output_dir / filename
 
     request = urllib.request.Request(
         sec_url,
@@ -28,7 +35,11 @@ def main():
     with urllib.request.urlopen(request) as response:
         content = response.read()
 
+    target.write_bytes(content)
+
+    print()
     print("Download Success")
+    print(f"Saved to: {target}")
     print(f"Bytes: {len(content)}")
 
 
