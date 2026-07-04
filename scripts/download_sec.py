@@ -5,10 +5,9 @@ import re
 import time
 import urllib.request
 from pathlib import Path
-from datetime import datetime
 
 
-USER_AGENT = "CRT_Master/3.0 contact: qqc168@gmail.com"
+USER_AGENT = "CRT_Master/3.1 contact: qqc168@gmail.com"
 TIMEOUT = 30
 RETRY = 3
 
@@ -30,11 +29,7 @@ MONTHS = {
 
 
 def fetch(url):
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": USER_AGENT},
-    )
-
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     last_error = None
 
     for attempt in range(1, RETRY + 1):
@@ -43,26 +38,32 @@ def fetch(url):
                 return response.read()
         except Exception as e:
             last_error = e
-            print(f"Fetch failed attempt {attempt}/{RETRY}: {e}")
+            print(f"Fetch failed {attempt}/{RETRY}: {e}")
             time.sleep(2)
 
     raise last_error
 
 
-def extract_date_from_text(text):
+def extract_date(text):
     pattern = r"\b(" + "|".join(MONTHS.keys()) + r")\.?\s+(\d{1,2}),\s+(20\d{2})\b"
-    match = re.search(pattern, text)
-
-    if not match:
+    m = re.search(pattern, text)
+    if not m:
         return "unknown_date"
 
-    month_name = match.group(1).replace(".", "")
-    day = match.group(2).zfill(2)
-    year = match.group(3)
-
-    month = MONTHS[month_name]
-
+    month = MONTHS[m.group(1).replace(".", "")]
+    day = m.group(2).zfill(2)
+    year = m.group(3)
     return f"{year}_{month}_{day}"
+
+
+def extract_company(text):
+    if re.search(r"\bStrategy\b", text, re.I):
+        return "strategy"
+    if re.search(r"\bMicroStrategy\b", text, re.I):
+        return "microstrategy"
+    if re.search(r"\bApple\b", text, re.I):
+        return "apple"
+    return "unknown_company"
 
 
 def safe_stem(filename):
@@ -73,13 +74,14 @@ def safe_stem(filename):
 
 
 def build_filename(url, html):
-    original_name = url.split("/")[-1]
-    ext = Path(original_name).suffix or ".html"
-    stem = safe_stem(original_name)
+    original = url.split("/")[-1]
+    ext = Path(original).suffix or ".html"
+    stem = safe_stem(original)
 
-    filing_date = extract_date_from_text(html)
+    company = extract_company(html)
+    date = extract_date(html)
 
-    return f"mstr_{filing_date}_{stem}{ext}"
+    return f"{company}_{date}_{stem}{ext}"
 
 
 def main():
@@ -88,29 +90,28 @@ def main():
         print('python scripts/download_sec.py "<SEC_URL>"')
         return
 
-    sec_url = sys.argv[1]
+    url = sys.argv[1]
 
     root = Path(__file__).resolve().parents[1]
     raw_dir = root / "raw" / "sec"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
-    print("CRT SEC Downloader v3.0")
+    print("CRT SEC Downloader v3.1")
     print()
     print("Downloading:")
-    print(sec_url)
+    print(url)
 
-    data = fetch(sec_url)
+    data = fetch(url)
     html = data.decode("utf-8", errors="ignore")
 
-    filename = build_filename(sec_url, html)
-    output_path = raw_dir / filename
-
-    output_path.write_bytes(data)
+    filename = build_filename(url, html)
+    output = raw_dir / filename
+    output.write_bytes(data)
 
     print()
     print("Download Success")
     print("Saved to:")
-    print(output_path)
+    print(output)
     print(f"Bytes: {len(data)}")
 
 
