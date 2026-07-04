@@ -7,7 +7,7 @@ import urllib.request
 from pathlib import Path
 
 
-USER_AGENT = "CRT_Master/3.1 contact: qqc168@gmail.com"
+USER_AGENT = "CRT_Master/3.2 contact: qqc168@gmail.com"
 TIMEOUT = 30
 RETRY = 3
 
@@ -23,7 +23,7 @@ MONTHS = {
     "August": "08", "Aug": "08",
     "September": "09", "Sep": "09",
     "October": "10", "Oct": "10",
-    "November": "11", "Nov": "11",
+    "November": "11","Nov": "11",
     "December": "12", "Dec": "12",
 }
 
@@ -96,7 +96,7 @@ def main():
     raw_dir = root / "raw" / "sec"
     raw_dir.mkdir(parents=True, exist_ok=True)
 
-    print("CRT SEC Downloader v3.1")
+    print("CRT SEC Downloader v3.2")
     print()
     print("Downloading:")
     print(url)
@@ -106,6 +106,14 @@ def main():
 
     filename = build_filename(url, html)
     output = raw_dir / filename
+
+    if output.exists():
+        print()
+        print("File already exists")
+        print("Skip download")
+        print(output)
+        return
+
     output.write_bytes(data)
 
     print()
