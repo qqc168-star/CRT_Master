@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 
 import json
+import sys
 import urllib.request
 from pathlib import Path
 
-USER_AGENT = "CRT_Master/1.0"
-INDEX_URL = "https://www.sec.gov/Archives/edgar/data/1050446/000119312526237907/index.json"
+USER_AGENT = "CRT_Master/2.0"
 
 
 def fetch(url):
@@ -13,19 +13,34 @@ def fetch(url):
         url,
         headers={"User-Agent": USER_AGENT}
     )
-
     with urllib.request.urlopen(req, timeout=30) as r:
         return r.read()
 
 
+def sec_to_index(sec_url):
+    return sec_url.rsplit("/", 1)[0] + "/index.json"
+
+
 def main():
-    print("CRT Index Downloader v1.0")
+
+    if len(sys.argv) != 2:
+        print("Usage:")
+        print('python scripts/download_index.py "<SEC_URL>"')
+        return
+
+    sec_url = sys.argv[1]
+    index_url = sec_to_index(sec_url)
+
+    print("CRT Index Downloader v2.0")
+    print()
+    print("SEC URL:")
+    print(sec_url)
+    print()
+    print("Index URL:")
+    print(index_url)
     print()
 
-    print("Downloading:")
-    print(INDEX_URL)
-
-    data = fetch(INDEX_URL)
+    data = fetch(index_url)
 
     root = Path(__file__).resolve().parents[1]
     outdir = root / "raw" / "index"
@@ -36,20 +51,13 @@ def main():
 
     obj = json.loads(data.decode())
 
-    print()
     print("Download Success")
-    print("Saved to:")
     print(outfile)
-    print(f"Bytes: {len(data)}")
     print()
+    print("Files")
 
-    print("Directory:")
-    print(obj["directory"]["name"])
-    print()
-
-    print("Files:")
     for item in obj["directory"]["item"]:
-        print("-", item["name"])
+        print(item["name"])
 
 
 if __name__ == "__main__":
