@@ -1,0 +1,25 @@
+{
+  "contract_id": "CRT-RADAR-ASL4-E2E-ADAPTER-CONTRACT-V1",
+  "status": "CANDIDATE_UNMERGED",
+  "formal_parent": "CRT Master V1.9",
+  "architecture_target": "CRT-RADAR-E2E-001 V0.1 / V1.10-RC2 candidate",
+  "layer_id": "AS-L4",
+  "required_input_families": [
+    "OPEN_INTEREST",
+    "FUNDING_RATE",
+    "LIQUIDATION_AGGREGATES"
+  ],
+  "valid_quality_states": {
+    "OPEN_INTEREST": "VALID_FRESH",
+    "FUNDING_RATE": "VALID_FRESH",
+    "LIQUIDATION_AGGREGATES": "VALID_FRESH_COMPLETE_COVERAGE"
+  },
+  "critical_statuses": ["MISSING", "STALE", "CONFLICT", "INVALID"],
+  "score_authority": "UPSTREAM_LOCKED_MODEL_ONLY",
+  "adapter_score": null,
+  "semantic_locks": {
+    "mnav": "diluted_equity_mnav",
+    "q4_window": "2026-Q4"
+  },
+  "external_action_authority": "NONE"
+}

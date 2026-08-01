@@ -1,0 +1,22 @@
+test_complete_fresh_l4_can_only_emit_read_only_observation (tests.test_production_safety_contract.ProductionSafetyContractTests.test_complete_fresh_l4_can_only_emit_read_only_observation) ... ok
+test_connected_empty_liquidation_window_is_not_transport_missing (tests.test_production_safety_contract.ProductionSafetyContractTests.test_connected_empty_liquidation_window_is_not_transport_missing) ... ok
+test_contract_declares_oi_funding_and_liquidation_as_critical_l4 (tests.test_production_safety_contract.ProductionSafetyContractTests.test_contract_declares_oi_funding_and_liquidation_as_critical_l4) ... ok
+test_dollar_proxy_transport_error_blocks (tests.test_production_safety_contract.ProductionSafetyContractTests.test_dollar_proxy_transport_error_blocks) ... ok
+test_existing_p07_nominal_fixtures_remain_parser_compatible (tests.test_production_safety_contract.ProductionSafetyContractTests.test_existing_p07_nominal_fixtures_remain_parser_compatible) ... ok
+test_funding_transport_error_blocks (tests.test_production_safety_contract.ProductionSafetyContractTests.test_funding_transport_error_blocks) ... ok
+test_malformed_funding_payload_blocks_instead_of_raising (tests.test_production_safety_contract.ProductionSafetyContractTests.test_malformed_funding_payload_blocks_instead_of_raising) ... ok
+test_malformed_liquidation_event_blocks (tests.test_production_safety_contract.ProductionSafetyContractTests.test_malformed_liquidation_event_blocks) ... ok
+test_malformed_oi_payload_blocks_instead_of_raising (tests.test_production_safety_contract.ProductionSafetyContractTests.test_malformed_oi_payload_blocks_instead_of_raising) ... ok
+test_missing_liquidation_stream_blocks_instead_of_becoming_zero (tests.test_production_safety_contract.ProductionSafetyContractTests.test_missing_liquidation_stream_blocks_instead_of_becoming_zero) ... ok
+test_missing_mark_price_is_rejected_and_never_zero_filled (tests.test_production_safety_contract.ProductionSafetyContractTests.test_missing_mark_price_is_rejected_and_never_zero_filled) ... ok
+test_oi_transport_error_blocks (tests.test_production_safety_contract.ProductionSafetyContractTests.test_oi_transport_error_blocks) ... ok
+test_stale_fred_observation_blocks (tests.test_production_safety_contract.ProductionSafetyContractTests.test_stale_fred_observation_blocks) ... ok
+test_stale_funding_observation_blocks (tests.test_production_safety_contract.ProductionSafetyContractTests.test_stale_funding_observation_blocks) ... ok
+test_stale_oi_observation_blocks (tests.test_production_safety_contract.ProductionSafetyContractTests.test_stale_oi_observation_blocks) ... ok
+test_transient_http_errors_are_retried_before_success (tests.test_production_safety_contract.ProductionSafetyContractTests.test_transient_http_errors_are_retried_before_success) ... ok
+test_transient_liquidation_connection_errors_are_retried (tests.test_production_safety_contract.ProductionSafetyContractTests.test_transient_liquidation_connection_errors_are_retried) ... ok
+
+----------------------------------------------------------------------
+Ran 17 tests in 0.014s
+
+OK

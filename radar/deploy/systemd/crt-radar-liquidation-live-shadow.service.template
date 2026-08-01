@@ -1,0 +1,22 @@
+[Unit]
+Description=CRT Radar BTC Liquidation Live Shadow (read-only, 24h)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=REPLACE_WITH_SERVICE_USER
+WorkingDirectory=REPLACE_WITH_ABSOLUTE_WORKSPACE_PATH
+Environment=CRT_RUNTIME_ROOT=REPLACE_WITH_ABSOLUTE_RUNTIME_PATH
+ExecStart=REPLACE_WITH_ABSOLUTE_WORKSPACE_PATH/scripts/run_live_shadow_24h.sh
+Restart=no
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=REPLACE_WITH_ABSOLUTE_RUNTIME_PATH
+ProtectHome=true
+LockPersonality=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

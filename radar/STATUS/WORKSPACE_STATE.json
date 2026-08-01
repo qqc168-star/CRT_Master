@@ -1,0 +1,42 @@
+{
+  "absorbed_stages": [
+    "V0.2 Safety Contract",
+    "V0.3 Source Gate migration",
+    "V0.4 Persistent Liquidation Aggregator"
+  ],
+  "architecture_target": [
+    "V1.10-RC2 candidate",
+    "V1.10-RC3 candidate lineage"
+  ],
+  "current_tests": {
+    "fail": 0,
+    "pass": 88
+  },
+  "external_action_authority": "NONE",
+  "formal_parent": "CRT Master V1.9",
+  "github_write": "BLOCKED_PENDING_CODEX_QUOTA_OR_WRITE_PATH",
+  "implemented_input_layers": [
+    "AS-L2",
+    "AS-L4",
+    "AS-L5"
+  ],
+  "legacy_v0_2_tests": {
+    "fail": 0,
+    "pass": 17
+  },
+  "live_shadow": "NOT_RUN_DNS_UNAVAILABLE_IN_SANDBOX",
+  "live_shadow_preflight": "PASS",
+  "missing_input_layers": [
+    "AS-L1",
+    "AS-L3",
+    "AS-L6"
+  ],
+  "next_gate": "24H_LIVE_SHADOW_ON_PERSISTENT_NETWORKED_HOST",
+  "program_registry": "PASS",
+  "read_only_surface": "PASS",
+  "source_registry_payload_version": "1.3-wip",
+  "status": "OFFLINE_INTEGRATION_PASS_LIVE_NOT_RUN",
+  "user_facing_package": "DEFERRED_UNTIL_MAJOR_GATE",
+  "workspace_id": "CRT-RADAR-INTEGRATED-WORKSPACE-WIP-20260801",
+  "workspace_version": "0.9.0-wip"
+}

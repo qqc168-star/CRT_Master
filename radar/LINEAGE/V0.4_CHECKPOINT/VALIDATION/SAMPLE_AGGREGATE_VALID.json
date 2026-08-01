@@ -1,0 +1,45 @@
+{
+  "anomaly_count_24h": 0,
+  "as_of_ms": 1785549120000,
+  "blocked_reasons": [],
+  "connection_set_hash": "9397c4d39acc52af1646f562e9bc48cf294177c500de54150ab59425e387efa5",
+  "coverage_ratio": 1.0,
+  "event_count_24h": 2,
+  "event_set_hash": "7cc1459590c3b56ce847d859d1d3daf364013f1bfec8e48172e94bd9fd6a5a90",
+  "external_action_authority": "NONE",
+  "external_action_performed": false,
+  "generated_at_ms": 1785549120000,
+  "minimum_coverage_ratio": 0.95,
+  "quality_state": "VALID_FRESH_COMPLETE_COVERAGE",
+  "schema_version": "CRT_LIQ_AGGREGATE_SNAPSHOT_V1",
+  "snapshot_hash": "e35a654151974000108959e141005969f19e7500d4698e9063671d17365e2d60",
+  "snapshot_id": "28b4e6c4cc674edc89b19f6be9807f171638078091a7a558e5a52a56d3351d98",
+  "store_schema_version": "CRT_LIQ_STORE_V1",
+  "symbol": "BTCUSDT",
+  "windows": {
+    "1h": {
+      "coverage_ratio": 1.0,
+      "covered_ms": 3600000,
+      "event_count": 2,
+      "gap_ms": 0,
+      "long_liquidation_usd": 32000.0,
+      "quiet_window": false,
+      "short_liquidation_usd": 16025.0,
+      "total_liquidation_usd": 48025.0,
+      "window_end_ms": 1785549120000,
+      "window_start_ms": 1785545520000
+    },
+    "24h": {
+      "coverage_ratio": 1.0,
+      "covered_ms": 86400000,
+      "event_count": 2,
+      "gap_ms": 0,
+      "long_liquidation_usd": 32000.0,
+      "quiet_window": false,
+      "short_liquidation_usd": 16025.0,
+      "total_liquidation_usd": 48025.0,
+      "window_end_ms": 1785549120000,
+      "window_start_ms": 1785462720000
+    }
+  }
+}

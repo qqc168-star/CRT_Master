@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "crt-radar-readonly"
+version = "0.6.0.dev0"
+description = "CRT read-only Radar source gate, liquidation evidence and E2E adapter"
+requires-python = ">=3.13"
+dependencies = [
+  "websockets==16.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

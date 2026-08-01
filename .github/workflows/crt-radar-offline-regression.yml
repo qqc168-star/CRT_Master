@@ -1,0 +1,40 @@
+name: CRT Radar Offline Regression
+
+on:
+  push:
+    branches-ignore:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: radar
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: radar/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install --requirement requirements.txt
+      - name: Compile
+        run: python -m compileall -q src tests scripts
+      - name: Run offline tests
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+      - name: Validate registry
+        env:
+          PYTHONPATH: src
+        run: python scripts/validate_program_registry.py
+      - name: Enforce read-only surface
+        run: python scripts/assert_read_only_surface.py
