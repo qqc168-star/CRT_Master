@@ -38,13 +38,3 @@ jobs:
         run: python scripts/validate_program_registry.py
       - name: Enforce read-only surface
         run: python scripts/assert_read_only_surface.py
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: radar-artifacts
-          path: |
-            radar/runtime_live_shadow/**
-            radar/run_ledger/**
-            radar/snapshots/**
-            radar/reports/**
