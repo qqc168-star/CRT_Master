@@ -1,0 +1,32 @@
+﻿{
+    "schema":  "CRT_LIVE_SHADOW_PASS_ARCHIVE_V1",
+    "created_at":  "2026-08-05T19:03:33.1572459+08:00",
+    "formal_parent":  "CRT Master V1.9",
+    "branch":  "radar/integrated-wip-20260801",
+    "pull_request":  "#1 Draft / unmerged",
+    "process_run_id":  "17cccceb-d819-4fca-aab0-45f6dc9275f1",
+    "decision":  "LIVE_SHADOW_PASS",
+    "acceptance_failures":  [
+
+                            ],
+    "ledger_valid":  true,
+    "reported_elapsed_s":  86410.584270400024,
+    "snapshot_delivery_ratio":  0.99861111111111123,
+    "controlled_restart_count":  1,
+    "open_session_count":  0,
+    "process_stop_outcome":  "COMPLETED",
+    "minimum_observed_coverage_ratio_diagnostic":  0.0006919097222222222,
+    "blocked_snapshot_count_diagnostic":  1368,
+    "secondary_archive_gate_applied":  false,
+    "summary_sha256":  "3ed0737f8e8c0bd4440ed11f2c4f91bcee154c3bb6eaaaf0b67a2d11be8e1bc8",
+    "validator_sha256":  "8bb2a76803f4f99b2705714720626c634bcc40d2fba859edcb32e4fdce06919d",
+    "external_runtime_zip":  "CRT_LIVE_SHADOW_PASS_20260805_17cccceb.zip",
+    "external_runtime_zip_sha256":  "a30c518317621c05e22f7705682169c4e7adf28f1025a8d7d5739d92060223e7",
+    "runtime_sha256_manifest":  "CRT_LIVE_SHADOW_PASS_20260805_17cccceb.runtime.sha256.txt",
+    "runtime_sha256_manifest_sha256":  "a83f25ffb1e45fa2d8b299b75b00c98160703130d564ece9974d79553a6f7ce9",
+    "stash_preserved":  "stash@{0}|64d1ecdf3fc5621eff5d42f34c1e534f1605c5bf|On radar/integrated-wip-20260801: parallel-automation-work-before-live-pass-archive",
+    "formal_v1_10":  "NOT_PROMOTED",
+    "production":  "NOT_APPROVED",
+    "post_seal_maturity":  "0/20",
+    "external_action_authority":  "NONE"
+}
