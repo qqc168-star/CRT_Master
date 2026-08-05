@@ -1,45 +1,28 @@
-# CRT Radar Rollback Plan - WIP
+# CRT V1.10 Rollback Plan
 
-## Purpose
+## Protected baselines
 
-Provide a reversible recovery path without altering the formal parent or current Production authority.
-
-## Protected baseline
-
-- Formal parent: `CRT Master V1.9`
-- Working branch: `radar/integrated-wip-20260801`
-- Pull request: `#1 Draft / unmerged`
+- Pre-merge main: `6e624acc6e02892b4cdff99f8e177abbc388fd51`
+- Release vehicle: Pull Request `#1`
+- Release branch: `radar/integrated-wip-20260801`
 - External action authority: `NONE`
 
 ## Rollback triggers
 
-- Live Shadow verification fails
-- Coverage is below 0.95
-- Run Ledger verification fails
-- Snapshot archive is incomplete or corrupted
-- Registry or policy hash mismatch
-- Critical blocked evidence was accepted
-- Unauthorized external action is detected
-- Governance or lineage conflict remains unresolved
+- Post-merge integrity or regression failure
+- Evidence corruption
+- Governance or lineage conflict
+- Unauthorized external action
+- A confirmed defect that violates the accepted read-only Safety Contract
 
 ## Rollback method
 
-1. Keep PR #1 in Draft state.
-2. Do not merge into `main`.
-3. Preserve failed evidence and logs.
-4. Record the failing commit and verification result.
-5. Return the branch to the last verified checkpoint only after explicit approval.
-6. Re-run offline regression and preflight before another Live Shadow attempt.
-7. Never delete failed evidence merely to obtain a passing result.
+1. Preserve all accepted and failed evidence.
+2. Record the defective commit and exact failing result.
+3. Revert the V1.10 merge commit through a new reviewed commit.
+4. Do not force-push or rewrite `main`.
+5. Do not delete evidence to obtain a passing result.
+6. Re-run offline regression and integrity checks before any replacement seal.
+7. Production and external actions remain blocked throughout rollback.
 
-## Safe rollback boundary
-
-Rollback may affect only the isolated WIP branch.
-
-It must not:
-
-- rewrite `main`
-- alter CRT Master V1.9
-- authorize Production
-- change formal models, weights or thresholds
-- trigger trading, account access, email, webhook or notification
+The parallel automation stash is outside the V1.10 merge scope and must not be dropped or applied as part of rollback.

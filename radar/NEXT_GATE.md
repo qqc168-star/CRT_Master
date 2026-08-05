@@ -1,18 +1,23 @@
-# Next Gate｜External 24h Live Shadow
+# Next Gate｜Post-Seal 20-Run Maturity Observation
 
-## Required environment
+## Current formal state
 
-- Persistent networked Linux host or container runtime.
-- Persistent writable volume for SQLite, raw JSONL, snapshots and Run Ledger.
-- Python 3.13 and dependencies from `requirements.txt`.
+- Version: `CRT V1.10`
+- First 24-hour Live Shadow Gate: `PASS`
+- P1-01 technical post-live review: `PASS`
+- Production: `NOT_APPROVED`
+- External action authority: `NONE`
 
-## Gate sequence
+## Maturity rule
 
-1. Offline tests PASS.
-2. Preflight returns `PREFLIGHT_PASS`.
-3. Run 24 hours with one controlled restart.
-4. Verify evidence.
-5. Review any blocked snapshots, disconnect gaps or anomalies.
-6. Only after `LIVE_SHADOW_PASS`, conduct P1-01 integration review.
+- Count only qualified Daily Radar Production Runs.
+- Maximum one qualified sample per Taipei calendar day.
+- Record schedule execution, latency, output state, Safety Contract result, data completeness, conflicts and schema validity.
+- Hourly sentinel silence does not create additional samples.
+- A correctly fail-closed `BLOCKED` run may count as execution success, but not as a normal six-layer score.
 
-No packaging or formal promotion occurs before this gate.
+## Boundary
+
+The 20-run observation is post-seal maturity evidence. It does not reopen or invalidate the accepted first Live Shadow Gate.
+
+Parallel automation work must remain isolated until a separate inventory and approval.

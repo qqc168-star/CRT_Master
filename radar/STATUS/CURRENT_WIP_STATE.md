@@ -1,13 +1,21 @@
-﻿# CRT Radar Current WIP State
+# CRT Radar Current Formal State
 
-- Formal parent: CRT Master V1.9
-- Branch: radar/integrated-wip-20260801
-- PR #1: Draft / open / unmerged
-- 24h Live Shadow Gate: PASS
-- P1-01 technical post-live: PASS
-- Live PASS evidence archive and push: PASS
-- Formal V1.10: WAITING USER APPROVAL
-- Post-seal maturity: 0/20
-- Production: NOT APPROVED
-- External action authority: NONE
-- Parallel automation stash: PRESERVED / NOT APPLIED
+- Formal SSOT: `CRT V1.10`
+- Predecessor: `CRT Master V1.9`
+- Pull request: `#1 / merged into main`
+- Formal seal approval: `2026-08-05 19:09 +08:00`
+- 24-hour Live Shadow Gate: `PASS`
+- P1-01 technical post-live review: `PASS`
+- Live evidence archive: `PASS`
+- Production: `NOT_APPROVED`
+- Post-seal maturity observation: `0 / 20`
+- External action authority: `NONE`
+- Parallel automation stash: `PRESERVED / NOT_APPLIED`
+
+## Preserved locks
+
+- Six-layer weights: `20 / 20 / 17 / 25 / 13 / 5`
+- Light thresholds: `-60 / -35 / 35 / 60`
+- Unqualified `mNAV`: `Diluted Equity mNAV`
+- Q4: `2026 Q4`
+- Constitution and governance boundaries: unchanged

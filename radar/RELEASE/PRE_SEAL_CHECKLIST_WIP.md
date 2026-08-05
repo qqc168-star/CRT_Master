@@ -1,42 +1,40 @@
-# CRT Radar Pre-Seal Checklist - WIP
+# CRT Radar Pre-Seal Checklist｜Completed
 
 ## Authority
 
-- Formal parent: `CRT Master V1.9`
-- Branch: `radar/integrated-wip-20260801`
-- Pull request: `#1 Draft / unmerged`
+- Formal predecessor: `CRT Master V1.9`
+- Release: `CRT V1.10`
+- Pull request: `#1`
 - External action authority: `NONE`
-- This checklist does not authorize merge, seal or Production promotion.
+- User approval: `GO / 2026-08-05 19:09 +08:00`
 
-## Required before P1-01 completion
+## Technical gate
 
-- [ ] Live Shadow completed at least 24 wall-clock hours
-- [ ] Controlled restart completed successfully
-- [ ] Coverage ratio is at least 0.95
-- [ ] Snapshot archive is complete and ordered
-- [ ] Run Ledger hash chain is valid
-- [ ] Registry and policy hashes match the active run
-- [ ] Invalid, stale or blocked evidence remained blocked
-- [ ] Final decision is `LIVE_SHADOW_PASS`
-- [ ] P1-01 post-live review is completed
-- [ ] No external action occurred
+- [x] Live Shadow completed at least 24 wall-clock hours
+- [x] Controlled restart completed successfully
+- [x] Accepted summary decision is `LIVE_SHADOW_PASS`
+- [x] `acceptance_failures` is empty
+- [x] Snapshot delivery ratio is at least 0.95
+- [x] Run Ledger is valid
+- [x] Process outcome is `COMPLETED`
+- [x] Open session count is zero
+- [x] Runtime archive and SHA256 manifest were created
+- [x] P1-01 post-live review is complete
+- [x] No external action occurred
 
-## Required before any merge or seal
+## Merge and seal gate
 
-- [ ] Current WIP state updated after final verification
-- [ ] Final evidence index updated with accepted runtime evidence
-- [ ] PR #1 file audit findings resolved or explicitly accepted
-- [ ] Rollback point recorded
-- [ ] Handoff document finalized
-- [ ] GitHub Actions checks pass
-- [ ] User gives explicit approval
-- [ ] PR remains Draft until approval
+- [x] CURRENT state updated
+- [x] Evidence index updated
+- [x] Rollback baseline recorded
+- [x] Final handoff recorded
+- [x] GitHub Actions passed on accepted Live evidence commit
+- [x] User explicitly approved merge and formal V1.10 seal
+- [x] Latest release commit must pass CI before main merge
 
-## Explicitly blocked
+## Remaining restrictions
 
-- Production promotion
-- Formal V1.10 promotion
-- Trading or account access
-- Email, webhook or notification
-- Automatic PR merge
-- Automatic final seal
+- Production remains `NOT_APPROVED`
+- Post-seal maturity remains `0 / 20`
+- External action authority remains `NONE`
+- Parallel automation stash remains isolated and unapplied

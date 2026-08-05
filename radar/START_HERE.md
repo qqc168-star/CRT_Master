@@ -1,39 +1,38 @@
-# CRT Radar Integrated Workspace
+# CRT Radar｜CRT V1.10
 
-- Workspace: `CRT-RADAR-INTEGRATED-WORKSPACE-WIP-20260801`
-- Version: `0.9.0-wip`
-- Status: `OFFLINE_INTEGRATION_PASS / LIVE_NOT_RUN / CANDIDATE_UNMERGED`
-- Formal parent: `CRT Master V1.9`
-- Architecture target: V1.10-RC2／RC3 candidate lineage
+- Formal version: `CRT V1.10`
+- Status: `FORMAL_SEALED / READ_ONLY_DECISION_SUPPORT`
+- Production: `NOT_APPROVED`
 - External action authority: `NONE`
+- Predecessor: `CRT Master V1.9`
 
-## Absorbed work
+## Integrated components
 
-1. V0.2 Production Safety Contract repair.
-2. V0.3 Source Registry and Binance liquidation route migration.
-3. V0.4 Persistent Liquidation Aggregator.
-4. Hash-chained Run Ledger, immutable snapshot archive and deployment harness.
-5. Run-scoped Live Shadow acceptance hardening.
-6. 32-system Radar Program Registry and validator.
-7. Coin Metrics transparent MVRV/NUPL input parser.
+1. Production Safety Contract and fail-closed controls.
+2. Source Registry and Binance liquidation route migration.
+3. Persistent Liquidation Aggregator.
+4. Hash-chained Run Ledger and immutable snapshot archive.
+5. Live Shadow evidence and acceptance harness.
+6. Radar Program Registry and validator.
+7. Transparent Coin Metrics MVRV/NUPL inputs.
 8. AS-L2 / AS-L4 / AS-L5 no-score multi-layer bridge.
 
-## Current verification
+## Accepted verification
 
-- `88/88` integrated tests PASS.
-- Program Registry PASS.
-- Read-only surface PASS.
-- Live Shadow preflight PASS.
+- Integrated offline regression: `PASS`
+- Legacy regression: `PASS`
+- Program Registry: `PASS`
+- Read-only surface: `PASS`
+- 24-hour Live Shadow Gate: `LIVE_SHADOW_PASS`
+- P1-01 technical post-live review: `PASS`
+- Evidence archive and integrity manifest: `PASS`
 
-## Current truth
+## Governance
 
-The system is ready for an isolated 24-hour Live Shadow on a persistent networked host. That run has not occurred. AS-L1, AS-L3 and AS-L6 remain unimplemented. No formal score or trade action is authorized.
+No formal model, weight, threshold, Constitution rule or external action boundary was changed by the V1.10 seal.
 
-## Commands
+Formal scoring remains upstream-governed. Missing critical evidence remains fail-closed. Production and all external actions remain blocked.
 
-```bash
-./run_offline_tests.sh
-./scripts/preflight_live_shadow.sh
-./scripts/run_live_shadow_24h.sh
-./scripts/verify_live_shadow.sh
-```
+## Next track
+
+The next formal track is the post-seal 20-run maturity observation. Parallel automation work remains isolated in stash until separately inventoried and approved.

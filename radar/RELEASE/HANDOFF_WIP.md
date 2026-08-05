@@ -1,51 +1,29 @@
-# CRT Radar Handoff - WIP
+# CRT V1.10 Final Handoff
 
-## Current position
+## Formal state
 
-- Formal parent: `CRT Master V1.9`
-- Branch: `radar/integrated-wip-20260801`
-- Pull request: `#1 Draft / unmerged`
+- Formal SSOT: `CRT V1.10`
+- Integration vehicle: Pull Request `#1`
+- First 24-hour Live Shadow Gate: `PASS`
+- P1-01 technical post-live review: `PASS`
+- Production: `NOT_APPROVED`
 - External action authority: `NONE`
-- Current gate: `RUNNING / LIVE_GATE_NOT_YET_PASSED`
-- Live Shadow start: `2026-08-01 15:09:48 +08:00`
-- Earliest verification: `2026-08-02 15:09:48 +08:00`
+- Post-seal maturity: `0 / 20`
 
-## Completed
+## Authoritative records
 
-- Integrated offline suite: `88/88 PASS`
-- Legacy V0.2 regression: `17/17 PASS`
-- Program Registry: `PASS`
-- Read-only surface: `PASS`
-- Live Shadow preflight: `PASS`
-- Windows one-click status and verification controls
-- PR #1 file audit
-- Authoritative current WIP state
-- Final WIP evidence index
-- Post-seal 20-run maturity plan and tracker
-
-## Current authoritative files
-
+- `RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md`
 - `STATUS/CURRENT_WIP_STATE.md`
-- `VALIDATION/PR1_FILE_AUDIT_20260801.md`
 - `VALIDATION/FINAL_EVIDENCE_INDEX_WIP.md`
-- `STATUS/LIVE_SHADOW_RUN_20260801.md`
-- `P1_01_POST_LIVE_REVIEW_TEMPLATE.md`
+- `P1_01_POST_LIVE_REVIEW_20260805.md`
+- `VALIDATION/LIVE_SHADOW_PASS_20260805/EVIDENCE_MANIFEST.json`
+- `POST_SEAL_20_RUN_MATURITY_PLAN.md`
+- `STATUS/POST_SEAL_20_RUN_TRACKER.csv`
 
-## Next required action
+## Next action
 
-After `2026-08-02 15:09:48 +08:00`:
+Begin the post-seal 20-run maturity observation under its existing accounting rules.
 
-1. Confirm the runner has finished.
-2. Run the one-click verification entry.
-3. Require final decision `LIVE_SHADOW_PASS`.
-4. Review coverage, restart, snapshots and Run Ledger.
-5. Complete P1-01 post-live review.
-6. Request explicit user approval before changing Draft, merge or seal status.
+The stash named `parallel-automation-work-before-live-pass-archive` remains preserved, unapplied and outside this seal. It requires a separate inventory and approval before any integration.
 
-## Restrictions
-
-Do not reconstruct missing formal components from memory.
-
-Do not modify models, weights, thresholds, governance boundaries or external action authority.
-
-Do not merge or seal automatically.
+No model, weight, threshold, Constitution rule or governance boundary may be reconstructed or changed from memory.

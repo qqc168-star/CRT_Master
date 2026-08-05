@@ -2,31 +2,32 @@
 
 ## Retained stages
 
-| Stage | Result retained | Current authority |
-|---|---|---|
-| V0.2 Safety Contract | 17/17 legacy regression PASS | Safety component only |
-| V0.3 Source Gate migration | Market route + single Source Registry | Candidate / unmerged |
-| V0.4 Persistent Aggregator | append-only events, coverage, snapshots | Ready for Live Shadow |
-| Evidence hardening V0.7-WIP | run-scoped duration, cadence, hash/path locks | Offline PASS |
-| Program Registry | 32-system inventory + validator | Local candidate |
-| L5 transparent inputs | Coin Metrics parser + MVRV/NUPL formulas | Input only; no score |
-| Multi-layer bridge | AS-L2 / AS-L4 / AS-L5 adapters | Observation only |
+| Stage | Result | Formal authority |
+|---|---:|---|
+| V0.2 Safety Contract | 17/17 legacy regression PASS | Integrated in CRT V1.10 |
+| V0.3 Source Gate migration | PASS | Integrated in CRT V1.10 |
+| V0.4 Persistent Aggregator | PASS | Integrated in CRT V1.10 |
+| Evidence hardening | PASS | Integrated in CRT V1.10 |
+| Program Registry | PASS | Integrated in CRT V1.10 |
+| Transparent L5 inputs | PASS | Input only; no independent score |
+| Multi-layer bridge | PASS | Observation only |
+| 24-hour Live Shadow | PASS | Accepted first Live-run Gate |
+| P1-01 post-live review | PASS | Technical integration accepted |
 
 ## Current executable result
 
-- Integrated suite: **88/88 PASS**.
-- Program Registry validator: **PASS**.
-- Read-only surface scan: **PASS**.
-- Live Shadow preflight: **PASS**.
-- Python compile / JSON / shell syntax: **PASS** through `run_offline_tests.sh`.
+- Formal version: `CRT V1.10`
+- Integrated suite: `88/88 PASS`
+- Program Registry: `PASS`
+- Read-only surface: `PASS`
+- Live Shadow: `LIVE_SHADOW_PASS`
+- Production: `NOT_APPROVED`
+- External action authority: `NONE`
 
-## Current blocking facts
+## Open maturity work
 
-1. The required external 24-hour networked Live Shadow has not run.
-2. Current sandbox cannot resolve external DNS, so it cannot perform a trustworthy live smoke test.
-3. GitHub isolated branch remains blocked until Codex quota/write path becomes available.
-4. AS-L1, AS-L3 and AS-L6 source families are not yet implemented.
+1. Post-seal 20-run maturity observation: `0 / 20`
+2. AS-L1, AS-L3 and AS-L6 remain unimplemented
+3. Parallel automation stash remains outside the formal seal
 
-## Authority
-
-`CANDIDATE_UNMERGED / LIVE_NOT_RUN / EXTERNAL_ACTION_AUTHORITY_NONE`
+The formal seal establishes accepted implementation and evidence lineage; it does not claim broad predictive maturity.
