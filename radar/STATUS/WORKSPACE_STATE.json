@@ -1,0 +1,37 @@
+{
+  "workspace_id": "CRT-RADAR-INTEGRATED-WORKSPACE-V1.10",
+  "workspace_version": "1.10",
+  "formal_version": "CRT V1.10",
+  "formal_predecessor": "CRT Master V1.9",
+  "status": "FORMAL_SEALED_READ_ONLY_DECISION_SUPPORT",
+  "production": "NOT_APPROVED",
+  "external_action_authority": "NONE",
+  "live_shadow": "LIVE_SHADOW_PASS",
+  "p1_01_post_live": "PASS",
+  "post_seal_maturity": {
+    "completed": 0,
+    "required": 20
+  },
+  "current_tests": {
+    "pass": 88,
+    "fail": 0
+  },
+  "legacy_v0_2_tests": {
+    "pass": 17,
+    "fail": 0
+  },
+  "program_registry": "PASS",
+  "read_only_surface": "PASS",
+  "implemented_input_layers": [
+    "AS-L2",
+    "AS-L4",
+    "AS-L5"
+  ],
+  "missing_input_layers": [
+    "AS-L1",
+    "AS-L3",
+    "AS-L6"
+  ],
+  "parallel_automation_stash": "PRESERVED_NOT_APPLIED",
+  "next_gate": "POST_SEAL_20_RUN_MATURITY_OBSERVATION"
+}

@@ -1,0 +1,18 @@
+services:
+  crt-liquidation-live-shadow:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    restart: "no"
+    environment:
+      CRT_RUNTIME_ROOT: /var/lib/crt-radar
+    volumes:
+      - crt_radar_live_shadow:/var/lib/crt-radar
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  crt_radar_live_shadow:

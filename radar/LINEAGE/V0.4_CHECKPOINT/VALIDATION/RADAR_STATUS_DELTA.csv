@@ -1,0 +1,5 @@
+module_id,previous_state,new_state,authority,note
+P0-04,PARTIAL,SOURCE_REGISTRY_V1.1_CANDIDATE,NO_FORMAL_AUTHORITY,Aggregator snapshot contract added
+P0-05,NOT_COMPLETE,LOCAL_APPEND_ONLY_AND_HASHED_SNAPSHOT_OFFLINE_PASS,NO_FORMAL_AUTHORITY,Raw events and connection evidence persist locally
+P1-01,LEGACY_PARTIAL_LIVE_BLOCKED,OFFLINE_E2E_PASS_READY_FOR_LIVE_SHADOW,NO_FORMAL_AUTHORITY,OI Funding Liquidation aggregate gate can run offline end to end
+P4-02,NOT_COMPLETE,NOT_COMPLETE,NO_FORMAL_AUTHORITY,Run Ledger remains next work order

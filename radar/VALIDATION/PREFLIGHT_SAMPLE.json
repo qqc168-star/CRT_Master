@@ -1,0 +1,22 @@
+{
+  "checks": {
+    "aggregate_schema": true,
+    "external_action_authority": "NONE",
+    "ledger": {
+      "errors": [],
+      "head_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "last_sequence": 0,
+      "record_count": 0,
+      "valid": true
+    },
+    "market_route": true,
+    "public_route_forbidden": true,
+    "registry_hash": "0ed88e289e4960bde70162d10b050c570897f9e5ab3ae29be36faeaead2af2c0",
+    "registry_loaded": true,
+    "runtime_writable": true,
+    "store_integrity": true
+  },
+  "decision": "PREFLIGHT_PASS",
+  "external_action_performed": false,
+  "harness_version": "CRT-RADAR-LIVE-SHADOW-HARNESS-V0.5-WIP"
+}

@@ -1,0 +1,2 @@
+Final internal SHA-256 verification: PASS
+Verification executed after all payload files were finalized; MANIFEST.json and SHA256SUMS.txt are self-describing control files and are excluded from the payload hash list.

@@ -1,0 +1,19 @@
+{
+  "acceptance_decision": "LIVE_SHADOW_PASS_ONLY_AFTER_EVIDENCE_VERIFICATION",
+  "acceptance_scope": "LATEST_OR_EXPLICIT_PROCESS_RUN_ID_ONLY",
+  "controlled_restart_after_s": 43200,
+  "controlled_restart_gap_s": 2.0,
+  "duration_evidence": "PROCESS_START_TO_PROCESS_STOP_AND_MONOTONIC_ELAPSED",
+  "duration_s": 86400,
+  "elapsed_duration_tolerance_s": 2.0,
+  "external_action_authority": "NONE",
+  "maximum_snapshot_clock_skew_s": 300,
+  "maximum_snapshot_gap_s": 180,
+  "minimum_coverage_ratio": 0.95,
+  "minimum_snapshot_delivery_ratio": 0.95,
+  "policy_id": "CRT-LIQ-LIVE-SHADOW-POLICY-V1.1",
+  "policy_version": "1.1",
+  "required_controlled_restarts": 1,
+  "snapshot_interval_s": 60,
+  "status": "CANDIDATE_UNMERGED"
+}
