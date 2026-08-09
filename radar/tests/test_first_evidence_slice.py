@@ -121,6 +121,39 @@ class FirstEvidenceSliceTests(unittest.TestCase):
             self.assertEqual(pack["pack_state"], "PARTIAL_FOR_ANALYST")
             self.assertEqual(pack["changes"]["open_interest_contracts"]["horizons"]["1d"]["history_state"], "INSUFFICIENT_HISTORY")
 
+    def test_contract_surface_is_explicitly_blocked(self):
+        with tempfile.TemporaryDirectory() as td:
+            pack = build_evidence_pack(
+                gate(0),
+                observation_db=Path(td) / "obs.sqlite3",
+                generated_at_ms=BASE_MS,
+            )
+        self.assertEqual(pack["schema_version"], "CRT_EVIDENCE_PACK_V0.2")
+        self.assertEqual(pack["action_output"], "NONE")
+        self.assertEqual(
+            pack["asset_facts"],
+            {"section_state": "BLOCKED", "reason_code": "NOT_IMPLEMENTED"},
+        )
+        self.assertEqual(
+            pack["decision_relevant_events"],
+            {"section_state": "BLOCKED", "reason_code": "NOT_IMPLEMENTED"},
+        )
+        self.assertEqual(
+            pack["blockers"],
+            {
+                "section_state": "BLOCKED",
+                "reason_code": "NOT_IMPLEMENTED",
+                "items": [
+                    {"scope": "ASSET_FACTS", "reason_code": "NOT_IMPLEMENTED"},
+                    {
+                        "scope": "DECISION_RELEVANT_EVENTS",
+                        "reason_code": "NOT_IMPLEMENTED",
+                    },
+                ],
+            },
+        )
+        self.assertEqual(pack["pack_state"], "PARTIAL_FOR_ANALYST")
+
     def test_history_enables_1d_7d_30d_changes(self):
         with tempfile.TemporaryDirectory() as td:
             db = Path(td) / "obs.sqlite3"
@@ -135,10 +168,41 @@ class FirstEvidenceSliceTests(unittest.TestCase):
             self.assertLessEqual(len(pack["distillation"]["top_changes"]), 8)
 
     def test_blocked_source_gate_propagates(self):
+        source_gate = gate(0, blocked=True)
+        source_gate["blocked_reasons"] = [
+            "Z_SOURCE_GATE_BLOCKER",
+            "OPEN_INTEREST_TRANSPORT_ERROR",
+            "A_SOURCE_GATE_BLOCKER",
+            "OPEN_INTEREST_TRANSPORT_ERROR",
+        ]
         with tempfile.TemporaryDirectory() as td:
-            pack = build_evidence_pack(gate(0, blocked=True), observation_db=Path(td) / "obs.sqlite3", generated_at_ms=BASE_MS)
+            pack = build_evidence_pack(
+                source_gate,
+                observation_db=Path(td) / "obs.sqlite3",
+                generated_at_ms=BASE_MS,
+            )
             self.assertEqual(pack["pack_state"], "BLOCKED")
             self.assertIn("OPEN_INTEREST_TRANSPORT_ERROR", pack["data_health"]["critical_blockers"])
+            self.assertEqual(
+                pack["blockers"],
+                {
+                    "section_state": "BLOCKED",
+                    "reason_code": "NOT_IMPLEMENTED",
+                    "items": [
+                        {"scope": "ASSET_FACTS", "reason_code": "NOT_IMPLEMENTED"},
+                        {
+                            "scope": "DECISION_RELEVANT_EVENTS",
+                            "reason_code": "NOT_IMPLEMENTED",
+                        },
+                        {"scope": "SOURCE_GATE", "reason_code": "A_SOURCE_GATE_BLOCKER"},
+                        {
+                            "scope": "SOURCE_GATE",
+                            "reason_code": "OPEN_INTEREST_TRANSPORT_ERROR",
+                        },
+                        {"scope": "SOURCE_GATE", "reason_code": "Z_SOURCE_GATE_BLOCKER"},
+                    ],
+                },
+            )
 
     def test_noncritical_onchain_failure_is_partial_not_blocked(self):
         with tempfile.TemporaryDirectory() as td:
@@ -149,6 +213,7 @@ class FirstEvidenceSliceTests(unittest.TestCase):
     def test_automation_never_fills_analyst_judgment(self):
         with tempfile.TemporaryDirectory() as td:
             pack = build_evidence_pack(gate(0), observation_db=Path(td) / "obs.sqlite3", generated_at_ms=BASE_MS)
+            self.assertEqual(pack["action_output"], "NONE")
             self.assertEqual(pack["authority"]["external_action_authority"], "NONE")
             self.assertFalse(pack["authority"]["external_action_performed"])
             self.assertTrue(pack["authority"]["analyst_judgment_required"])
