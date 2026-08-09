@@ -82,6 +82,20 @@ Include only events that can plausibly affect a CRT layer, asset role, invalidat
 
 Explicitly list unresolved data or formal-model gaps that prevent a confident CRT judgment.
 
+### Reflexivity Overlay Mapping (additive V0.2 contract)
+
+`CRT-ISSUER-001` is a `NON_WEIGHTED_EVIDENCE_OVERLAY`. It reuses the existing generic V0.2 sections and does not add a new top-level section:
+
+- verified issuer facts, approved market-reaction facts, and approved deterministic calculation results enter `asset_facts.items`;
+- issuer actions with separate execution and disclosure windows enter `decision_relevant_events.items`;
+- unresolved identity, source, supersession, window, share-basis, calculation, or coverage conditions enter `blockers.items`.
+
+Every overlay-backed section must expose `section_state`, `coverage_state` where applicable, `overlay_id`, `overlay_type`, and `items`. Missing input, `null`, or a missing `items` field is unknown and must fail closed. An empty `items` list is verified empty only when coverage is `COMPLETE` and `empty_reason` is `VERIFIED_NO_MATCH`; otherwise the section remains `BLOCKED` or incomplete.
+
+Execution, disclosure, and reaction windows are distinct semantic clocks and must not be substituted for one another. Superseded events remain traceable but are excluded from active calculations. Market-response facts and market-dependent calculations remain `BLOCKED` until both their data-source lock and observation-window specification are formally approved in current `main`.
+
+The overlay may calculate only formula-locked metrics from explicit, source-referenced inputs. A deterministic result is evidence, not a causal claim. The overlay must not emit `reflexivity_score`, an automatic asset role, `capital_strategy`, BUY, or SELL.
+
 ## Output Principle
 
 Raw data may contain thousands of observations. The Evidence Pack should contain only the small subset that materially improves the five North Star answers.
@@ -96,6 +110,7 @@ If not, keep it outside the pack.
 
 The Evidence Pack is evidence only.
 
+- Its top-level `action_output` is always `"NONE"`.
 - It does not authorize trades.
 - It does not modify formal models.
 - It does not replace GPT judgment.

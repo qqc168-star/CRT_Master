@@ -9,6 +9,7 @@ __all__ = [
     "live_shadow_evidence",
     "live_shadow_runner",
     "multi_layer_bridge",
+    "reflexivity_overlay",
     "run_ledger",
     "source_gate_runner",
     "source_registry",

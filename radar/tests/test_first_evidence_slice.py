@@ -130,27 +130,16 @@ class FirstEvidenceSliceTests(unittest.TestCase):
             )
         self.assertEqual(pack["schema_version"], "CRT_EVIDENCE_PACK_V0.2")
         self.assertEqual(pack["action_output"], "NONE")
+        self.assertEqual(pack["asset_facts"]["section_state"], "BLOCKED")
+        self.assertEqual(pack["asset_facts"]["reason_code"], "REFLEXIVITY_INPUT_MISSING")
+        self.assertEqual(pack["asset_facts"]["items"], [])
+        self.assertNotIn("empty_reason", pack["asset_facts"])
+        self.assertEqual(pack["decision_relevant_events"]["section_state"], "BLOCKED")
+        self.assertEqual(pack["decision_relevant_events"]["items"], [])
+        self.assertEqual(pack["blockers"]["section_state"], "BLOCKED")
         self.assertEqual(
-            pack["asset_facts"],
-            {"section_state": "BLOCKED", "reason_code": "NOT_IMPLEMENTED"},
-        )
-        self.assertEqual(
-            pack["decision_relevant_events"],
-            {"section_state": "BLOCKED", "reason_code": "NOT_IMPLEMENTED"},
-        )
-        self.assertEqual(
-            pack["blockers"],
-            {
-                "section_state": "BLOCKED",
-                "reason_code": "NOT_IMPLEMENTED",
-                "items": [
-                    {"scope": "ASSET_FACTS", "reason_code": "NOT_IMPLEMENTED"},
-                    {
-                        "scope": "DECISION_RELEVANT_EVENTS",
-                        "reason_code": "NOT_IMPLEMENTED",
-                    },
-                ],
-            },
+            {item["reason_code"] for item in pack["blockers"]["items"]},
+            {"REFLEXIVITY_INPUT_MISSING"},
         )
         self.assertEqual(pack["pack_state"], "PARTIAL_FOR_ANALYST")
 
@@ -183,25 +172,23 @@ class FirstEvidenceSliceTests(unittest.TestCase):
             )
             self.assertEqual(pack["pack_state"], "BLOCKED")
             self.assertIn("OPEN_INTEREST_TRANSPORT_ERROR", pack["data_health"]["critical_blockers"])
+            self.assertEqual(pack["blockers"]["section_state"], "BLOCKED")
+            source_gate_codes = [
+                item["reason_code"]
+                for item in pack["blockers"]["items"]
+                if item["scope"] == "SOURCE_GATE"
+            ]
             self.assertEqual(
-                pack["blockers"],
-                {
-                    "section_state": "BLOCKED",
-                    "reason_code": "NOT_IMPLEMENTED",
-                    "items": [
-                        {"scope": "ASSET_FACTS", "reason_code": "NOT_IMPLEMENTED"},
-                        {
-                            "scope": "DECISION_RELEVANT_EVENTS",
-                            "reason_code": "NOT_IMPLEMENTED",
-                        },
-                        {"scope": "SOURCE_GATE", "reason_code": "A_SOURCE_GATE_BLOCKER"},
-                        {
-                            "scope": "SOURCE_GATE",
-                            "reason_code": "OPEN_INTEREST_TRANSPORT_ERROR",
-                        },
-                        {"scope": "SOURCE_GATE", "reason_code": "Z_SOURCE_GATE_BLOCKER"},
-                    ],
-                },
+                source_gate_codes,
+                [
+                    "A_SOURCE_GATE_BLOCKER",
+                    "OPEN_INTEREST_TRANSPORT_ERROR",
+                    "Z_SOURCE_GATE_BLOCKER",
+                ],
+            )
+            self.assertIn(
+                "REFLEXIVITY_INPUT_MISSING",
+                {item["reason_code"] for item in pack["blockers"]["items"]},
             )
 
     def test_noncritical_onchain_failure_is_partial_not_blocked(self):
