@@ -11,7 +11,7 @@ from .change_engine import compute_changes, distill_top_changes
 from .observation_store import Observation, ObservationStore, extract_observations
 
 
-PACK_SCHEMA_VERSION = "CRT_EVIDENCE_PACK_V0.1"
+PACK_SCHEMA_VERSION = "CRT_EVIDENCE_PACK_V0.2"
 EXTERNAL_ACTION_AUTHORITY = "NONE"
 FIRST_SLICE_REQUIRED_FAMILIES = {
     "DOLLAR_STRENGTH_PROXY",
@@ -113,6 +113,42 @@ def _pack_state(source_gate: dict[str, Any], evidence_by_family: dict[str, dict[
     return "READY_FOR_ANALYST"
 
 
+def _contract_surface(source_gate: dict[str, Any]) -> dict[str, Any]:
+    blocked_reasons = source_gate.get("blocked_reasons")
+    if not isinstance(blocked_reasons, list):
+        blocked_reasons = []
+    source_gate_reason_codes = sorted(
+        {
+            reason
+            for reason in blocked_reasons
+            if isinstance(reason, str) and reason
+        }
+    )
+    blocker_items: list[dict[str, str]] = [
+        {"scope": "ASSET_FACTS", "reason_code": "NOT_IMPLEMENTED"},
+        {"scope": "DECISION_RELEVANT_EVENTS", "reason_code": "NOT_IMPLEMENTED"},
+    ]
+    blocker_items.extend(
+        {"scope": "SOURCE_GATE", "reason_code": reason}
+        for reason in source_gate_reason_codes
+    )
+    return {
+        "asset_facts": {
+            "section_state": "BLOCKED",
+            "reason_code": "NOT_IMPLEMENTED",
+        },
+        "decision_relevant_events": {
+            "section_state": "BLOCKED",
+            "reason_code": "NOT_IMPLEMENTED",
+        },
+        "blockers": {
+            "section_state": "BLOCKED",
+            "reason_code": "NOT_IMPLEMENTED",
+            "items": blocker_items,
+        },
+    }
+
+
 def build_evidence_pack(
     source_gate: dict[str, Any],
     *,
@@ -133,6 +169,7 @@ def build_evidence_pack(
 
     pack: dict[str, Any] = {
         "schema_version": PACK_SCHEMA_VERSION,
+        "action_output": "NONE",
         "generated_at_ms": generated_at,
         "source_gate_run_id": source_gate.get("run_id"),
         "source_gate_idempotency_key": source_gate.get("idempotency_key"),
@@ -158,6 +195,7 @@ def build_evidence_pack(
             "data_quality_conflicts": deepcopy(source_gate.get("blocked_reasons", [])),
             "note": "No investment-semantic extreme or divergence rule is invented in this first slice.",
         },
+        **_contract_surface(source_gate),
         "analyst_output": {
             "season": None,
             "weather": None,
