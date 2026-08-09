@@ -50,6 +50,7 @@ def run_daily_evidence(
     registry: SourceRegistry,
     *,
     observation_db: str | Path,
+    reflexivity_input: dict[str, Any] | None = None,
     fetch_overrides: dict[str, FetchResult] | None = None,
     liquidation_aggregate_payload: dict[str, Any] | None = None,
     probe_fetcher: Callable[[SourceSpec], FetchResult] | None = None,
@@ -67,6 +68,7 @@ def run_daily_evidence(
         source_gate,
         observation_db=observation_db,
         generated_at_ms=generated_at_ms,
+        reflexivity_input=reflexivity_input,
     )
 
 

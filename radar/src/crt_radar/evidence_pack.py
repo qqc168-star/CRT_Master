@@ -9,6 +9,7 @@ from typing import Any
 
 from .change_engine import compute_changes, distill_top_changes
 from .observation_store import Observation, ObservationStore, extract_observations
+from .reflexivity_overlay import build_reflexivity_overlay
 
 
 PACK_SCHEMA_VERSION = "CRT_EVIDENCE_PACK_V0.2"
@@ -113,40 +114,17 @@ def _pack_state(source_gate: dict[str, Any], evidence_by_family: dict[str, dict[
     return "READY_FOR_ANALYST"
 
 
-def _contract_surface(source_gate: dict[str, Any]) -> dict[str, Any]:
+def _contract_surface(
+    source_gate: dict[str, Any],
+    reflexivity_input: dict[str, Any] | None,
+) -> dict[str, Any]:
     blocked_reasons = source_gate.get("blocked_reasons")
     if not isinstance(blocked_reasons, list):
         blocked_reasons = []
-    source_gate_reason_codes = sorted(
-        {
-            reason
-            for reason in blocked_reasons
-            if isinstance(reason, str) and reason
-        }
+    return build_reflexivity_overlay(
+        reflexivity_input,
+        source_gate_blocked_reasons=blocked_reasons,
     )
-    blocker_items: list[dict[str, str]] = [
-        {"scope": "ASSET_FACTS", "reason_code": "NOT_IMPLEMENTED"},
-        {"scope": "DECISION_RELEVANT_EVENTS", "reason_code": "NOT_IMPLEMENTED"},
-    ]
-    blocker_items.extend(
-        {"scope": "SOURCE_GATE", "reason_code": reason}
-        for reason in source_gate_reason_codes
-    )
-    return {
-        "asset_facts": {
-            "section_state": "BLOCKED",
-            "reason_code": "NOT_IMPLEMENTED",
-        },
-        "decision_relevant_events": {
-            "section_state": "BLOCKED",
-            "reason_code": "NOT_IMPLEMENTED",
-        },
-        "blockers": {
-            "section_state": "BLOCKED",
-            "reason_code": "NOT_IMPLEMENTED",
-            "items": blocker_items,
-        },
-    }
 
 
 def build_evidence_pack(
@@ -154,6 +132,7 @@ def build_evidence_pack(
     *,
     observation_db: str | Path,
     generated_at_ms: int | None = None,
+    reflexivity_input: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
         raise ValueError("source_gate must be an object")
@@ -195,7 +174,7 @@ def build_evidence_pack(
             "data_quality_conflicts": deepcopy(source_gate.get("blocked_reasons", [])),
             "note": "No investment-semantic extreme or divergence rule is invented in this first slice.",
         },
-        **_contract_surface(source_gate),
+        **_contract_surface(source_gate, reflexivity_input),
         "analyst_output": {
             "season": None,
             "weather": None,
