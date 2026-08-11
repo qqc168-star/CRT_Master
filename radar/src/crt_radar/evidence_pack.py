@@ -89,6 +89,7 @@ def _data_health(source_gate: dict[str, Any]) -> dict[str, Any]:
         "source_gate_state": source_gate.get("formal_state"),
         "critical_blockers": deepcopy(source_gate.get("blocked_reasons", [])),
         "unusable_or_missing_evidence": invalid,
+        "runtime_checks": deepcopy(source_gate.get("runtime_checks", [])),
         "source_registry_hash": source_gate.get("source_registry_hash"),
     }
 
