@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from .evidence_pack import build_evidence_pack
 from .liquidation_aggregator import SnapshotCorruption, load_verified_snapshot
+from .runtime_freshness import apply_runtime_checks, assess_file_freshness
 from .source_gate_runner import (
     FetchResult,
     default_liquidation_snapshot_path,
@@ -54,6 +55,7 @@ def run_daily_evidence(
     fetch_overrides: dict[str, FetchResult] | None = None,
     liquidation_aggregate_payload: dict[str, Any] | None = None,
     probe_fetcher: Callable[[SourceSpec], FetchResult] | None = None,
+    runtime_checks: list[dict[str, Any]] | None = None,
     now_ms: int | None = None,
     generated_at_ms: int | None = None,
 ) -> dict[str, Any]:
@@ -64,6 +66,7 @@ def run_daily_evidence(
         probe_fetcher=probe_fetcher,
         now_ms=now_ms,
     )
+    source_gate = apply_runtime_checks(source_gate, runtime_checks)
     return build_evidence_pack(
         source_gate,
         observation_db=observation_db,
@@ -87,15 +90,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--liquidation-snapshot", type=Path, default=default_liquidation_snapshot_path())
     parser.add_argument("--observation-db", type=Path, default=default_observation_db_path())
     parser.add_argument("--output", type=Path, default=default_evidence_pack_path())
+    parser.add_argument(
+        "--phone-l4-freshness-path",
+        type=Path,
+        default=None,
+        help="Optional Mobile L4 handoff file whose local mtime is checked before the Evidence Pack is built.",
+    )
+    parser.add_argument(
+        "--phone-l4-max-age-seconds",
+        type=int,
+        default=300,
+        help="Transport-only freshness limit for --phone-l4-freshness-path. Source-level freshness remains authoritative.",
+    )
     args = parser.parse_args(argv)
 
     registry = SourceRegistry.load(args.registry)
     liquidation_payload = _load_liquidation_snapshot(args.liquidation_snapshot)
+    runtime_checks: list[dict[str, Any]] = []
+    if args.phone_l4_freshness_path is not None:
+        runtime_checks.append(
+            assess_file_freshness(
+                args.phone_l4_freshness_path,
+                max_age_seconds=args.phone_l4_max_age_seconds,
+                reason_prefix="PHONE_L4",
+            )
+        )
+
     pack = run_daily_evidence(
         registry,
         observation_db=args.observation_db,
         liquidation_aggregate_payload=liquidation_payload,
         probe_fetcher=probe_liquidation_stream,
+        runtime_checks=runtime_checks,
     )
     write_json_atomic(args.output, pack)
     print(json.dumps(pack, ensure_ascii=False, indent=2))
