@@ -1,0 +1,118 @@
+{
+  "schema_version": "CRT_CANDIDATE_ACQUISITION_CONTRACT_V0.1",
+  "contract_id": "CRT-CANDIDATE-ACQUISITION-CONTRACT-V0.1",
+  "status": "PROOF_SLICE_IMPLEMENTED_DATA_NOT_ACQUIRED",
+  "base_sha": "a267ea84e797d41a5e973523d7d013fdf00ba773",
+  "candidate_registry_hash": "62497bab3e7d551f45e6b3bc23b367575927d5be6be9f25a0956566e1d64c2ee",
+  "public_source_authority_hash": "b090665891e84fc8ddbccd0e07d81e3b6abc9013e76bc43f4baab5c2406261fb",
+  "etp_replay_feasibility_id": "CRT-ETP-PUBLIC-REPLAY-FEASIBILITY-V0.1",
+  "etp_replay_feasibility_hash": "380bd6713011510b1e15f292090c439f989294689ef3c4999c76419a165f3cfc",
+  "purpose": "Define a deterministic local research archive and manifest proof surface for caller-supplied raw bytes. This slice does not fetch provider data, implement issuer-specific adapters, satisfy historical coverage, start walk-forward validation, approve the formal model, or authorize production or capital action.",
+  "network_fetch_implemented": false,
+  "issuer_adapters_implemented": false,
+  "raw_dataset_acquired": false,
+  "dataset_readiness_granted": false,
+  "authority": {
+    "formal_model": "NOT_APPROVED",
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "action_output": "NONE",
+    "capital_decision_authority": "USER_ONLY"
+  },
+  "archive_contract": {
+    "layout": "artifacts/sha256/{sha256_prefix_2}/{sha256}",
+    "identity_layout": "metadata/identities/{identity_hash_prefix_2}/{identity_hash}.json",
+    "identity_key": "SHA256_OF_SOURCE_CONTRACT_ID_REQUEST_IDENTITY_AND_RAW_SHA256",
+    "identity_write_policy": "ATOMIC_CREATE_ON_FIRST_CAPTURE_NEVER_REWRITE_FIRST_SEEN_METADATA",
+    "content_address": "SHA256_OF_EXACT_RAW_BYTES",
+    "write_policy": "ATOMIC_CREATE_IF_ABSENT_NEVER_OVERWRITE",
+    "existing_path_policy": "VERIFY_EXISTING_BYTES_OR_FAIL",
+    "empty_artifact_policy": "FORBIDDEN",
+    "request_identity_policy": "EXACT_METHOD_URL_AND_CANONICAL_PARAMETERS_REQUIRED",
+    "first_seen_policy": "FIRST_SUCCESSFUL_CAPTURE_TIME_IS_IMMUTABLE_FOR_IDENTICAL_SOURCE_BYTES",
+    "revision_policy": "CHANGED_BYTES_CREATE_A_NEW_ARTIFACT_AND_MAY_REFERENCE_REVISION_OF_SHA256",
+    "redistribution_policy": "RAW_BYTES_LOCAL_RESEARCH_ONLY_UNTIL_PROVIDER_SPECIFIC_TERMS_REVIEW"
+  },
+  "availability_contract": {
+    "current_capture_rule": "CURRENT_FIRST_SEEN_CAPTURE can prove availability only at its first_seen_at_ms and cannot be assigned backward.",
+    "provider_archive_rule": "IMMUTABLE_PROVIDER_ARCHIVE requires a provider checksum and retains the provider archive availability proof.",
+    "official_filing_rule": "OFFICIAL_FILING may prove only facts and periods disclosed at its filing availability time; it cannot imply undisclosed daily observations.",
+    "synthetic_rule": "SYNTHETIC_FIXTURE is always replay_eligible false and cannot satisfy source presence, coverage, history, or readiness.",
+    "future_rule": "No availability coverage timestamp may be later than retrieved_at_ms."
+  },
+  "evidence_classes": {
+    "CURRENT_FIRST_SEEN_CAPTURE": {
+      "historical_backfill_authority": "NONE",
+      "prospective_replay_authority": "AT_OR_AFTER_FIRST_SEEN_ONLY"
+    },
+    "IMMUTABLE_PROVIDER_ARCHIVE": {
+      "historical_backfill_authority": "SOURCE_SPECIFIC_PROOF_REQUIRED",
+      "provider_checksum_required": true
+    },
+    "OFFICIAL_FILING": {
+      "historical_backfill_authority": "DISCLOSED_FACTS_AND_PERIODS_ONLY",
+      "daily_series_substitution": "FORBIDDEN"
+    },
+    "SYNTHETIC_FIXTURE": {
+      "historical_backfill_authority": "NONE",
+      "replay_eligible": false
+    }
+  },
+  "manifest_contract": {
+    "schema_version": "CRT_CANDIDATE_POINT_IN_TIME_DATASET_MANIFEST_V0.3",
+    "manifest_hash_rule": "SHA256_OF_CANONICAL_JSON_EXCLUDING_MANIFEST_SHA256_FIELD",
+    "required_root_fields": [
+      "schema_version",
+      "candidate_registry_hash",
+      "public_source_authority_hash",
+      "acquisition_contract_hash",
+      "source_contract_hash",
+      "created_at_ms",
+      "artifacts",
+      "manifest_sha256"
+    ],
+    "required_artifact_fields": [
+      "source_contract_id",
+      "request_identity",
+      "retrieved_at_ms",
+      "first_seen_at_ms",
+      "available_at_coverage_start_ms",
+      "available_at_coverage_end_ms",
+      "sha256",
+      "size_bytes",
+      "archive_relpath",
+      "content_type",
+      "integrity_proof_type",
+      "provider_checksum",
+      "license_classification",
+      "source_authority_hash",
+      "evidence_class",
+      "availability_proof_type",
+      "replay_eligible",
+      "revision_of_sha256"
+    ],
+    "byte_verification_rule": "Readiness requires an archive root and exact byte-level SHA-256 and size verification for every manifest artifact.",
+    "source_presence_rule": "Only replay_eligible non-synthetic artifacts with verified bytes can satisfy source artifact presence."
+  },
+  "etp_proof_slice": {
+    "representative_tickers": [
+      "IBIT",
+      "GBTC",
+      "BTC"
+    ],
+    "historical_backfill_state": "BLOCKED_NOT_PROVEN",
+    "prospective_capture_state": "CONTRACT_READY_ADAPTERS_NOT_IMPLEMENTED",
+    "all_twelve_adapter_state": "NOT_IMPLEMENTED_BLOCKED",
+    "rule": "Prospective capture may begin once issuer adapters bind exact fields and identities, but it cannot fill the period before first capture."
+  },
+  "promotion": {
+    "archive_write_is_dataset_readiness": false,
+    "manifest_creation_is_history_completion": false,
+    "feasibility_probe_is_source_promotion": false,
+    "merge_is_approval": false,
+    "automatic_promotion": false,
+    "formal_approval_required": true,
+    "external_action_authority": "NONE"
+  }
+}

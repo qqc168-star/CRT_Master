@@ -1,0 +1,541 @@
+{
+  "schema_version": "CRT_RESEARCH_CANDIDATE_MODEL_V0.1",
+  "candidate_id": "CRT-SIX-LAYER-CANDIDATE-V0.1",
+  "status": "RESEARCH_ONLY_NOT_APPROVED",
+  "base_sha": "a267ea84e797d41a5e973523d7d013fdf00ba773",
+  "purpose": "Deterministic six-layer candidate scoring specification for offline falsification and shadow research only.",
+  "authority": {
+    "formal_model": "NOT_APPROVED",
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "action_output": "NONE",
+    "capital_decision_authority": "USER_ONLY"
+  },
+  "inherited_formal_constants": {
+    "source": "RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md",
+    "use": "COPIED_UNCHANGED_FOR_NON_FORMAL_OFFLINE_COMPARISON",
+    "layer_weights_percent": {
+      "L1": 20,
+      "L2": 20,
+      "L3": 17,
+      "L4": 25,
+      "L5": 13,
+      "L6": 5
+    },
+    "light_thresholds": [
+      -60,
+      -35,
+      35,
+      60
+    ],
+    "mnav_semantics": "Diluted Equity mNAV",
+    "modification_authority": "NONE"
+  },
+  "score_semantics": {
+    "positive": "Evidence is more supportive of BTC market weather under this candidate, not a BUY instruction.",
+    "negative": "Evidence is less supportive of BTC market weather under this candidate, not a SELL instruction.",
+    "zero": "Mixed or historically ordinary evidence under this candidate.",
+    "forbidden_inference": "Candidate score alone must not determine season, asset role, capital strategy, or action."
+  },
+  "aggregation": {
+    "feature_formula": "layer_score = sum(feature_score * feature_weight_percent / 100)",
+    "layer_formula": "candidate_score = sum(layer_score * inherited_layer_weight_percent / 100)",
+    "score_range": [
+      -100,
+      100
+    ],
+    "missing_policy": "BLOCK_NO_RENORMALIZATION",
+    "threshold_boundary_rule": "bisect_right([-60,-35,35,60], candidate_score)",
+    "threshold_labels": [
+      "C0_VERY_UNSUPPORTIVE",
+      "C1_UNSUPPORTIVE",
+      "C2_MIXED",
+      "C3_SUPPORTIVE",
+      "C4_VERY_SUPPORTIVE"
+    ],
+    "threshold_authority": "NON_FORMAL_OFFLINE_COMPARISON_ONLY"
+  },
+  "normalization_contract": {
+    "history_rule": "Only observations strictly earlier than the current observation may enter a transform.",
+    "robust_z": "z=(x-median(history))/(1.4826*MAD(history)); clip to +/-clip_z; feature_score=direction*100*z/clip_z.",
+    "percentile": "p=(count(history<x)+0.5*count(history==x))/n; feature_score=direction*(2*p-1)*100.",
+    "tanh_fixed": "feature_score=100*tanh(direction*x/scale).",
+    "revision_rule": "Backtests must use point-in-time vintages when the source revises historical data.",
+    "missing_rule": "No zero fill, stale reuse, guessed value, feature reweighting, or layer reweighting."
+  },
+  "layers": [
+    {
+      "layer_id": "L1",
+      "name": "Macro",
+      "layer_semantics": "Inflation, labor deterioration, and policy restraint.",
+      "source_state": "SOURCE_CONTRACT_AND_COLLECTOR_REQUIRED",
+      "features": [
+        {
+          "feature_id": "L1_CORE_INFLATION_ACCELERATION",
+          "weight_percent": 40,
+          "required": true,
+          "source_series": [
+            "CPILFESL"
+          ],
+          "source_documentation": "https://fred.stlouisfed.org/series/CPILFESL",
+          "raw_formula": "100*((CPILFESL_t/CPILFESL_t_minus_3_months)^4-1) - 100*(CPILFESL_t/CPILFESL_t_minus_12_months-1)",
+          "unit": "percentage_points",
+          "direction": -1,
+          "economic_hypothesis": "Falling core inflation momentum is more supportive because it reduces policy-pressure risk.",
+          "as_of_rule": "LATEST_RELEASE_AVAILABLE_AT_RUN_TIME_NO_LOOKAHEAD",
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 120,
+            "minimum_history_observations": 60,
+            "clip_z": 3.0
+          }
+        },
+        {
+          "feature_id": "L1_UNEMPLOYMENT_DETERIORATION",
+          "weight_percent": 30,
+          "required": true,
+          "source_series": [
+            "UNRATE"
+          ],
+          "source_documentation": "https://fred.stlouisfed.org/series/UNRATE",
+          "raw_formula": "mean(UNRATE_t,UNRATE_t_minus_1m,UNRATE_t_minus_2m) - min(prior_12_completed_3m_means_excluding_current)",
+          "unit": "percentage_points",
+          "direction": -1,
+          "economic_hypothesis": "Rapid labor deterioration is less supportive even when it later invites easier policy.",
+          "as_of_rule": "LATEST_RELEASE_AVAILABLE_AT_RUN_TIME_NO_LOOKAHEAD",
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 120,
+            "minimum_history_observations": 60,
+            "clip_z": 3.0
+          }
+        },
+        {
+          "feature_id": "L1_REAL_POLICY_RATE",
+          "weight_percent": 30,
+          "required": true,
+          "source_series": [
+            "EFFR",
+            "PCEPILFE"
+          ],
+          "source_documentation": "https://fred.stlouisfed.org/series/EFFR; https://fred.stlouisfed.org/series/PCEPILFE",
+          "raw_formula": "EFFR_t - 100*(PCEPILFE_t/PCEPILFE_t_minus_12_months-1)",
+          "unit": "percentage_points",
+          "direction": -1,
+          "economic_hypothesis": "A higher ex-post real policy rate is more restrictive and less supportive.",
+          "as_of_rule": "ALIGN_LATEST_RELEASES_WITHOUT_FORWARD_FILL_BEYOND_SOURCE_FRESHNESS",
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 120,
+            "minimum_history_observations": 60,
+            "clip_z": 3.0
+          }
+        }
+      ]
+    },
+    {
+      "layer_id": "L2",
+      "name": "USD_Rates",
+      "layer_semantics": "Marginal dollar and rate pressure over a common 20-trading-day horizon.",
+      "source_state": "BROAD_USD_IMPLEMENTED_RATES_SOURCE_CONTRACT_REQUIRED",
+      "features": [
+        {
+          "feature_id": "L2_BROAD_USD_20D_LOG_CHANGE",
+          "weight_percent": 40,
+          "required": true,
+          "source_series": [
+            "DTWEXBGS"
+          ],
+          "source_documentation": "https://fred.stlouisfed.org/series/DTWEXBGS",
+          "naming_rule": "Never label DTWEXBGS as DXY.",
+          "raw_formula": "100*ln(DTWEXBGS_t/DTWEXBGS_t_minus_20_trading_days)",
+          "unit": "log_percent",
+          "direction": -1,
+          "economic_hypothesis": "Broad dollar weakening is more supportive for dollar-priced risk assets.",
+          "as_of_rule": "LATEST_DAILY_OBSERVATION_WITH_SOURCE_FRESHNESS",
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 756,
+            "minimum_history_observations": 252,
+            "clip_z": 3.0
+          }
+        },
+        {
+          "feature_id": "L2_REAL_10Y_YIELD_20D_CHANGE_BP",
+          "weight_percent": 35,
+          "required": true,
+          "source_series": [
+            "DFII10"
+          ],
+          "source_documentation": "https://fred.stlouisfed.org/series/DFII10",
+          "raw_formula": "100*(DFII10_t-DFII10_t_minus_20_trading_days)",
+          "unit": "basis_points",
+          "direction": -1,
+          "economic_hypothesis": "Falling long real yields reduce the opportunity cost of non-yielding BTC exposure.",
+          "as_of_rule": "LATEST_DAILY_OBSERVATION_WITH_SOURCE_FRESHNESS",
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 756,
+            "minimum_history_observations": 252,
+            "clip_z": 3.0
+          }
+        },
+        {
+          "feature_id": "L2_NOMINAL_2Y_YIELD_20D_CHANGE_BP",
+          "weight_percent": 25,
+          "required": true,
+          "source_series": [
+            "DGS2"
+          ],
+          "source_documentation": "https://fred.stlouisfed.org/series/DGS2",
+          "raw_formula": "100*(DGS2_t-DGS2_t_minus_20_trading_days)",
+          "unit": "basis_points",
+          "direction": -1,
+          "economic_hypothesis": "Falling front-end yields are more supportive through lower near-term discount-rate pressure.",
+          "as_of_rule": "LATEST_DAILY_OBSERVATION_WITH_SOURCE_FRESHNESS",
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 756,
+            "minimum_history_observations": 252,
+            "clip_z": 3.0
+          }
+        }
+      ]
+    },
+    {
+      "layer_id": "L3",
+      "name": "Credit_Liquidity",
+      "layer_semantics": "Crypto-native liquidity, regulated wrapper demand, and broad credit stress.",
+      "source_state": "SOURCE_UNIVERSE_AND_POINT_IN_TIME_ETP_FEED_REQUIRED",
+      "applicability_start": "2024-01-11",
+      "pre_applicability_policy": "BLOCK_MODEL_NO_RETROACTIVE_REWEIGHTING",
+      "features": [
+        {
+          "feature_id": "L3_STABLECOIN_SUPPLY_30D_LOG_CHANGE",
+          "weight_percent": 35,
+          "required": true,
+          "source_series": [
+            "APPROVED_FIAT_BACKED_STABLECOIN_UNIVERSE.CapMrktCurUSD"
+          ],
+          "source_documentation": "https://docs.coinmetrics.io/resources/faqs",
+          "raw_formula": "100*ln(sum_approved_stablecoin_CapMrktCurUSD_t/sum_approved_stablecoin_CapMrktCurUSD_t_minus_30d)",
+          "unit": "log_percent",
+          "direction": 1,
+          "economic_hypothesis": "Expanding fiat-backed stablecoin supply is more supportive as crypto-native liquidity capacity grows.",
+          "source_lock_required": "Versioned asset and network universe with de-duplication and depeg policy.",
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 730,
+            "minimum_history_observations": 365,
+            "clip_z": 3.0
+          }
+        },
+        {
+          "feature_id": "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM",
+          "weight_percent": 35,
+          "required": true,
+          "source_series": [
+            "APPROVED_US_SPOT_BTC_ETP_UNIVERSE"
+          ],
+          "source_documentation": "https://www.sec.gov/files/rules/sro/nysearca/2024/34-99306.pdf",
+          "raw_formula": "100*sum((shares_outstanding_d-shares_outstanding_d_minus_1)*nav_per_share_d,last_20_trading_days)/aggregate_net_assets_at_window_start",
+          "unit": "percent_of_starting_aum",
+          "direction": 1,
+          "economic_hypothesis": "Net creations are more supportive because they represent marginal regulated-wrapper demand.",
+          "source_lock_required": "Point-in-time issuer or filing data, split adjustments, fund universe, and GBTC conversion baseline.",
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 504,
+            "minimum_history_observations": 126,
+            "clip_z": 3.0
+          }
+        },
+        {
+          "feature_id": "L3_HIGH_YIELD_OAS_20D_CHANGE_BP",
+          "weight_percent": 30,
+          "required": true,
+          "source_series": [
+            "BAMLH0A0HYM2"
+          ],
+          "source_documentation": "https://fred.stlouisfed.org/series/BAMLH0A0HYM2",
+          "raw_formula": "100*(BAMLH0A0HYM2_t-BAMLH0A0HYM2_t_minus_20_trading_days)",
+          "unit": "basis_points",
+          "direction": -1,
+          "economic_hypothesis": "Tightening high-yield spreads are more supportive because broad credit stress is receding.",
+          "licensing_note": "Upstream licensing and redistribution terms must be reviewed before operational use.",
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 756,
+            "minimum_history_observations": 252,
+            "clip_z": 3.0
+          }
+        }
+      ]
+    },
+    {
+      "layer_id": "L4",
+      "name": "Leverage",
+      "layer_semantics": "Crowding, financing imbalance, liquidation stress, and liquidation direction.",
+      "source_state": "CURRENT_MAIN_INPUTS_PLUS_HISTORY_AND_CONTRACT_MULTIPLIER_REQUIRED",
+      "features": [
+        {
+          "feature_id": "L4_OI_TO_MARKET_CAP",
+          "weight_percent": 30,
+          "required": true,
+          "source_series": [
+            "OPEN_INTEREST.open_interest_contracts",
+            "FUNDING_RATE.mark_price",
+            "ONCHAIN_VALUE.market_cap_usd"
+          ],
+          "source_documentation": "CONFIG/SOURCE_REGISTRY_V1.2.json",
+          "raw_formula": "100*(open_interest_contracts*approved_contract_multiplier_btc*mark_price_usd)/market_cap_usd",
+          "unit": "percent",
+          "direction": -1,
+          "economic_hypothesis": "Higher derivatives open interest relative to BTC market cap is less supportive because crowding and forced-flow capacity rise.",
+          "source_lock_required": "Contract multiplier and cross-source timestamp alignment.",
+          "valid_range": {
+            "minimum_inclusive": 0
+          },
+          "transform": {
+            "type": "PERCENTILE",
+            "history_window_observations": 1095,
+            "minimum_history_observations": 180
+          }
+        },
+        {
+          "feature_id": "L4_ABS_FUNDING_3D_MEAN_BP",
+          "weight_percent": 25,
+          "required": true,
+          "source_series": [
+            "FUNDING_RATE.funding_rate"
+          ],
+          "source_documentation": "CONFIG/SOURCE_REGISTRY_V1.2.json",
+          "raw_formula": "10000*abs(mean(last_9_complete_8h_funding_rates))",
+          "unit": "basis_points_per_8h",
+          "direction": -1,
+          "economic_hypothesis": "Large funding imbalance in either direction is less supportive because crowding is elevated.",
+          "valid_range": {
+            "minimum_inclusive": 0
+          },
+          "transform": {
+            "type": "PERCENTILE",
+            "history_window_observations": 1095,
+            "minimum_history_observations": 180
+          }
+        },
+        {
+          "feature_id": "L4_LIQUIDATION_INTENSITY_24H",
+          "weight_percent": 20,
+          "required": true,
+          "source_series": [
+            "LIQUIDATION_AGGREGATES.windows.24h.total_liquidation_usd",
+            "OPEN_INTEREST",
+            "FUNDING_RATE.mark_price"
+          ],
+          "source_documentation": "DATA_CONTRACT.md; CONFIG/SOURCE_REGISTRY_V1.2.json",
+          "raw_formula": "100*total_liquidation_usd_24h/open_interest_notional_usd",
+          "unit": "percent",
+          "direction": -1,
+          "economic_hypothesis": "Higher realized liquidation intensity is less supportive because market stress and forced execution are elevated.",
+          "valid_range": {
+            "minimum_inclusive": 0
+          },
+          "transform": {
+            "type": "PERCENTILE",
+            "history_window_observations": 1095,
+            "minimum_history_observations": 180
+          }
+        },
+        {
+          "feature_id": "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H",
+          "weight_percent": 25,
+          "required": true,
+          "source_series": [
+            "LIQUIDATION_AGGREGATES.windows.24h.short_liquidation_usd",
+            "LIQUIDATION_AGGREGATES.windows.24h.long_liquidation_usd"
+          ],
+          "source_documentation": "DATA_CONTRACT.md",
+          "raw_formula": "(short_liquidation_usd_24h-long_liquidation_usd_24h)/total_liquidation_usd_24h; define 0 only for verified complete-coverage zero-event windows",
+          "unit": "share",
+          "direction": 1,
+          "economic_hypothesis": "Short-dominant liquidations are more supportive than long-dominant liquidations as a direction-of-forced-flow observation.",
+          "valid_range": {
+            "minimum_inclusive": -1,
+            "maximum_inclusive": 1
+          },
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 1095,
+            "minimum_history_observations": 180,
+            "clip_z": 3.0
+          }
+        }
+      ]
+    },
+    {
+      "layer_id": "L5",
+      "name": "Onchain_Value",
+      "layer_semantics": "Cycle-relative valuation and realized-cap adoption without double-counting algebraically equivalent indicators.",
+      "source_state": "CURRENT_MAIN_VALUE_INPUTS_PLUS_HISTORY_REQUIRED",
+      "features": [
+        {
+          "feature_id": "L5_MVRV_LEVEL",
+          "weight_percent": 70,
+          "required": true,
+          "source_series": [
+            "ONCHAIN_VALUE.mvrv"
+          ],
+          "source_documentation": "https://docs.coinmetrics.io/asset-metrics/market/capact1yrusd",
+          "raw_formula": "CapMrktCurUSD/CapRealUSD",
+          "unit": "ratio",
+          "direction": -1,
+          "economic_hypothesis": "Lower cycle-relative MVRV is more supportive as valuation opportunity, while price structure remains L6's job.",
+          "valid_range": {
+            "minimum_exclusive": 0
+          },
+          "transform": {
+            "type": "PERCENTILE",
+            "history_window_observations": 1460,
+            "minimum_history_observations": 730
+          }
+        },
+        {
+          "feature_id": "L5_REALIZED_CAP_30D_LOG_CHANGE",
+          "weight_percent": 30,
+          "required": true,
+          "source_series": [
+            "ONCHAIN_VALUE.realized_cap_usd"
+          ],
+          "source_documentation": "https://docs.coinmetrics.io/asset-metrics/market/capact1yrusd",
+          "raw_formula": "100*ln(CapRealUSD_t/CapRealUSD_t_minus_30d)",
+          "unit": "log_percent",
+          "direction": 1,
+          "economic_hypothesis": "Rising realized cap is more supportive as aggregate on-chain cost basis expands.",
+          "transform": {
+            "type": "ROBUST_Z",
+            "history_window_observations": 730,
+            "minimum_history_observations": 365,
+            "clip_z": 3.0
+          }
+        }
+      ]
+    },
+    {
+      "layer_id": "L6",
+      "name": "Price_Structure",
+      "layer_semantics": "Trend, momentum, volatility-scaled distance, and signed-volume confirmation.",
+      "source_state": "PRICE_AND_TRADE_CLASSIFICATION_SOURCE_CONTRACT_REQUIRED",
+      "bar_contract": "UTC_DAILY_OHLCV_POINT_IN_TIME_NO_PARTIAL_CURRENT_BAR",
+      "atr_contract": "TR=max(high-low,abs(high-prev_close),abs(low-prev_close)); ATR20=simple_mean(last_20_complete_TR)",
+      "cvd_contract": "buyer_initiated_quote_volume is positive; seller_initiated_quote_volume is negative; unknown aggressor volume blocks the feature.",
+      "features": [
+        {
+          "feature_id": "L6_CLOSE_MINUS_SMA200_OVER_ATR20",
+          "weight_percent": 30,
+          "required": true,
+          "source_series": [
+            "APPROVED_BTC_SPOT_COMPOSITE_OHLCV"
+          ],
+          "source_documentation": "SOURCE_REGISTRY_REQUIRED",
+          "raw_formula": "(close_t-simple_mean(close,last_200_complete_days))/ATR20_t",
+          "unit": "atr_units",
+          "direction": 1,
+          "economic_hypothesis": "Price above the long moving average is more supportive, scaled by current range volatility.",
+          "transform": {
+            "type": "TANH_FIXED",
+            "scale": 4.0
+          }
+        },
+        {
+          "feature_id": "L6_SMA50_MINUS_SMA200_OVER_ATR20",
+          "weight_percent": 25,
+          "required": true,
+          "source_series": [
+            "APPROVED_BTC_SPOT_COMPOSITE_OHLCV"
+          ],
+          "source_documentation": "SOURCE_REGISTRY_REQUIRED",
+          "raw_formula": "(simple_mean(close,last_50_complete_days)-simple_mean(close,last_200_complete_days))/ATR20_t",
+          "unit": "atr_units",
+          "direction": 1,
+          "economic_hypothesis": "A stronger intermediate trend relative to the long trend is more supportive.",
+          "transform": {
+            "type": "TANH_FIXED",
+            "scale": 3.0
+          }
+        },
+        {
+          "feature_id": "L6_RETURN_20D_OVER_ATR_VOL",
+          "weight_percent": 25,
+          "required": true,
+          "source_series": [
+            "APPROVED_BTC_SPOT_COMPOSITE_OHLCV"
+          ],
+          "source_documentation": "SOURCE_REGISTRY_REQUIRED",
+          "raw_formula": "ln(close_t/close_t_minus_20d)/((ATR20_t/close_t)*sqrt(20))",
+          "unit": "atr_scaled_return",
+          "direction": 1,
+          "economic_hypothesis": "Positive volatility-scaled 20-day momentum is more supportive.",
+          "transform": {
+            "type": "TANH_FIXED",
+            "scale": 2.0
+          }
+        },
+        {
+          "feature_id": "L6_CVD_20D_SHARE",
+          "weight_percent": 20,
+          "required": true,
+          "source_series": [
+            "APPROVED_BTC_SPOT_TRADE_AGGRESSOR_FEED"
+          ],
+          "source_documentation": "SOURCE_REGISTRY_REQUIRED",
+          "raw_formula": "sum(buyer_initiated_quote_volume-seller_initiated_quote_volume,last_20_complete_days)/sum(total_quote_volume,last_20_complete_days)",
+          "unit": "share",
+          "direction": 1,
+          "economic_hypothesis": "Positive signed-volume participation is more supportive as trend confirmation.",
+          "valid_range": {
+            "minimum_inclusive": -1,
+            "maximum_inclusive": 1
+          },
+          "transform": {
+            "type": "TANH_FIXED",
+            "scale": 0.15
+          }
+        }
+      ]
+    }
+  ],
+  "validation_rules": [
+    {
+      "rule_id": "L5_MVRV_NUPL_IDENTITY",
+      "type": "MVRV_NUPL_IDENTITY",
+      "layer_id": "L5",
+      "mvrv_feature_id": "L5_MVRV_LEVEL",
+      "nupl_feature_id": "L5_NUPL_OBSERVED",
+      "formula": "NUPL == 1 - 1/MVRV",
+      "absolute_tolerance": 1e-10,
+      "required": true,
+      "scoring_weight_percent": 0,
+      "reason": "NUPL and MVRV are algebraically dependent when derived from the same market-cap and realized-cap pair; NUPL validates lineage but must not receive a second vote."
+    }
+  ],
+  "known_model_risks": [
+    "Direction hypotheses can fail across regimes and require walk-forward falsification.",
+    "L1 inflation and real-policy inputs share inflation lineage and require correlation diagnostics.",
+    "L2 rate features may remain correlated even though they represent different maturities and real-versus-nominal pressure.",
+    "L3 ETP history begins in 2024 and cannot establish full-cycle predictive maturity.",
+    "L4 OI normalization depends on an approved contract multiplier and aligned market cap.",
+    "L6 fixed tanh scales are candidate parameters and must not be tuned on the final evaluation sample.",
+    "The composite may describe market weather but cannot by itself establish BTC season or capital action."
+  ],
+  "promotion_gates": [
+    "All source contracts, asset universes, timestamp rules, revision handling, and licensing constraints approved in current main.",
+    "Raw-feature calculators independently tested against point-in-time fixtures.",
+    "Golden vectors and deterministic replay pass without importing this research module into radar/src.",
+    "Feature correlation and redundancy report reviewed; no hidden duplicate vote remains.",
+    "Walk-forward protocol, horizons, bucket tests, and block-bootstrap method pre-registered before results are viewed.",
+    "Historical evaluation includes the complete post-2024 applicability period without survivorship or lookahead bias.",
+    "Prospective read-only shadow observation completed; backtest alone cannot approve the model.",
+    "User separately approves exact registry hash as a formal model; merge alone is not approval."
+  ]
+}

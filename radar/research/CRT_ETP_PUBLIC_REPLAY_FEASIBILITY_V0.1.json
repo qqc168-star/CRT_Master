@@ -1,0 +1,105 @@
+{
+  "schema_version": "CRT_ETP_PUBLIC_REPLAY_FEASIBILITY_V0.1",
+  "record_id": "CRT-ETP-PUBLIC-REPLAY-FEASIBILITY-V0.1",
+  "status": "REPRESENTATIVE_PROBE_COMPLETE_HISTORICAL_BACKFILL_NOT_PROVEN",
+  "base_sha": "a267ea84e797d41a5e973523d7d013fdf00ba773",
+  "probe_date": "2026-08-11",
+  "public_source_authority_id": "CRT-PUBLIC-SOURCE-AUTHORITY-LOCK-V0.1",
+  "public_source_authority_hash": "b090665891e84fc8ddbccd0e07d81e3b6abc9013e76bc43f4baab5c2406261fb",
+  "purpose": "Test whether representative official issuer and SEC public sources can replay the daily adjusted shares, NAV per share, and net-assets history required by the locked ETP calculation route. This record can block an unsupported backfill; it cannot approve a provider, claim that no endpoint exists, or grant dataset readiness.",
+  "probe_method": {
+    "source_scope": "PRIMARY_OFFICIAL_ISSUER_PAGES_DOWNLOADS_AND_SEC_FILINGS_ONLY",
+    "representative_shape_rule": "Probe a new 2024 launch, the converted pre-existing trust, and a later launch with an initial distribution and reverse split before implementing all twelve adapters.",
+    "required_daily_fields": [
+      "adjusted_shares_outstanding",
+      "nav_per_share",
+      "net_assets",
+      "observed_at_ms",
+      "published_at_ms"
+    ],
+    "negative_evidence_rule": "NOT_PROVEN means the inspected official surfaces did not establish a date-addressable immutable daily archive. It is a fail-closed result, not a claim that an undiscovered endpoint cannot exist.",
+    "sec_frequency_rule": "Annual and quarterly SEC filings can anchor identity and discrete corporate events, but period totals or period-end balances do not constitute a daily point-in-time creation and redemption series."
+  },
+  "representative_cases": [
+    {
+      "case_type": "NEW_LAUNCH",
+      "ticker": "IBIT",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf",
+      "official_current_download_url": "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf/latest-holdings.csv",
+      "sec_cik": "0001980994",
+      "sec_identity_accession": "000143774925006260",
+      "sec_identity_form": "10-K",
+      "sec_identity_url": "https://www.sec.gov/Archives/edgar/data/1980994/000143774925006260/bit20241231_10k.htm",
+      "identity_event_proven": "NEW_TRUST_EFFECTIVE_AND_SEED_CREATION_IN_2024",
+      "current_snapshot_fields_observed": [
+        "nav_per_share",
+        "net_assets",
+        "shares_outstanding",
+        "as_of_date"
+      ],
+      "official_current_download_state": "CURRENT_HOLDINGS_CSV_OBSERVED",
+      "date_addressable_daily_snapshot_state": "NOT_PROVEN",
+      "immutable_daily_archive_state": "NOT_PROVEN",
+      "daily_historical_replay_state": "NOT_PROVEN_BLOCKED",
+      "reason": "The official product surface exposes current dated facts and a latest holdings download. The inspected official evidence did not establish immutable date-addressable daily shares, NAV, and net-assets snapshots from launch."
+    },
+    {
+      "case_type": "CONVERTED_TRUST",
+      "ticker": "GBTC",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://etfs.grayscale.com/gbtc",
+      "sec_cik": "0001588489",
+      "sec_identity_accession": "000095017025029408",
+      "sec_identity_form": "10-K",
+      "sec_identity_url": "https://www.sec.gov/Archives/edgar/data/1588489/000095017025029408/gbtc-20241231.htm",
+      "sec_registration_file_number": "333-275079",
+      "identity_event_proven": "NYSE_ARCA_UPLISTING_AND_CREATION_REDEMPTION_PROGRAM_EFFECTIVE_2024_01_11",
+      "current_snapshot_fields_observed": [
+        "nav_per_share",
+        "shares_outstanding",
+        "as_of_date"
+      ],
+      "sec_periodic_data_state": "IDENTITY_EVENTS_AND_PERIOD_BALANCES_ONLY",
+      "date_addressable_daily_snapshot_state": "NOT_PROVEN",
+      "immutable_daily_archive_state": "NOT_PROVEN",
+      "daily_historical_replay_state": "NOT_PROVEN_BLOCKED",
+      "reason": "The SEC filing proves the structural break between the OTC trust and the ETP creation-redemption regime. Period and quarter disclosures do not reconstruct every daily adjusted share balance and starting AUM."
+    },
+    {
+      "case_type": "LATE_LAUNCH_DISTRIBUTION_AND_SPLIT",
+      "ticker": "BTC",
+      "membership_effective_from": "2024-07-31",
+      "official_product_url": "https://etfs.grayscale.com/btc",
+      "sec_cik": "0002015034",
+      "sec_identity_accession": "000095017025029405",
+      "sec_identity_form": "10-K",
+      "sec_identity_url": "https://www.sec.gov/Archives/edgar/data/2015034/000095017025029405/btc-20241231.htm",
+      "sec_registration_file_number": "333-277837",
+      "identity_event_proven": "INITIAL_GBTC_DISTRIBUTION_2024_07_31_AND_1_FOR_5_REVERSE_SPLIT_2024_11_19",
+      "current_snapshot_fields_observed": [
+        "nav_per_share",
+        "shares_outstanding",
+        "as_of_date"
+      ],
+      "sec_periodic_data_state": "DISTRIBUTION_SPLIT_AND_PERIOD_ACTIVITY_ONLY",
+      "date_addressable_daily_snapshot_state": "NOT_PROVEN",
+      "immutable_daily_archive_state": "NOT_PROVEN",
+      "daily_historical_replay_state": "NOT_PROVEN_BLOCKED",
+      "reason": "The official filing proves the initial distribution and reverse split, including retroactive presentation. Without daily raw snapshots and an effective-dated split ledger, creation flow can be mechanically distorted."
+    }
+  ],
+  "result": {
+    "representative_sec_identity_state": "PROVEN_FOR_THREE_CASES",
+    "all_twelve_sec_identity_state": "NOT_PROVEN_BLOCKED",
+    "historical_backfill_state": "BLOCKED_NOT_PROVEN",
+    "prospective_capture_state": "CONTRACT_READY_ADAPTERS_NOT_IMPLEMENTED",
+    "dataset_readiness": "NOT_GRANTED",
+    "walk_forward_start": "BLOCKED",
+    "formal_model": "NOT_APPROVED",
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "action_output": "NONE"
+  }
+}

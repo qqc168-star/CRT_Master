@@ -1,0 +1,302 @@
+{
+  "schema_version": "CRT_PUBLIC_SOURCE_AUTHORITY_LOCK_V0.1",
+  "lock_id": "CRT-PUBLIC-SOURCE-AUTHORITY-LOCK-V0.1",
+  "status": "PUBLIC_RESEARCH_ROUTE_LOCKED_DATA_NOT_READY",
+  "base_sha": "a267ea84e797d41a5e973523d7d013fdf00ba773",
+  "design_date": "2026-08-11",
+  "candidate_registry_hash": "62497bab3e7d551f45e6b3bc23b367575927d5be6be9f25a0956566e1d64c2ee",
+  "purpose": "Freeze the public, replayable research-source route for the five unresolved candidate data decisions. This lock selects evidence contracts only; it does not acquire data, validate predictive performance, approve the formal model, or authorize production or capital action.",
+  "authorization": {
+    "user_route_selection": "PUBLIC_ROUTE_CONTINUE",
+    "scope": "RESEARCH_SOURCE_SELECTION_ONLY",
+    "commercial_provider_route": "NOT_SELECTED",
+    "formal_model_approval": "NOT_GRANTED",
+    "production_approval": "NOT_GRANTED",
+    "external_action_authority": "NONE"
+  },
+  "authority": {
+    "formal_model": "NOT_APPROVED",
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "action_output": "NONE",
+    "capital_decision_authority": "USER_ONLY"
+  },
+  "global_rules": {
+    "public_access_rule": "Publicly readable is necessary but not sufficient. The exact request identity, response bytes, retrieval time, first-seen time, content hash, license classification, and source documentation identity must be archived.",
+    "point_in_time_rule": "An observation is visible only when its source-specific availability proof establishes available_at_ms less than or equal to evaluation as_of_ms.",
+    "historical_backfill_rule": "A currently retrieved historical response cannot be assigned an earlier available_at_ms unless an immutable provider archive, event-time trade record, filing timestamp, or independently hashed contemporaneous snapshot proves earlier availability.",
+    "revision_rule": "Retain first-seen bytes and every later replacement. Never overwrite a prior artifact in place, and never let a revised artifact enter an earlier evaluation.",
+    "fallback_rule": "No provider, venue, ticker, asset, field, or methodology substitution is allowed. Contract failure blocks the dependent feature.",
+    "redistribution_rule": "Store raw bytes locally for research until the provider-specific license review permits broader redistribution; code, hashes, request identities, and derived tests may be shared separately.",
+    "synthetic_fixture_rule": "Synthetic data may validate mechanics only and cannot satisfy a dataset, coverage, or history gate."
+  },
+  "decisions": {
+    "STABLECOIN_POINT_IN_TIME_UNIVERSE": {
+      "decision_state": "LOCKED_RESEARCH_SOURCE",
+      "selected_route": "DEFILLAMA_FIXED_CORE_FIAT_PANEL",
+      "provider": "DefiLlama peggedassets-server",
+      "documentation": [
+        "https://docs.llama.fi/",
+        "https://github.com/DefiLlama/peggedassets-server",
+        "https://defillama.com/stablecoins"
+      ],
+      "endpoint_template": "https://stablecoins.llama.fi/stablecoin/{provider_id}",
+      "value_field": "totalCirculating.peggedUSD",
+      "value_semantics": "Issuer units circulating across all provider-covered networks, denominated in the USD peg unit. Do not multiply by a current secondary-market price and do not remove an asset during a depeg.",
+      "universe": {
+        "universe_version": "CRT_CORE_FIAT_STABLECOINS_V1",
+        "effective_start": "2024-01-01",
+        "members": [
+          {
+            "provider_id": "1",
+            "symbol": "USDT"
+          },
+          {
+            "provider_id": "2",
+            "symbol": "USDC"
+          }
+        ],
+        "membership_policy": "Fixed two-asset core panel. No current-rank selection, dynamic winner inclusion, or survivorship deletion. This is a core-liquidity proxy, not a claim to cover the entire stablecoin market."
+      },
+      "observation_rule": "Require both assets on the exact UTC observation date. Aggregate only after per-asset point-in-time selection.",
+      "availability_rule": "For prospective snapshots, use the first successful retrieval time. For backfilled history, use retrieval time unless a hash-bound contemporaneous archive proves an earlier first-seen time.",
+      "quality_gates": [
+        "BOTH_PROVIDER_IDS_PRESENT",
+        "PEG_TYPE_IS_PEGGED_USD",
+        "PEG_MECHANISM_IS_FIAT_BACKED",
+        "NONNEGATIVE_FINITE_VALUES",
+        "NO_DUPLICATE_DATE_OR_PROVIDER_ID",
+        "SOURCE_RESPONSE_HASHED"
+      ],
+      "fallback_policy": "NONE_BLOCK_ON_SOURCE_OR_COVERAGE_FAILURE",
+      "license_classification": "TERMS_REVIEW_REQUIRED_LOCAL_RESEARCH_ONLY",
+      "history_state": "NOT_PRESENT"
+    },
+    "US_SPOT_BTC_ETP_POINT_IN_TIME": {
+      "decision_state": "LOCKED_RESEARCH_SOURCE",
+      "selected_route": "OFFICIAL_ISSUER_DAILY_SNAPSHOTS_WITH_SEC_IDENTITY_ANCHOR",
+      "calculation_authority": "OFFICIAL_ISSUER_DAILY_SNAPSHOT",
+      "identity_authority": "SEC_EDGAR_AND_EXCHANGE_LISTING",
+      "documentation": [
+        "https://www.sec.gov/files/rules/sro/nysearca/2024/34-99306.pdf",
+        "https://www.sec.gov/data-research/sec-markets-data/form-n-port-data-sets",
+        "https://farside.co.uk/bitcoin-etf-flow-all-data/"
+      ],
+      "universe": {
+        "universe_version": "CRT_US_SPOT_BTC_ETP_V1",
+        "effective_dated_membership_required": true,
+        "launch_baseline_required": true,
+        "closure_and_conversion_events_required": true,
+        "members": [
+          {
+            "ticker": "IBIT",
+            "issuer_label": "iShares / BlackRock",
+            "membership_effective_from": "2024-01-11",
+            "official_product_url": "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf"
+          },
+          {
+            "ticker": "FBTC",
+            "issuer_label": "Fidelity Investments",
+            "membership_effective_from": "2024-01-11",
+            "official_product_url": "https://digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=FBTC"
+          },
+          {
+            "ticker": "BITB",
+            "issuer_label": "Bitwise Asset Management",
+            "membership_effective_from": "2024-01-11",
+            "official_product_url": "https://bitbetf.com/"
+          },
+          {
+            "ticker": "ARKB",
+            "issuer_label": "ARK / 21Shares",
+            "membership_effective_from": "2024-01-11",
+            "official_product_url": "https://www.21shares.com/en-us/products-us/arkb"
+          },
+          {
+            "ticker": "BTCO",
+            "issuer_label": "Invesco / Galaxy",
+            "membership_effective_from": "2024-01-11",
+            "official_product_url": "https://www.invesco.com/us/en/financial-products/etfs/invesco-galaxy-bitcoin-etf.html"
+          },
+          {
+            "ticker": "EZBC",
+            "issuer_label": "Franklin Templeton",
+            "membership_effective_from": "2024-01-11",
+            "official_product_url": "https://www.franklintempleton.com/investments/options/exchange-traded-funds/products/39639/SINGLCLASS/franklin-bitcoin-etf/EZBC"
+          },
+          {
+            "ticker": "BRRR",
+            "issuer_label": "CoinShares",
+            "membership_effective_from": "2024-01-11",
+            "official_product_url": "https://coinshares.com/us/etf/brrr/"
+          },
+          {
+            "ticker": "HODL",
+            "issuer_label": "VanEck",
+            "membership_effective_from": "2024-01-11",
+            "official_product_url": "https://www.vaneck.com/us/en/investments/bitcoin-etf-hodl/"
+          },
+          {
+            "ticker": "BTCW",
+            "issuer_label": "WisdomTree",
+            "membership_effective_from": "2024-01-11",
+            "official_product_url": "https://www.wisdomtree.com/us/products/crypto/btcw"
+          },
+          {
+            "ticker": "GBTC",
+            "issuer_label": "Grayscale",
+            "membership_effective_from": "2024-01-11",
+            "official_product_url": "https://etfs.grayscale.com/gbtc"
+          },
+          {
+            "ticker": "BTC",
+            "issuer_label": "Grayscale",
+            "membership_effective_from": "2024-07-31",
+            "official_product_url": "https://etfs.grayscale.com/btc"
+          },
+          {
+            "ticker": "MSBT",
+            "issuer_label": "Morgan Stanley Investment Management",
+            "membership_effective_from": "2026-04-08",
+            "official_product_url": "https://www.morganstanley.com/im/en-us/individual-investor/products/etfs/digital-assets/morgan-stanley-bitcoin-trust.html"
+          }
+        ]
+      },
+      "registry_binding": {
+        "official_product_url_state": "LOCKED_FOR_ALL_MEMBERS",
+        "sec_identity_state": "CIK_AND_ACCESSION_BINDING_REQUIRED_BEFORE_ACQUISITION",
+        "daily_snapshot_adapter_state": "NOT_IMPLEMENTED_BLOCKED",
+        "historical_replay_state": "NOT_PROVEN_BLOCKED",
+        "rule": "A product page identifies the intended issuer source but does not prove a historical field, publication timestamp, split event, or point-in-time vintage. Each adapter must bind exact fields and SEC identity before data acquisition can satisfy readiness."
+      },
+      "required_daily_fields": [
+        "adjusted_shares_outstanding",
+        "nav_per_share",
+        "net_assets",
+        "fund_id",
+        "observed_at_ms",
+        "published_at_ms"
+      ],
+      "split_rule": "Use an effective-dated split factor and retain raw and adjusted shares. A split cannot be interpreted as a creation or redemption.",
+      "availability_rule": "Use the issuer publication timestamp when present and independently captured first-seen time otherwise. A current issuer page cannot prove a historical publication time by itself.",
+      "sec_nport_role": "MONTHLY_OR_QUARTERLY_AUDIT_ONLY_NOT_DAILY_FLOW_AUTHORITY",
+      "farside_role": "CROSS_CHECK_ONLY_NOT_CALCULATION_AUTHORITY",
+      "farside_reason": "The public table is automatically updated and disclaims errors; its current historical table is not a point-in-time vintage archive and does not provide the required daily starting AUM contract.",
+      "quality_gates": [
+        "EVERY_EFFECTIVE_MEMBER_PRESENT",
+        "ISSUER_IDENTITY_MATCHED_TO_SEC",
+        "POSITIVE_NAV_AND_NET_ASSETS",
+        "NONNEGATIVE_ADJUSTED_SHARES",
+        "SPLIT_LEDGER_APPLIED",
+        "PUBLISHED_AT_NOT_AFTER_AS_OF",
+        "RAW_SNAPSHOT_HASHED"
+      ],
+      "fallback_policy": "NONE_BLOCK_IF_ANY_EFFECTIVE_MEMBER_OR_PRIMARY_FIELD_IS_MISSING",
+      "license_classification": "ISSUER_AND_SEC_TERMS_REVIEW_REQUIRED_LOCAL_RESEARCH_ONLY",
+      "history_state": "NOT_PRESENT"
+    },
+    "BINANCE_BTCUSDT_CONTRACT_MULTIPLIER": {
+      "decision_state": "ELIMINATED_BY_OFFICIAL_NOTIONAL_FIELD",
+      "selected_route": "BINANCE_SUM_OPEN_INTEREST_VALUE",
+      "provider": "Binance USD-M Futures",
+      "symbol": "BTCUSDT",
+      "replacement_field": "sumOpenInterestValue",
+      "replacement_semantics": "Total open interest value in quote currency as published by Binance. Consume the notional directly; do not multiply open interest quantity by a guessed contract multiplier or a separately aligned mark price.",
+      "documentation": [
+        "https://developers.binance.com/en/docs/catalog/core-trading-derivatives-trading-usd-s-m-futures/api/rest-api/market-data",
+        "https://github.com/binance/binance-public-data",
+        "https://data.binance.vision/"
+      ],
+      "rest_endpoint": "/futures/data/openInterestHist",
+      "rest_history_limit": "LATEST_ONE_MONTH_ONLY",
+      "public_archive_pattern": "data/futures/um/daily/metrics/BTCUSDT/BTCUSDT-metrics-YYYY-MM-DD.zip",
+      "archive_rule": "Require provider CHECKSUM when available, local SHA-256, exact 5-minute cadence audit, duplicate detection, and gap ledger. Known archive defects block affected windows rather than being forward-filled.",
+      "forbidden_inputs": [
+        "contract_multiplier_btc",
+        "OPEN_INTEREST_TIMES_MARK_PRICE"
+      ],
+      "fallback_policy": "NONE_BLOCK_IF_NOTIONAL_FIELD_OR_COVERAGE_IS_MISSING",
+      "license_classification": "TERMS_REVIEW_REQUIRED_LOCAL_RESEARCH_ONLY",
+      "history_state": "NOT_PRESENT"
+    },
+    "BTC_SPOT_COMPOSITE_OHLCV": {
+      "decision_state": "LOCKED_RESEARCH_SOURCE",
+      "selected_route": "FIXED_THREE_VENUE_USD_DAILY_MEDIAN",
+      "effective_start": "2024-01-01",
+      "venue_universe": [
+        {
+          "venue_id": "COINBASE_BTC_USD",
+          "provider": "Coinbase Exchange",
+          "product": "BTC-USD",
+          "transport": "PUBLIC_DAILY_CANDLES",
+          "documentation": "https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-candles"
+        },
+        {
+          "venue_id": "KRAKEN_XBT_USD",
+          "provider": "Kraken",
+          "product": "XBT/USD",
+          "transport": "OFFICIAL_OHLCVT_COMPLETE_AND_QUARTERLY_ARCHIVES",
+          "documentation": "https://support.kraken.com/articles/360047124832-downloadable-historical-ohlcvt-open-high-low-close-volume-trades-data"
+        },
+        {
+          "venue_id": "BITSTAMP_BTC_USD",
+          "provider": "Bitstamp",
+          "product": "btcusd",
+          "transport": "PUBLIC_DAILY_OHLC",
+          "documentation": "https://www.bitstamp.net/api/#ohlc_data"
+        }
+      ],
+      "daily_cut": "UTC_00_00_START_EXCLUSIVE_END_INCLUSIVE",
+      "minimum_venue_count": 3,
+      "aggregation": "COORDINATE_WISE_MEDIAN_OHLC",
+      "volume_field": "SUM_BASE_ASSET_VOLUME_QUALITY_METADATA_ONLY",
+      "bar_rule": "Each venue bar must be complete and internally valid: low less than or equal to open and close, high greater than or equal to open and close, finite positive prices, and nonnegative base volume.",
+      "dispersion_rule": "Record per-field maximum absolute deviation from the median in basis points. Do not silently winsorize, drop, or replace a venue; all three official bars remain required.",
+      "availability_rule": "A complete daily bar is eligible only after UTC day close and source retrieval. Partial current bars are forbidden. Historical API or archive retrieval retains its actual retrieval and artifact hash evidence.",
+      "target_role": "THE_SAME_COMPOSITE_CLOSE_IS_THE_ONLY_FORWARD_RETURN_TARGET",
+      "fallback_policy": "NONE_BLOCK_IF_ANY_VENUE_DAY_IS_MISSING_OR_INVALID",
+      "license_classification": "VENUE_TERMS_REVIEW_REQUIRED_LOCAL_RESEARCH_ONLY",
+      "history_state": "NOT_PRESENT"
+    },
+    "BTC_SPOT_AGGRESSOR_DAILY": {
+      "decision_state": "LOCKED_RESEARCH_SOURCE",
+      "selected_route": "BINANCE_SPOT_AGGTRADES_ARCHIVE",
+      "provider": "Binance Spot Public Data",
+      "symbol": "BTCUSDT",
+      "data_kind": "aggTrades",
+      "documentation": [
+        "https://github.com/binance/binance-public-data",
+        "https://data.binance.vision/"
+      ],
+      "archive_pattern": "data/spot/daily/aggTrades/BTCUSDT/BTCUSDT-aggTrades-YYYY-MM-DD.zip",
+      "required_columns": [
+        "aggregate_trade_id",
+        "price",
+        "quantity",
+        "first_trade_id",
+        "last_trade_id",
+        "timestamp",
+        "is_buyer_maker",
+        "is_best_match"
+      ],
+      "buyer_initiated_when_is_buyer_maker": false,
+      "seller_initiated_when_is_buyer_maker": true,
+      "quote_volume_formula": "price*quantity",
+      "timestamp_rule": "Normalize documented millisecond timestamps before 2025-01-01 and microsecond timestamps on or after 2025-01-01 to integer milliseconds before UTC daily bucketing.",
+      "availability_rule": "Daily files are eligible no earlier than the next UTC day and only after successful retrieval and hash verification.",
+      "coverage_rule": "Require provider CHECKSUM, local SHA-256, unique aggregate trade IDs, monotonic timestamps, boundary audit against adjacent daily files, and zero unclassified rows. A verified empty day requires an explicit complete archive artifact; an absent file is missing, never zero.",
+      "fallback_policy": "NONE_BLOCK_ON_ARCHIVE_GAP_CHECKSUM_FAILURE_OR_UNKNOWN_SIDE",
+      "license_classification": "TERMS_REVIEW_REQUIRED_LOCAL_RESEARCH_ONLY",
+      "history_state": "NOT_PRESENT"
+    }
+  },
+  "promotion": {
+    "automatic_source_promotion": false,
+    "source_lock_is_dataset_readiness": false,
+    "source_lock_is_model_approval": false,
+    "merge_is_approval": false,
+    "formal_approval_required": true,
+    "external_action_authority": "NONE"
+  }
+}

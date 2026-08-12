@@ -1,0 +1,117 @@
+{
+  "schema_version": "CRT_CANDIDATE_WALK_FORWARD_PROTOCOL_V0.1",
+  "protocol_id": "CRT-CANDIDATE-WALK-FORWARD-V0.1",
+  "status": "PREREGISTERED_RESEARCH_ONLY_NOT_STARTED",
+  "base_sha": "a267ea84e797d41a5e973523d7d013fdf00ba773",
+  "design_freeze_date": "2026-08-11",
+  "candidate_registry_hash": "62497bab3e7d551f45e6b3bc23b367575927d5be6be9f25a0956566e1d64c2ee",
+  "source_contract_hash": "049c79b6fc96d61e88bf092d6368f9b68d205c7d0c7c6565bb6831949de5eaf1",
+  "retrospective_role": "EXPLORATORY_FALSIFICATION_ONLY",
+  "retrospective_reason": "The model was designed with market knowledge through the design freeze date, so pre-freeze results cannot be treated as an untouched confirmatory holdout.",
+  "authority": {
+    "formal_model": "NOT_APPROVED",
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "action_output": "NONE"
+  },
+  "evaluation_clock": {
+    "cadence": "UTC_DAILY_AFTER_ALL_REQUIRED_INPUTS_AVAILABLE",
+    "as_of_rule": "Each evaluation sees only observations with available_at_ms less than or equal to as_of_ms.",
+    "partial_bar_policy": "BLOCK",
+    "revised_history_policy": "USE_POINT_IN_TIME_VINTAGE_ONLY",
+    "first_eligible_date_rule": "Later of 2024-01-11 and the first date on which every required feature has its preregistered minimum strictly-prior history.",
+    "missing_policy": "BLOCK_NO_RENORMALIZATION_NO_SOURCE_SUBSTITUTION"
+  },
+  "target": {
+    "source_contract_id": "BTC_SPOT_COMPOSITE_OHLCV",
+    "field": "close",
+    "horizons_calendar_days": [
+      7,
+      30,
+      90
+    ],
+    "formula": "100*ln(composite_close_at_or_after_t_plus_h/composite_close_t)",
+    "timestamp_rule": "Use the first complete UTC daily close at or after the exact calendar horizon; report realized slippage in milliseconds and block if it exceeds one day.",
+    "primary_horizon_days": 30,
+    "target_independence_note": "No exchange-specific fallback may replace the approved composite target."
+  },
+  "score_generation": {
+    "registry_frozen": true,
+    "parameter_refit": "NONE",
+    "normalization_history": "STRICTLY_PRIOR_FIXED_WINDOWS_FROM_CANDIDATE_REGISTRY",
+    "layer_reweighting": "FORBIDDEN",
+    "feature_reweighting": "FORBIDDEN",
+    "threshold_use": "NON_FORMAL_BUCKET_COMPARISON_ONLY",
+    "output_authority": "RESEARCH_EVIDENCE_ONLY"
+  },
+  "analysis_plan": {
+    "primary_statistic": "SPEARMAN_RANK_CORRELATION_CANDIDATE_SCORE_VS_30D_FORWARD_LOG_RETURN",
+    "primary_null": "RHO_EQUALS_ZERO",
+    "primary_direction": "TWO_SIDED_FALSIFICATION",
+    "secondary_statistics": [
+      "MEAN_30D_RETURN_C3_C4_MINUS_C0_C1",
+      "SPEARMAN_AT_7D",
+      "SPEARMAN_AT_90D",
+      "MONOTONIC_BUCKET_ORDER",
+      "DOWNSIDE_TAIL_RATE_BY_BUCKET",
+      "MODEL_BLOCK_RATE"
+    ],
+    "uncertainty": {
+      "method": "MOVING_BLOCK_BOOTSTRAP",
+      "replicates": 10000,
+      "block_length_calendar_days": 90,
+      "confidence_level": 0.95,
+      "random_seed": 1681101
+    },
+    "multiple_testing": "HOLM_CORRECTION_FOR_SECONDARY_HORIZON_P_VALUES",
+    "overlap_disclosure": "Forward-return horizons overlap; naive independent-observation standard errors are forbidden.",
+    "subgroup_policy": "No post-hoc regime slice may be presented as confirmatory. Every exploratory slice must be labeled and reported with its full search family."
+  },
+  "minimum_evidence": {
+    "retrospective_valid_scored_days": 365,
+    "minimum_observations_per_extreme_group": 30,
+    "prospective_shadow_calendar_days": 180,
+    "prospective_valid_scored_days": 120,
+    "required_reports": [
+      "VALID_AND_BLOCKED_DAY_LEDGER",
+      "SOURCE_COVERAGE_BY_CONTRACT",
+      "FEATURE_PAIR_REDUNDANCY_MATRIX",
+      "PRIMARY_AND_ALL_SECONDARY_RESULTS",
+      "ALL_PROTOCOL_DEVIATIONS"
+    ],
+    "redundancy_review_trigger": "ABS_SPEARMAN_GREATER_THAN_OR_EQUAL_TO_0.85_FOR_ANY_FEATURE_PAIR",
+    "redundancy_action": "REVIEW_ONLY_NO_AUTOMATIC_REWEIGHTING"
+  },
+  "dataset_gate": {
+    "required_manifest_schema": "CRT_CANDIDATE_POINT_IN_TIME_DATASET_MANIFEST_V0.1",
+    "required_hashes": [
+      "candidate_registry_hash",
+      "source_contract_hash",
+      "artifact_sha256"
+    ],
+    "required_source_contract_ids": [
+      "FRED_MACRO_VINTAGE",
+      "FRED_MARKET_DAILY",
+      "STABLECOIN_POINT_IN_TIME_UNIVERSE",
+      "US_SPOT_BTC_ETP_POINT_IN_TIME",
+      "BINANCE_USDM_MARKET_HISTORY",
+      "BINANCE_BTCUSDT_CONTRACT_MULTIPLIER",
+      "CRT_LIQUIDATION_AGGREGATE_HISTORY",
+      "COINMETRICS_BTC_CAPS",
+      "BTC_SPOT_COMPOSITE_OHLCV",
+      "BTC_SPOT_AGGRESSOR_DAILY"
+    ],
+    "start_policy": "BLOCK_UNTIL_ALL_REQUIRED_CONTRACTS_LOCKED_AND_ALL_HASHED_ARTIFACTS_PRESENT",
+    "current_state": "BLOCKED_BY_SOURCE_CONTRACT_AND_DATASET"
+  },
+  "promotion": {
+    "automatic_promotion": false,
+    "merge_is_approval": false,
+    "backtest_is_sufficient": false,
+    "prospective_shadow_is_required": true,
+    "formal_approval_required": true,
+    "capital_decision_authority": "USER_ONLY",
+    "external_action_authority": "NONE"
+  }
+}

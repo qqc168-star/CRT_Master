@@ -1,0 +1,643 @@
+{
+  "schema_version": "CRT_ETP_ISSUER_ADAPTER_CONTRACT_V0.1",
+  "contract_id": "CRT-ETP-ISSUER-ADAPTER-CONTRACT-V0.1",
+  "status": "ADAPTER_PROFILES_IMPLEMENTED_CAPTURE_NOT_STARTED_SURFACES_PARTIAL",
+  "base_sha": "a267ea84e797d41a5e973523d7d013fdf00ba773",
+  "public_source_authority_hash": "b090665891e84fc8ddbccd0e07d81e3b6abc9013e76bc43f4baab5c2406261fb",
+  "etp_replay_feasibility_hash": "380bd6713011510b1e15f292090c439f989294689ef3c4999c76419a165f3cfc",
+  "acquisition_contract_hash": "2863f82ef52ba120e1f6c92018b13199a19df7e14897d0ad2e3f04cabdb18a05",
+  "implementation_sha256": "444801cee1a0dbcb710306b262dc6f89acc4a9aca4d3d3b05bd542724d291a85",
+  "purpose": "Bind twelve authority-locked US spot Bitcoin ETP issuer identities and deterministic offline parsing profiles for caller-supplied official product-page bytes. This successor evidence node does not rewrite its historical parents, fetch data, prove historical coverage, acquire a raw dataset, grant readiness, approve the formal model, authorize production, or authorize capital action.",
+  "probe_date": "2026-08-11",
+  "parent_operational_assertions_superseded": [
+    "ALL_TWELVE_SEC_IDENTITY_NOT_PROVEN_BLOCKED",
+    "ISSUER_ADAPTERS_NOT_IMPLEMENTED"
+  ],
+  "network_fetch_implemented": false,
+  "raw_dataset_acquired": false,
+  "dataset_readiness_granted": false,
+  "historical_backfill_state": "BLOCKED_NOT_PROVEN",
+  "prospective_capture_state": "ADAPTERS_IMPLEMENTED_CAPTURE_NOT_STARTED_SURFACES_PARTIAL",
+  "sec_identity_state": "ALL_TWELVE_BOUND_TO_OFFICIAL_SEC_FILINGS",
+  "adapter_profile_state": "ALL_TWELVE_IMPLEMENTED_OFFLINE",
+  "required_fields": [
+    "nav_per_share",
+    "net_assets",
+    "raw_shares_outstanding"
+  ],
+  "field_policy": {
+    "same_date_required": true,
+    "weekend_observation": "FORBIDDEN",
+    "required_field_derivation": "FORBIDDEN",
+    "split_normalization": "APPLY_LOCKED_LEDGER_TO_SHARES_AND_NAV_IN_RECIPROCAL_DIRECTIONS",
+    "split_normalization_basis": "CURRENT_KNOWN_SHARE_BASIS",
+    "abbreviated_required_values": "FORBIDDEN",
+    "ambiguous_match": "FAIL_CLOSED",
+    "issuer_timestamp_absent": "USE_LOCAL_FIRST_SEEN_FOR_PROSPECTIVE_AVAILABILITY_ONLY",
+    "historical_availability_inference": "FORBIDDEN"
+  },
+  "input_contract": {
+    "source": "CALLER_SUPPLIED_OFFICIAL_PRODUCT_PAGE_BYTES",
+    "content_types": [
+      "text/html",
+      "text/plain"
+    ],
+    "encoding": "UTF-8",
+    "exact_locked_url_required": true,
+    "ticker_and_named_identity_marker_required": true,
+    "network_client": "NONE",
+    "scheduler": "NONE",
+    "browser": "NONE",
+    "pdf_or_ocr": "NONE",
+    "writes": "NONE"
+  },
+  "license_classification": "ISSUER_OFFICIAL_PRODUCT_PAGE_LOCAL_RESEARCH_ONLY_TERMS_REVIEW_REQUIRED",
+  "surface_probe_result": {
+    "probe_semantics": "CURRENT_OFFICIAL_VISIBLE_SURFACE_ONLY_NOT_HISTORICAL_ARCHIVE_PROOF",
+    "proven_tickers": [
+      "IBIT",
+      "BITB",
+      "ARKB",
+      "HODL",
+      "GBTC",
+      "BTC"
+    ],
+    "blocked_tickers": {
+      "FBTC": "CROSS_OFFICIAL_SURFACE_DAILY_ALIGNMENT_NOT_PROVEN",
+      "BTCO": "REQUIRED_NAV_AND_SHARES_NOT_PROVEN_ON_STATIC_SURFACE",
+      "EZBC": "NET_ASSETS_ONLY_ABBREVIATED_ON_VISIBLE_SURFACE",
+      "BRRR": "SHARES_OUTSTANDING_NOT_PRESENT_ON_VISIBLE_SURFACE",
+      "BTCW": "NET_ASSETS_SEMANTIC_EQUIVALENCE_NOT_PROVEN",
+      "MSBT": "REQUIRED_VALUES_NOT_PROVEN_ON_STATIC_SURFACE"
+    }
+  },
+  "issuer_profiles": [
+    {
+      "ticker": "IBIT",
+      "adapter_id": "ISHARES_IBIT_V0.1",
+      "issuer_label": "iShares / BlackRock",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://www.ishares.com/us/products/333011/ishares-bitcoin-trust-etf",
+      "identity_markers": [
+        "IBIT",
+        "iShares Bitcoin Trust ETF"
+      ],
+      "sec_identity": {
+        "cik": "0001980994",
+        "accession": "000143774925006260",
+        "form": "10-K",
+        "url": "https://www.sec.gov/Archives/edgar/data/1980994/000143774925006260/bit20241231_10k.htm"
+      },
+      "surface_probe_state": "CURRENT_REQUIRED_FIELDS_PROVEN",
+      "snapshot_date_patterns": [
+        "NAV\\s+as\\s+of\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "NAV\\s+as\\s+of\\s+{DATE}\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "Net\\s+Assets\\s+of\\s+Fund\\s+{NUMBER}\\s+as\\s+of\\s+{DATE}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "Shares\\s+Outstanding\\s+{NUMBER}\\s+as\\s+of\\s+{DATE}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    },
+    {
+      "ticker": "FBTC",
+      "adapter_id": "FIDELITY_FBTC_V0.1",
+      "issuer_label": "Fidelity Investments",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://digital.fidelity.com/prgw/digital/research/quote/dashboard/summary?symbol=FBTC",
+      "identity_markers": [
+        "FBTC",
+        "Fidelity Wise Origin Bitcoin Fund"
+      ],
+      "sec_identity": {
+        "cik": "0001852317",
+        "accession": "000119312524006077",
+        "form": "424B3",
+        "url": "https://www.sec.gov/Archives/edgar/data/1852317/000119312524006077/d375081d424b3.htm"
+      },
+      "surface_probe_state": "CROSS_OFFICIAL_SURFACE_DAILY_ALIGNMENT_NOT_PROVEN",
+      "snapshot_date_patterns": [
+        "Nav\\s+as\\s+of\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "Nav\\s+as\\s+of\\s+{DATE}\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "Net\\s+assets\\s+as\\s+of\\s+{DATE}\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "Shares\\s+outstanding\\s+as\\s+of\\s+{DATE}\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    },
+    {
+      "ticker": "BITB",
+      "adapter_id": "BITWISE_BITB_V0.1",
+      "issuer_label": "Bitwise Asset Management",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://bitbetf.com/",
+      "identity_markers": [
+        "BITB",
+        "Bitwise Bitcoin ETF"
+      ],
+      "sec_identity": {
+        "cik": "0001763415",
+        "accession": "000199937124000346",
+        "form": "424B3",
+        "url": "https://www.sec.gov/Archives/edgar/data/1763415/000199937124000346/bitcoin-424b3_011024.htm"
+      },
+      "surface_probe_state": "CURRENT_REQUIRED_FIELDS_PROVEN",
+      "snapshot_date_patterns": [
+        "Data\\s+as\\s+of\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "NAV\\s*:\\s*{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "Net\\s+Assets\\s+\\(AUM\\)\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "Shares\\s+Outstanding\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    },
+    {
+      "ticker": "ARKB",
+      "adapter_id": "ARK_21SHARES_ARKB_V0.1",
+      "issuer_label": "ARK / 21Shares",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://www.21shares.com/en-us/products-us/arkb",
+      "identity_markers": [
+        "ARKB",
+        "ARK 21Shares Bitcoin ETF"
+      ],
+      "sec_identity": {
+        "cik": "0001869699",
+        "accession": "000119312524003823",
+        "form": "S-1/A",
+        "url": "https://www.sec.gov/Archives/edgar/data/1869699/000119312524003823/d549524ds1a.htm"
+      },
+      "surface_probe_state": "CURRENT_REQUIRED_FIELDS_PROVEN",
+      "snapshot_date_patterns": [
+        "Value\\s+as\\s+of\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "NAV\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "AUM\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "SHARES\\s+OUTSTANDING\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    },
+    {
+      "ticker": "BTCO",
+      "adapter_id": "INVESCO_GALAXY_BTCO_V0.1",
+      "issuer_label": "Invesco / Galaxy",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://www.invesco.com/us/en/financial-products/etfs/invesco-galaxy-bitcoin-etf.html",
+      "identity_markers": [
+        "BTCO",
+        "Invesco Galaxy Bitcoin ETF"
+      ],
+      "sec_identity": {
+        "cik": "0001855781",
+        "accession": "000119312524003812",
+        "form": "S-1/A",
+        "url": "https://www.sec.gov/Archives/edgar/data/1855781/000119312524003812/d507893ds1a.htm"
+      },
+      "surface_probe_state": "REQUIRED_NAV_AND_SHARES_NOT_PROVEN_ON_STATIC_SURFACE",
+      "snapshot_date_patterns": [
+        "Data\\s+as\\s+of\\s+{DATE}",
+        "Market\\s+value\\s+\\(as\\s+of\\s+{DATE}\\)"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "NAV\\s+per\\s+Share\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "Net\\s+Assets\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "Shares\\s+Outstanding\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    },
+    {
+      "ticker": "EZBC",
+      "adapter_id": "FRANKLIN_EZBC_V0.1",
+      "issuer_label": "Franklin Templeton",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://www.franklintempleton.com/investments/options/exchange-traded-funds/products/39639/SINGLCLASS/franklin-bitcoin-etf/EZBC",
+      "identity_markers": [
+        "EZBC",
+        "Franklin Bitcoin ETF"
+      ],
+      "sec_identity": {
+        "cik": "0001992870",
+        "accession": "000113743924000039",
+        "form": "S-1/A",
+        "url": "https://www.sec.gov/Archives/edgar/data/1992870/000113743924000039/ftdhts1a01082024.htm"
+      },
+      "surface_probe_state": "NET_ASSETS_ONLY_ABBREVIATED_ON_VISIBLE_SURFACE",
+      "snapshot_date_patterns": [
+        "NAV\\s+{NUMBER}\\s+As\\s+of\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "NAV\\s+{NUMBER}\\s+As\\s+of\\s+{DATE}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "Total\\s+Net\\s+Assets\\s+{NUMBER}\\s+As\\s+of\\s+{DATE}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "Shares\\s+Outstanding\\s+{NUMBER}\\s+As\\s+of\\s+{DATE}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    },
+    {
+      "ticker": "BRRR",
+      "adapter_id": "COINSHARES_BRRR_V0.1",
+      "issuer_label": "CoinShares",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://coinshares.com/us/etf/brrr/",
+      "identity_markers": [
+        "BRRR",
+        "CoinShares Bitcoin ETF"
+      ],
+      "sec_identity": {
+        "cik": "0001841175",
+        "accession": "000199937126005527",
+        "form": "10-K",
+        "url": "https://www.sec.gov/Archives/edgar/data/1841175/000199937126005527/brrr_10k-123125.htm"
+      },
+      "surface_probe_state": "SHARES_OUTSTANDING_NOT_PRESENT_ON_VISIBLE_SURFACE",
+      "snapshot_date_patterns": [
+        "Data\\s+as\\s+of\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "NAV\\s+USD\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "AuM\\s+USD\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "Shares\\s+Outstanding\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    },
+    {
+      "ticker": "HODL",
+      "adapter_id": "VANECK_HODL_V0.1",
+      "issuer_label": "VanEck",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://www.vaneck.com/us/en/investments/bitcoin-etf-hodl/",
+      "identity_markers": [
+        "HODL",
+        "VanEck Bitcoin ETF"
+      ],
+      "sec_identity": {
+        "cik": "0001838028",
+        "accession": "000093041324000073",
+        "form": "424B3",
+        "url": "https://www.sec.gov/Archives/edgar/data/1838028/000093041324000073/c106800_424b3.htm"
+      },
+      "surface_probe_state": "CURRENT_REQUIRED_FIELDS_PROVEN",
+      "snapshot_date_patterns": [
+        "NAV\\s+{NUMBER}\\s+as\\s+of\\s+{DATE}",
+        "ETF\\s+Statistics\\s+as\\s+of\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "NAV\\s+{NUMBER}\\s+as\\s+of\\s+{DATE}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "Total\\s+Net\\s+Assets\\s+{NUMBER}\\s+as\\s+of\\s+{DATE}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "Shares\\s+Outstanding\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    },
+    {
+      "ticker": "BTCW",
+      "adapter_id": "WISDOMTREE_BTCW_V0.1",
+      "issuer_label": "WisdomTree",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://www.wisdomtree.com/us/products/crypto/btcw",
+      "identity_markers": [
+        "BTCW",
+        "WisdomTree Bitcoin Fund"
+      ],
+      "sec_identity": {
+        "cik": "0001850391",
+        "accession": "000121465924000453",
+        "form": "S-1/A",
+        "url": "https://www.sec.gov/Archives/edgar/data/1850391/000121465924000453/wtb17241s1a7.htm"
+      },
+      "surface_probe_state": "NET_ASSETS_SEMANTIC_EQUIVALENCE_NOT_PROVEN",
+      "snapshot_date_patterns": [
+        "Product\\s+Overview\\s+As\\s+of\\s+{DATE}",
+        "Net\\s+Asset\\s+Value\\s+As\\s+of\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "NAV\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "Total\\s+Net\\s+Assets\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "Shares\\s+Outstanding\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    },
+    {
+      "ticker": "GBTC",
+      "adapter_id": "GRAYSCALE_GBTC_V0.1",
+      "issuer_label": "Grayscale",
+      "membership_effective_from": "2024-01-11",
+      "official_product_url": "https://etfs.grayscale.com/gbtc",
+      "identity_markers": [
+        "GBTC",
+        "Grayscale Bitcoin Trust ETF"
+      ],
+      "sec_identity": {
+        "cik": "0001588489",
+        "accession": "000095017025029408",
+        "form": "10-K",
+        "url": "https://www.sec.gov/Archives/edgar/data/1588489/000095017025029408/gbtc-20241231.htm"
+      },
+      "surface_probe_state": "CURRENT_REQUIRED_FIELDS_PROVEN",
+      "snapshot_date_patterns": [
+        "AS\\s+OF\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "NET\\s+ASSET\\s+VALUE\\s+\\(NAV\\)\\s+PER\\s+SHARE\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "ASSETS\\s+UNDER\\s+MANAGEMENT\\s+\\(NON-GAAP\\)\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "SHARES\\s+OUTSTANDING\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    },
+    {
+      "ticker": "BTC",
+      "adapter_id": "GRAYSCALE_BTC_V0.1",
+      "issuer_label": "Grayscale",
+      "membership_effective_from": "2024-07-31",
+      "official_product_url": "https://etfs.grayscale.com/btc",
+      "identity_markers": [
+        "BTC",
+        "Grayscale Bitcoin Mini Trust ETF"
+      ],
+      "sec_identity": {
+        "cik": "0002015034",
+        "accession": "000095017025029405",
+        "form": "10-K",
+        "url": "https://www.sec.gov/Archives/edgar/data/2015034/000095017025029405/btc-20241231.htm"
+      },
+      "surface_probe_state": "CURRENT_REQUIRED_FIELDS_PROVEN",
+      "snapshot_date_patterns": [
+        "AS\\s+OF\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "NET\\s+ASSET\\s+VALUE\\s+\\(NAV\\)\\s+PER\\s+SHARE\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "ASSETS\\s+UNDER\\s+MANAGEMENT\\s+\\(NON-GAAP\\)\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "SHARES\\s+OUTSTANDING\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": [
+        {
+          "effective_on": "2024-11-19",
+          "numerator": 1,
+          "denominator": 5,
+          "event": "1_FOR_5_REVERSE_SPLIT",
+          "evidence_url": "https://www.sec.gov/Archives/edgar/data/2015034/000095017025029405/btc-20241231.htm"
+        }
+      ]
+    },
+    {
+      "ticker": "MSBT",
+      "adapter_id": "MORGAN_STANLEY_MSBT_V0.1",
+      "issuer_label": "Morgan Stanley Investment Management",
+      "membership_effective_from": "2026-04-08",
+      "official_product_url": "https://www.morganstanley.com/im/en-us/individual-investor/products/etfs/digital-assets/morgan-stanley-bitcoin-trust.html",
+      "identity_markers": [
+        "MSBT",
+        "Morgan Stanley Bitcoin Trust"
+      ],
+      "sec_identity": {
+        "cik": "0002103612",
+        "accession": "000110465926039992",
+        "form": "424B3",
+        "url": "https://www.sec.gov/Archives/edgar/data/2103612/000110465926039992/tm2534140-20_424b3.htm"
+      },
+      "surface_probe_state": "REQUIRED_VALUES_NOT_PROVEN_ON_STATIC_SURFACE",
+      "snapshot_date_patterns": [
+        "As\\s+of\\s+{DATE}"
+      ],
+      "field_rules": {
+        "nav_per_share": {
+          "patterns": [
+            "Net\\s+Asset\\s+Value\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "net_assets": {
+          "patterns": [
+            "Net\\s+Assets\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        },
+        "raw_shares_outstanding": {
+          "patterns": [
+            "Shares\\s+Outstanding\\s+{NUMBER}"
+          ],
+          "scale": "1",
+          "allow_abbreviated": false
+        }
+      },
+      "split_events": []
+    }
+  ],
+  "promotion": {
+    "adapter_parse_is_dataset_readiness": false,
+    "current_surface_probe_is_historical_coverage": false,
+    "synthetic_fixture_is_source_evidence": false,
+    "automatic_promotion": false,
+    "formal_approval_required": true,
+    "external_action_authority": "NONE"
+  },
+  "authority": {
+    "formal_model": "NOT_APPROVED",
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "action_output": "NONE",
+    "capital_decision_authority": "USER_ONLY"
+  }
+}

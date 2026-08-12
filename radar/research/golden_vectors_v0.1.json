@@ -1,0 +1,150 @@
+{
+  "schema_version": "CRT_RESEARCH_CANDIDATE_GOLDEN_VECTORS_V0.1",
+  "candidate_id": "CRT-SIX-LAYER-CANDIDATE-V0.1",
+  "vectors": [
+    {
+      "vector_id": "ALL_NEUTRAL",
+      "normalized_feature_scores": {
+        "L1_CORE_INFLATION_ACCELERATION": 0,
+        "L1_UNEMPLOYMENT_DETERIORATION": 0,
+        "L1_REAL_POLICY_RATE": 0,
+        "L2_BROAD_USD_20D_LOG_CHANGE": 0,
+        "L2_REAL_10Y_YIELD_20D_CHANGE_BP": 0,
+        "L2_NOMINAL_2Y_YIELD_20D_CHANGE_BP": 0,
+        "L3_STABLECOIN_SUPPLY_30D_LOG_CHANGE": 0,
+        "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM": 0,
+        "L3_HIGH_YIELD_OAS_20D_CHANGE_BP": 0,
+        "L4_OI_TO_MARKET_CAP": 0,
+        "L4_ABS_FUNDING_3D_MEAN_BP": 0,
+        "L4_LIQUIDATION_INTENSITY_24H": 0,
+        "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H": 0,
+        "L5_MVRV_LEVEL": 0,
+        "L5_REALIZED_CAP_30D_LOG_CHANGE": 0,
+        "L6_CLOSE_MINUS_SMA200_OVER_ATR20": 0,
+        "L6_SMA50_MINUS_SMA200_OVER_ATR20": 0,
+        "L6_RETURN_20D_OVER_ATR_VOL": 0,
+        "L6_CVD_20D_SHARE": 0
+      },
+      "expected": {
+        "layer_scores": {
+          "L1": 0.0,
+          "L2": 0.0,
+          "L3": 0.0,
+          "L4": 0.0,
+          "L5": 0.0,
+          "L6": 0.0
+        },
+        "candidate_score": 0.0,
+        "threshold_bucket": "C2_MIXED"
+      }
+    },
+    {
+      "vector_id": "MIXED_LAYER_PRESSURES",
+      "normalized_feature_scores": {
+        "L1_CORE_INFLATION_ACCELERATION": 100,
+        "L1_UNEMPLOYMENT_DETERIORATION": 100,
+        "L1_REAL_POLICY_RATE": 100,
+        "L2_BROAD_USD_20D_LOG_CHANGE": 50,
+        "L2_REAL_10Y_YIELD_20D_CHANGE_BP": 50,
+        "L2_NOMINAL_2Y_YIELD_20D_CHANGE_BP": 50,
+        "L3_STABLECOIN_SUPPLY_30D_LOG_CHANGE": 0,
+        "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM": 0,
+        "L3_HIGH_YIELD_OAS_20D_CHANGE_BP": 0,
+        "L4_OI_TO_MARKET_CAP": -50,
+        "L4_ABS_FUNDING_3D_MEAN_BP": -50,
+        "L4_LIQUIDATION_INTENSITY_24H": -50,
+        "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H": -50,
+        "L5_MVRV_LEVEL": -100,
+        "L5_REALIZED_CAP_30D_LOG_CHANGE": -100,
+        "L6_CLOSE_MINUS_SMA200_OVER_ATR20": 25,
+        "L6_SMA50_MINUS_SMA200_OVER_ATR20": 25,
+        "L6_RETURN_20D_OVER_ATR_VOL": 25,
+        "L6_CVD_20D_SHARE": 25
+      },
+      "expected": {
+        "layer_scores": {
+          "L1": 100.0,
+          "L2": 50.0,
+          "L3": 0.0,
+          "L4": -50.0,
+          "L5": -100.0,
+          "L6": 25.0
+        },
+        "candidate_score": 5.75,
+        "threshold_bucket": "C2_MIXED"
+      }
+    },
+    {
+      "vector_id": "EXACT_POSITIVE_OUTER_THRESHOLD",
+      "normalized_feature_scores": {
+        "L1_CORE_INFLATION_ACCELERATION": 60,
+        "L1_UNEMPLOYMENT_DETERIORATION": 60,
+        "L1_REAL_POLICY_RATE": 60,
+        "L2_BROAD_USD_20D_LOG_CHANGE": 60,
+        "L2_REAL_10Y_YIELD_20D_CHANGE_BP": 60,
+        "L2_NOMINAL_2Y_YIELD_20D_CHANGE_BP": 60,
+        "L3_STABLECOIN_SUPPLY_30D_LOG_CHANGE": 60,
+        "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM": 60,
+        "L3_HIGH_YIELD_OAS_20D_CHANGE_BP": 60,
+        "L4_OI_TO_MARKET_CAP": 60,
+        "L4_ABS_FUNDING_3D_MEAN_BP": 60,
+        "L4_LIQUIDATION_INTENSITY_24H": 60,
+        "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H": 60,
+        "L5_MVRV_LEVEL": 60,
+        "L5_REALIZED_CAP_30D_LOG_CHANGE": 60,
+        "L6_CLOSE_MINUS_SMA200_OVER_ATR20": 60,
+        "L6_SMA50_MINUS_SMA200_OVER_ATR20": 60,
+        "L6_RETURN_20D_OVER_ATR_VOL": 60,
+        "L6_CVD_20D_SHARE": 60
+      },
+      "expected": {
+        "layer_scores": {
+          "L1": 60.0,
+          "L2": 60.0,
+          "L3": 60.0,
+          "L4": 60.0,
+          "L5": 60.0,
+          "L6": 60.0
+        },
+        "candidate_score": 60.0,
+        "threshold_bucket": "C4_VERY_SUPPORTIVE"
+      }
+    },
+    {
+      "vector_id": "EXACT_NEGATIVE_OUTER_THRESHOLD",
+      "normalized_feature_scores": {
+        "L1_CORE_INFLATION_ACCELERATION": -60,
+        "L1_UNEMPLOYMENT_DETERIORATION": -60,
+        "L1_REAL_POLICY_RATE": -60,
+        "L2_BROAD_USD_20D_LOG_CHANGE": -60,
+        "L2_REAL_10Y_YIELD_20D_CHANGE_BP": -60,
+        "L2_NOMINAL_2Y_YIELD_20D_CHANGE_BP": -60,
+        "L3_STABLECOIN_SUPPLY_30D_LOG_CHANGE": -60,
+        "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM": -60,
+        "L3_HIGH_YIELD_OAS_20D_CHANGE_BP": -60,
+        "L4_OI_TO_MARKET_CAP": -60,
+        "L4_ABS_FUNDING_3D_MEAN_BP": -60,
+        "L4_LIQUIDATION_INTENSITY_24H": -60,
+        "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H": -60,
+        "L5_MVRV_LEVEL": -60,
+        "L5_REALIZED_CAP_30D_LOG_CHANGE": -60,
+        "L6_CLOSE_MINUS_SMA200_OVER_ATR20": -60,
+        "L6_SMA50_MINUS_SMA200_OVER_ATR20": -60,
+        "L6_RETURN_20D_OVER_ATR_VOL": -60,
+        "L6_CVD_20D_SHARE": -60
+      },
+      "expected": {
+        "layer_scores": {
+          "L1": -60.0,
+          "L2": -60.0,
+          "L3": -60.0,
+          "L4": -60.0,
+          "L5": -60.0,
+          "L6": -60.0
+        },
+        "candidate_score": -60.0,
+        "threshold_bucket": "C1_UNSUPPORTIVE"
+      }
+    }
+  ]
+}
