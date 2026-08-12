@@ -1,0 +1,52 @@
+{
+  "schema_version": "CRT_ETP_ISSUER_ADAPTER_SYNTHETIC_VECTORS_V0.1",
+  "evidence_class": "SYNTHETIC_FIXTURE",
+  "warning": "TEST_ONLY_NOT_PROVIDER_DATA_NOT_REPLAY_ELIGIBLE",
+  "common_expected": {
+    "observed_on": "2026-08-10",
+    "observed_at_ms": 1786392000000,
+    "nav_per_share": 25.0,
+    "net_assets": 250000000.0,
+    "raw_shares_outstanding": 10000000
+  },
+  "complete_visible_text": {
+    "IBIT": "iShares Bitcoin Trust ETF IBIT\nNAV as of Aug 10, 2026\n$25.00\nNet Assets of Fund\n$250,000,000\nas of Aug 10, 2026\nShares Outstanding\n10,000,000\nas of Aug 10, 2026",
+    "FBTC": "Fidelity Wise Origin Bitcoin Fund FBTC\nNav as of Aug 10, 2026 $25.00\nNet assets as of Aug 10, 2026 $250,000,000\nShares outstanding as of Aug 10, 2026 10,000,000",
+    "BITB": "Bitwise Bitcoin ETF BITB\nData as of 08/10/2026\nShares Outstanding 10,000,000\nNet Assets (AUM) $250,000,000\nNAV: $25.00",
+    "ARKB": "ARK 21Shares Bitcoin ETF ARKB\nValue as of Aug 10, 2026\nNAV $25.00\nAUM $250,000,000\nSHARES OUTSTANDING 10000000",
+    "BTCO": "Invesco Galaxy Bitcoin ETF BTCO\nData as of 08/10/2026\nNAV per Share $25.00\nNet Assets $250,000,000\nShares Outstanding 10,000,000",
+    "EZBC": "Franklin Bitcoin ETF EZBC\nNAV $25.00 As of 08/10/2026\nTotal Net Assets $250,000,000 As of 08/10/2026\nShares Outstanding 10,000,000 As of 08/10/2026",
+    "BRRR": "CoinShares Bitcoin ETF BRRR\nData as of 08/10/2026\nAuM USD 250,000,000\nNAV USD 25.00\nShares Outstanding 10,000,000",
+    "HODL": "VanEck Bitcoin ETF HODL\nNAV $25.00 as of August 10, 2026\nTotal Net Assets $250,000,000 as of August 10, 2026\nETF Statistics as of 08/10/2026\nShares Outstanding 10,000,000",
+    "BTCW": "WisdomTree Bitcoin Fund BTCW\nProduct Overview As of 8/10/2026\nTotal Net Assets $250,000,000\nShares Outstanding 10,000,000\nNet Asset Value As of 8/10/2026\nNAV $25.00",
+    "GBTC": "Grayscale Bitcoin Trust ETF GBTC\nAS OF 08/10/2026\nASSETS UNDER MANAGEMENT (NON-GAAP) $250,000,000\nSHARES OUTSTANDING 10,000,000\nNET ASSET VALUE (NAV) PER SHARE $25.00",
+    "BTC": "Grayscale Bitcoin Mini Trust ETF BTC\nAS OF 08/10/2026\nASSETS UNDER MANAGEMENT (NON-GAAP) $250,000,000\nSHARES OUTSTANDING 10,000,000\nNET ASSET VALUE (NAV) PER SHARE $25.00",
+    "MSBT": "Morgan Stanley Bitcoin Trust MSBT\nAs of 08/10/2026\nNet Asset Value $25.00\nNet Assets $250,000,000\nShares Outstanding 10,000,000"
+  },
+  "observed_surface_blockers": {
+    "FBTC": {
+      "expected_error": "NET_ASSETS_MISSING",
+      "visible_text": "Fidelity Wise Origin Bitcoin Fund FBTC\nNav as of Aug 10, 2026 $25.00\nShares outstanding as of Aug 10, 2026 10,000,000"
+    },
+    "BTCO": {
+      "expected_error": "NAV_PER_SHARE_MISSING",
+      "visible_text": "Invesco Galaxy Bitcoin ETF BTCO\nMarket value (as of 08/10/2026) $250,000,000\nTotal units of crypto 3,800"
+    },
+    "EZBC": {
+      "expected_error": "NET_ASSETS_ABBREVIATED_FORBIDDEN",
+      "visible_text": "Franklin Bitcoin ETF EZBC\nNAV $25.00 As of 08/10/2026\nTotal Net Assets $250.00M As of 08/10/2026\nShares Outstanding 10,000,000 As of 08/10/2026"
+    },
+    "BRRR": {
+      "expected_error": "RAW_SHARES_OUTSTANDING_MISSING",
+      "visible_text": "CoinShares Bitcoin ETF BRRR\nData as of 08/10/2026\nAuM USD 250,000,000\nNAV USD 25.00"
+    },
+    "BTCW": {
+      "expected_error": "NET_ASSETS_MISSING",
+      "visible_text": "WisdomTree Bitcoin Fund BTCW\nProduct Overview As of 8/10/2026\nTotal Assets (000) $250,000.00\nShares Outstanding 10,000,000\nNet Asset Value As of 8/10/2026\nNAV $25.00"
+    },
+    "MSBT": {
+      "expected_error": "SNAPSHOT_DATE_MISSING",
+      "visible_text": "Morgan Stanley Bitcoin Trust MSBT\nPricing & Expenses\nHistorical Price\nPremium/Discount\nKey Facts & Characteristics"
+    }
+  }
+}
