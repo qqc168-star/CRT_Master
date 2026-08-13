@@ -57,6 +57,48 @@ Missing, stale, invalid, or unverifiable critical evidence must produce `BLOCKED
 
 Evidence is not a decision. A score is not a season by itself. A historical PASS does not make future evidence valid.
 
+## Evidence Precision Constitution
+
+Precision follows the claim and decision use; the claim must not be forced to match the maximum precision available from a source.
+
+CRT uses three evidence precision levels:
+
+### Directional / Research Evidence
+
+Use for trend, direction, acceleration, breadth, structural context, and hypothesis formation.
+
+Directional evidence may use partial but real coverage, a stable tracked basket, mature processed research sources, and date- or period-level timestamps when those are sufficient for the claim.
+
+It does not require complete-universe coverage, a formal total, or millisecond timestamp precision unless the claim itself depends on them.
+
+### Deterministic / Comparable Evidence
+
+Use for reproducible 1D / 7D / 30D comparisons and other deterministic change calculations.
+
+It requires stable metric semantics, comparable scope or basket, sufficient identity, explicit as-of semantics, and reproducible calculation inputs.
+
+Partial universe coverage is acceptable when the comparison scope is explicit and materially comparable across observations.
+
+### Formal / Action-Critical Evidence
+
+Use for exact total-market claims, formal model inputs, approved thresholds, gates, market-dependent formula locks, Production promotion, or external actions.
+
+These claims require the coverage, identity, timing precision, prerequisites, and approvals necessary for that exact claim.
+
+### Claim-Scoped Fail-Closed Rule
+
+`BLOCKED` is claim-scoped, metric-scoped, or calculation-scoped. It must not automatically invalidate independent evidence that remains real, relevant, and usable for a narrower claim.
+
+A missing or invalid total does not invalidate verified constituents. Incomplete universe coverage does not invalidate a clearly labeled tracked-basket trend. Date-level source timing does not require invention of a false millisecond timestamp.
+
+When evidence cannot support the strongest intended claim, CRT must first reduce claim scope or precision and preserve the valid evidence. It should discard the evidence only when the remaining evidence cannot support a decision-relevant claim at any appropriate precision level.
+
+Partial real evidence must remain visible with explicit scope, provenance, as-of semantics, and limitations.
+
+Fail-closed still forbids fabricated values, zero-fill, guessed identities, silent stale reuse, fake timestamps, or promotion of lower-precision evidence into a stronger claim than it supports.
+
+GPT may use appropriately labeled lower-precision evidence for qualitative judgment, but must state uncertainty and must not silently promote it into a formal exact claim.
+
 ## Governance Boundary
 
 - Production remains `NOT_APPROVED` unless explicitly changed by later formal approval.
