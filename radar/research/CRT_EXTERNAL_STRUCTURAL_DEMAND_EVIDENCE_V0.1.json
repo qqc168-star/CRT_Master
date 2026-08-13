@@ -1,0 +1,191 @@
+{
+  "schema_version": "CRT_EXTERNAL_STRUCTURAL_DEMAND_EVIDENCE_V0.1",
+  "contract_id": "CRT-EXTERNAL-STRUCTURAL-DEMAND-EVIDENCE-V0.1",
+  "status": "READY_FOR_INTEGRATION_PENDING_MAIN_MERGE",
+  "base_sha": "de10d6959bc2b862b668847550615d686e2c6c14",
+  "purpose_zh": "以最小、可追溯的證據描述 BTC 與 STRC 的外部結構性需求，供 GPT 判斷需求韌性、公司支撐依賴與資產風險；不建立新分數、新門檻或新層。",
+  "governance": {
+    "evidence_mode": "NON_WEIGHTED_ASSET_RISK_EVIDENCE",
+    "new_six_layer": false,
+    "new_top_level_evidence_pack_section": false,
+    "formal_score": null,
+    "formal_thresholds": null,
+    "automatic_asset_role": false,
+    "automatic_capital_strategy": false,
+    "action_output": "NONE",
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE",
+    "formal_model_change": "NONE"
+  },
+  "common_evidence_rules": {
+    "required_metadata": [
+      "source_id",
+      "source_as_of_ms",
+      "retrieved_at_ms",
+      "evidence_hash",
+      "coverage_state"
+    ],
+    "coverage_states": [
+      "COMPLETE",
+      "PARTIAL",
+      "BLOCKED"
+    ],
+    "missing_rule": "MISSING_STALE_INVALID_OR_UNVERIFIABLE_CRITICAL_EVIDENCE_BLOCKS_NO_ZERO_FILL_NO_GUESSING",
+    "empty_rule": "EMPTY_IS_NOT_ZERO_UNLESS_SCOPE_IS_COMPLETE_AND_VERIFIED_EMPTY",
+    "causal_rule": "AUTOMATION_MAY_REPORT_STOCK_FLOW_BREADTH_AND_PRICE_FACTS_BUT_MUST_NOT_LABEL_MARKET_HANDOFF_SUPPORT_DEPENDENCY_OR_CAUSAL_EFFECT",
+    "market_response_lock": "PRICE_RESPONSE_AND_OTHER_MARKET_DEPENDENT_CALCULATIONS_REMAIN_BLOCKED_UNTIL_GENERIC_CURRENT_MAIN_MARKET_SOURCE_AND_WINDOW_LOCKS_ARE_APPROVED"
+  },
+  "btc": {
+    "role_zh": "借用成熟加工資料觀察傳統金融結構性資金對 BTC 的存量、流量與廣度，不從零重建每日 ETF 資料工廠。",
+    "source_policy": {
+      "processed_research_sources_allowed": true,
+      "issuer_by_issuer_daily_rebuild_required": false,
+      "requirements": [
+        "METHODOLOGY_OR_METRIC_DEFINITION_KNOWN",
+        "SOURCE_AS_OF_KNOWN",
+        "FRESHNESS_KNOWN",
+        "COVERAGE_KNOWN",
+        "PROVENANCE_RETAINED"
+      ],
+      "existing_us_spot_btc_etp_capture_role": "INDEPENDENT_VALIDATION_AND_RESEARCH_NOT_MANDATORY_DAILY_REBUILD"
+    },
+    "core_evidence": [
+      {
+        "metric_id": "BTC_ETF_NET_FLOW_USD",
+        "meaning_zh": "美國現貨 BTC ETF 邊際淨資金流。",
+        "horizons": [
+          "1D",
+          "7D",
+          "30D"
+        ]
+      },
+      {
+        "metric_id": "BTC_ETF_BALANCE_BTC",
+        "meaning_zh": "ETF 體系持有的 BTC 存量。",
+        "level_required": true,
+        "delta_horizons": [
+          "7D",
+          "30D"
+        ]
+      },
+      {
+        "metric_id": "BTC_ETF_FLOW_BREADTH",
+        "meaning_zh": "同一交易日正流入與負流出基金的廣度。",
+        "horizons": [
+          "1D"
+        ],
+        "minimum_output": [
+          "positive_fund_count",
+          "negative_fund_count"
+        ]
+      },
+      {
+        "metric_id": "BTC_PRICE_RETURN",
+        "meaning_zh": "與 ETF 資金證據並置的 BTC 價格變化；只作客觀並置，不宣稱因果。",
+        "horizons": [
+          "1D",
+          "7D",
+          "30D"
+        ],
+        "formal_state_until_market_lock": "BLOCKED"
+      }
+    ],
+    "slow_evidence": [
+      {
+        "metric_id": "BTC_ETF_INSTITUTIONAL_ADOPTION",
+        "meaning_zh": "大型機構透過 ETF 採用 BTC 的慢變量證據。",
+        "cadence": "QUARTERLY",
+        "required_daily": false
+      }
+    ]
+  },
+  "strc": {
+    "role_zh": "觀察 Strategy 公司支撐之外，外部基金是否持續吸收 STRC 供給，作為外部需求與資產風險證據。",
+    "holder_universe_policy": {
+      "dynamic_universe": true,
+      "fixed_three_fund_universe": false,
+      "discovery_rule": "PERIODIC_OFFICIAL_FILING_OR_ISSUER_SOURCE_DISCOVERY_USING_STABLE_SECURITY_IDENTITY_WHERE_AVAILABLE",
+      "ticker_only_identity_forbidden": true,
+      "high_frequency_monitoring_rule": "ONLY_HOLDERS_WITH_RELIABLE_CURRENT_SOURCE_ENTER_HIGH_FREQUENCY_MONITORING",
+      "inactive_holder_history_retained": true
+    },
+    "core_evidence": [
+      {
+        "metric_id": "STRC_VERIFIED_EXTERNAL_FUND_HOLDINGS_SHARES",
+        "meaning_zh": "已驗證、目前監測集合中的外部基金 STRC 合計持股。",
+        "level_required": true,
+        "delta_horizons": [
+          "7D",
+          "30D"
+        ],
+        "coverage_required": true
+      },
+      {
+        "metric_id": "STRC_HOLDER_BREADTH",
+        "meaning_zh": "可比較監測集合中增持、持平、減持基金的廣度。",
+        "horizons": [
+          "7D",
+          "30D"
+        ],
+        "minimum_output": [
+          "increased_holder_count",
+          "unchanged_holder_count",
+          "decreased_holder_count"
+        ],
+        "coverage_required": true
+      },
+      {
+        "metric_id": "STRC_PRICE_RETURN",
+        "meaning_zh": "與外部基金持股及公司回購證據並置的 STRC 價格變化；只作客觀並置，不宣稱因果。",
+        "horizons": [
+          "7D",
+          "30D"
+        ],
+        "formal_state_until_market_lock": "BLOCKED"
+      }
+    ],
+    "issuer_context": {
+      "reuse_overlay_id": "CRT-ISSUER-001",
+      "duplicate_repurchase_system_forbidden": true,
+      "issuer_repurchase_event_source": "EXISTING_REFLEXIVITY_ISSUER_FACTS_AND_DECISION_RELEVANT_EVENTS",
+      "judgment_questions_zh": [
+        "公司支撐減少時，外部基金持股與價格是否仍能維持？",
+        "公司回購增加時，外部基金是否同步增加、持平或撤退？",
+        "公司與外部需求的方向組合是否提高或降低 STRC 的支撐依賴風險？"
+      ]
+    }
+  },
+  "evidence_pack_mapping": {
+    "verified_stock_flow_breadth_facts": "asset_facts.items",
+    "issuer_repurchase_and_other_issuer_actions": "decision_relevant_events.items",
+    "unresolved_source_freshness_coverage_identity_horizon_or_market_window": "blockers.items",
+    "new_top_level_section": false
+  },
+  "gpt_only_judgments": [
+    "EXTERNAL_DEMAND_STRENGTHENING_OR_WEAKENING",
+    "MARKET_HANDOFF",
+    "ISSUER_SUPPORT_DEPENDENCY",
+    "HOLDER_STRUCTURE_RISK",
+    "ASSET_ROLE",
+    "CAPITAL_STRATEGY"
+  ],
+  "explicit_non_goals": [
+    "NO_BTC_ETF_SCORE",
+    "NO_STRC_ETF_SCORE",
+    "NO_NEW_CRT_LAYER",
+    "NO_NEW_LIGHT_THRESHOLD",
+    "NO_AUTONOMOUS_BUY_OR_SELL",
+    "NO_DAILY_GLOBAL_FUND_UNIVERSE_CRAWLER",
+    "NO_REQUIREMENT_TO_REBUILD_MATURE_BTC_ETF_DATA_FROM_ISSUERS",
+    "NO_CONTINUATION_OF_SUPERSEDED_STRC_SHADOW_PATCH_V0_2"
+  ],
+  "horizon_alignment": {
+    "canonical_crt_horizons": [
+      "1D",
+      "7D",
+      "30D"
+    ],
+    "meaning_zh": "沿用 current main 既有變化尺度；7D 作為約一個交易週的代理，30D 作為約一個交易月的代理，不另建 5D／20D 變化引擎。",
+    "separate_5d_20d_engine": false
+  }
+}
