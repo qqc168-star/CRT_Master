@@ -1,0 +1,76 @@
+{
+  "schema_version": "CRT_EXTERNAL_STRUCTURAL_DEMAND_SOURCE_REGISTRY_V0.1",
+  "contract_id": "CRT-EXTERNAL-STRUCTURAL-DEMAND-EVIDENCE-V0.1",
+  "base_sha": "0e7d1eed65f7efa3bde400665ee3eb49e271f71b",
+  "status": "SOURCE_PROOF_PARTIAL_READY",
+  "sources": [
+    {
+      "source_id": "GLASSNODE_US_SPOT_BTC_ETF",
+      "asset": "BTC",
+      "role": "PRIMARY_PROCESSED_SOURCE",
+      "state": "READY_CANDIDATE",
+      "metrics": [
+        "BTC_ETF_BALANCE_BTC",
+        "BTC_ETF_NET_FLOW_USD",
+        "BTC_ETF_FLOW_BREADTH"
+      ],
+      "local_transport_proven": true,
+      "notes": "Mature processed source; total values require contributing ETF coverage completeness."
+    },
+    {
+      "source_id": "FARSIDE_US_BTC_ETF_FLOW",
+      "asset": "BTC",
+      "role": "NON_BLOCKING_CROSS_CHECK",
+      "state": "LOCAL_FETCH_BLOCKED",
+      "metrics": [
+        "BTC_ETF_NET_FLOW_USD",
+        "BTC_ETF_FLOW_BREADTH"
+      ],
+      "local_transport_proven": false
+    },
+    {
+      "source_id": "STRIVE_STXT",
+      "asset": "STRC",
+      "role": "PRIMARY_VERIFIED_HOLDER",
+      "state": "READY_CANDIDATE",
+      "security_identity": {
+        "cusip": "594972853"
+      },
+      "metrics": [
+        "STRC_VERIFIED_EXTERNAL_FUND_HOLDINGS_SHARES"
+      ],
+      "local_transport_proven": true,
+      "identity_proven": true
+    },
+    {
+      "source_id": "ISHARES_PFF",
+      "asset": "STRC",
+      "role": "CANDIDATE_VERIFIED_HOLDER",
+      "state": "PARTIAL_IDENTITY_LOCK_REQUIRED",
+      "metrics": [
+        "STRC_VERIFIED_EXTERNAL_FUND_HOLDINGS_SHARES"
+      ],
+      "local_transport_proven": true,
+      "identity_proven_on_local_csv": false
+    },
+    {
+      "source_id": "VANECK_PFXF",
+      "asset": "STRC",
+      "role": "CANDIDATE_HOLDER",
+      "state": "BLOCKED_REDIRECT_LOOP",
+      "metrics": [],
+      "local_transport_proven": false
+    }
+  ],
+  "coverage": {
+    "btc": "PARTIAL",
+    "strc": "PARTIAL"
+  },
+  "governance": {
+    "formal_score": null,
+    "formal_threshold": null,
+    "action_output": "NONE",
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE"
+  }
+}
