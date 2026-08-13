@@ -106,5 +106,53 @@ class ExternalStructuralDemandContractTests(unittest.TestCase):
         self.assertIn("market", rules["market_response_lock"].lower())
 
 
+    def test_precision_follows_use_and_blocking_is_claim_scoped(self):
+        repo_root = ROOT.parent
+        core = (repo_root / "CRT_CORE_CONTRACT.md").read_text(encoding="utf-8")
+        pack_contract = (repo_root / "CRT_EVIDENCE_PACK_CONTRACT.md").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("## Evidence Precision Constitution", core)
+        self.assertIn("Precision follows the claim and decision use", core)
+        self.assertIn("Claim-Scoped Fail-Closed Rule", core)
+        self.assertIn("must not automatically invalidate independent evidence", core)
+        self.assertIn("reduce claim scope or precision", core)
+
+        self.assertIn(
+            "smallest affected claim, metric, or calculation scope",
+            pack_contract,
+        )
+        self.assertIn("tracked-basket trends remain usable", pack_contract)
+        self.assertIn("`PARTIAL` means limited scope, not unusable evidence", pack_contract)
+
+    def test_external_structural_demand_allows_proportional_time_precision(self):
+        rules = self.contract["common_evidence_rules"]
+
+        self.assertNotIn("source_as_of_ms", rules["required_metadata"])
+        self.assertIn(
+            "DO_NOT_INVENT_HIGHER_PRECISION",
+            rules["source_time_rule"],
+        )
+        self.assertIn(
+            "INDEPENDENT_VALID_EVIDENCE_REMAINS_VISIBLE",
+            rules["claim_scoped_blocking_rule"],
+        )
+
+        tiers = rules["precision_tiers"]
+        self.assertTrue(tiers["DIRECTIONAL_RESEARCH"]["tracked_basket_allowed"])
+        self.assertFalse(
+            tiers["DIRECTIONAL_RESEARCH"]["complete_universe_required"]
+        )
+        self.assertTrue(
+            tiers["DETERMINISTIC_COMPARABLE"]["comparable_scope_required"]
+        )
+        self.assertTrue(
+            tiers["FORMAL_ACTION_CRITICAL"][
+                "fail_closed_if_exact_claim_prerequisites_missing"
+            ]
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -20,7 +20,6 @@
   "common_evidence_rules": {
     "required_metadata": [
       "source_id",
-      "source_as_of_ms",
       "retrieved_at_ms",
       "evidence_hash",
       "coverage_state"
@@ -33,7 +32,46 @@
     "missing_rule": "MISSING_STALE_INVALID_OR_UNVERIFIABLE_CRITICAL_EVIDENCE_BLOCKS_NO_ZERO_FILL_NO_GUESSING",
     "empty_rule": "EMPTY_IS_NOT_ZERO_UNLESS_SCOPE_IS_COMPLETE_AND_VERIFIED_EMPTY",
     "causal_rule": "AUTOMATION_MAY_REPORT_STOCK_FLOW_BREADTH_AND_PRICE_FACTS_BUT_MUST_NOT_LABEL_MARKET_HANDOFF_SUPPORT_DEPENDENCY_OR_CAUSAL_EFFECT",
-    "market_response_lock": "PRICE_RESPONSE_AND_OTHER_MARKET_DEPENDENT_CALCULATIONS_REMAIN_BLOCKED_UNTIL_GENERIC_CURRENT_MAIN_MARKET_SOURCE_AND_WINDOW_LOCKS_ARE_APPROVED"
+    "market_response_lock": "PRICE_RESPONSE_AND_OTHER_MARKET_DEPENDENT_CALCULATIONS_REMAIN_BLOCKED_UNTIL_GENERIC_CURRENT_MAIN_MARKET_SOURCE_AND_WINDOW_LOCKS_ARE_APPROVED",
+    "source_time_rule": "SOURCE_AS_OF_MUST_BE_REPORTED_WITH_DECLARED_PRECISION;DATE_OR_PERIOD_PRECISION_IS_VALID_WHEN_SUFFICIENT_FOR_THE_CLAIM;DO_NOT_INVENT_HIGHER_PRECISION",
+    "claim_scoped_blocking_rule": "BLOCK_ONLY_THE_AFFECTED_CLAIM_METRIC_OR_CALCULATION;INDEPENDENT_VALID_EVIDENCE_REMAINS_VISIBLE",
+    "partial_evidence_rule": "PARTIAL_REAL_EVIDENCE_MAY_SUPPORT_DIRECTIONAL_OR_COMPARATIVE_JUDGMENT;SCOPE_PROVENANCE_AS_OF_AND_LIMITATIONS_MUST_BE_EXPLICIT",
+    "precision_tiers": {
+      "DIRECTIONAL_RESEARCH": {
+        "purpose": [
+          "TREND",
+          "DIRECTION",
+          "ACCELERATION",
+          "BREADTH",
+          "STRUCTURAL_CONTEXT"
+        ],
+        "complete_universe_required": false,
+        "millisecond_timestamp_required": false,
+        "tracked_basket_allowed": true
+      },
+      "DETERMINISTIC_COMPARABLE": {
+        "purpose": [
+          "1D_CHANGE",
+          "7D_CHANGE",
+          "30D_CHANGE"
+        ],
+        "comparable_scope_required": true,
+        "stable_metric_semantics_required": true,
+        "complete_universe_required": false
+      },
+      "FORMAL_ACTION_CRITICAL": {
+        "purpose": [
+          "EXACT_TOTAL",
+          "FORMAL_MODEL_INPUT",
+          "THRESHOLD_OR_GATE",
+          "MARKET_DEPENDENT_FORMULA",
+          "PRODUCTION",
+          "EXTERNAL_ACTION"
+        ],
+        "claim_required_precision_and_coverage_required": true,
+        "fail_closed_if_exact_claim_prerequisites_missing": true
+      }
+    }
   },
   "btc": {
     "role_zh": "借用成熟加工資料觀察傳統金融結構性資金對 BTC 的存量、流量與廣度，不從零重建每日 ETF 資料工廠。",

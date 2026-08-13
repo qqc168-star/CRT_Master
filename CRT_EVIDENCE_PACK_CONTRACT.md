@@ -25,7 +25,23 @@ For every decision-relevant source or family:
 - fallback state when formally allowed;
 - explicit BLOCKED reason when critical evidence is unusable.
 
-Critical missing/stale/invalid/unverifiable data must fail closed. No zero-fill, silent stale reuse, or guessed values.
+Critical missing/stale/invalid/unverifiable evidence must fail closed at the smallest affected claim, metric, or calculation scope. It must not cascade `BLOCKED` into independent valid evidence.
+
+When the strongest intended claim is unsupported, first reduce the claim to the strongest narrower statement actually supported by the evidence. For example, an unusable total-market field may block a total-market claim while verified constituent or tracked-basket trends remain usable.
+
+No zero-fill, silent stale reuse, guessed values, guessed identities, or fabricated timestamp precision is allowed.
+
+### Evidence Precision and Use
+
+Evidence precision must be proportional to its use.
+
+- Directional / research evidence may support trend, direction, breadth, acceleration, and structural context with explicitly partial or tracked-basket coverage.
+- Deterministic / comparable evidence requires stable semantics and comparable scope across observations, but does not require complete-universe coverage when the claim is explicitly limited to the tracked scope.
+- Formal / action-critical evidence requires the completeness and precision necessary for the exact formal claim.
+
+`PARTIAL` means limited scope, not unusable evidence. `BLOCKED` must identify the affected claim or calculation rather than erase neighboring valid facts.
+
+Automation should preserve real lower-precision evidence and label its limitations; GPT decides how much weight it deserves in qualitative judgment.
 
 ### 2. Six-Layer Market Evidence
 
