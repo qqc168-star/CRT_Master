@@ -1,7 +1,7 @@
 {
   "schema_version": "CRT_EXTERNAL_STRUCTURAL_DEMAND_EVIDENCE_V0.1",
   "contract_id": "CRT-EXTERNAL-STRUCTURAL-DEMAND-EVIDENCE-V0.1",
-  "status": "READY_FOR_INTEGRATION_PENDING_MAIN_MERGE",
+  "status": "CONTRACT_INTEGRATED_DATA_NOT_CONNECTED",
   "base_sha": "de10d6959bc2b862b668847550615d686e2c6c14",
   "purpose_zh": "以最小、可追溯的證據描述 BTC 與 STRC 的外部結構性需求，供 GPT 判斷需求韌性、公司支撐依賴與資產風險；不建立新分數、新門檻或新層。",
   "governance": {
