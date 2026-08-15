@@ -12,8 +12,8 @@
   "complete_visible_text": {
     "IBIT": "iShares Bitcoin Trust ETF IBIT\nNAV as of Aug 10, 2026\n$25.00\nNet Assets of Fund\n$250,000,000\nas of Aug 10, 2026\nShares Outstanding\n10,000,000\nas of Aug 10, 2026",
     "FBTC": "Fidelity Wise Origin Bitcoin Fund FBTC\nNav as of Aug 10, 2026 $25.00\nNet assets as of Aug 10, 2026 $250,000,000\nShares outstanding as of Aug 10, 2026 10,000,000",
-    "BITB": "Bitwise Bitcoin ETF BITB\nData as of 08/10/2026\nShares Outstanding 10,000,000\nNet Assets (AUM) $250,000,000\nNAV: $25.00",
-    "ARKB": "ARK 21Shares Bitcoin ETF ARKB\nValue as of Aug 10, 2026\nNAV $25.00\nAUM $250,000,000\nSHARES OUTSTANDING 10000000",
+    "BITB": "Bitwise Bitcoin ETF BITB\nFund Details\nData as of 08/10/2026\nShares Outstanding 10,000,000\nNet Assets (AUM) $250,000,000\nNet Asset Value (NAV) and Market Price\nData as of 08/10/2026\nNAV: $25.00",
+    "ARKB": "ARK 21Shares Bitcoin ETF ARKB\nFactsheet\n$25.00\nNAV\n$250,000,000\nAUM\nValue as of Aug 10, 2026\nAum\n$250,000,000\nNav per unit\n$25.00\nNet assets\n$250,000,000\nKey facts\nAs of\nAugust 10, 2026\nSHARES OUTSTANDING\n10000000",
     "BTCO": "Invesco Galaxy Bitcoin ETF BTCO\nData as of 08/10/2026\nNAV per Share $25.00\nNet Assets $250,000,000\nShares Outstanding 10,000,000",
     "EZBC": "Franklin Bitcoin ETF EZBC\nNAV $25.00 As of 08/10/2026\nTotal Net Assets $250,000,000 As of 08/10/2026\nShares Outstanding 10,000,000 As of 08/10/2026",
     "BRRR": "CoinShares Bitcoin ETF BRRR\nData as of 08/10/2026\nAuM USD 250,000,000\nNAV USD 25.00\nShares Outstanding 10,000,000",
@@ -22,6 +22,11 @@
     "GBTC": "Grayscale Bitcoin Trust ETF GBTC\nAS OF 08/10/2026\nASSETS UNDER MANAGEMENT (NON-GAAP) $250,000,000\nSHARES OUTSTANDING 10,000,000\nNET ASSET VALUE (NAV) PER SHARE $25.00",
     "BTC": "Grayscale Bitcoin Mini Trust ETF BTC\nAS OF 08/10/2026\nASSETS UNDER MANAGEMENT (NON-GAAP) $250,000,000\nSHARES OUTSTANDING 10,000,000\nNET ASSET VALUE (NAV) PER SHARE $25.00",
     "MSBT": "Morgan Stanley Bitcoin Trust MSBT\nAs of 08/10/2026\nNet Asset Value $25.00\nNet Assets $250,000,000\nShares Outstanding 10,000,000"
+  },
+  "first_live_layout_regressions": {
+    "IBIT": "iShares Bitcoin Trust ETF IBIT\nNAV as of\nAug 10, 2026\n$\n$\n25.00\nNet Assets of\nFund\n$250,000,000\nas of Aug 10, 2026\nShares\nOutstanding\n10,000,000\nas of\nAug 10, 2026",
+    "BITB": "Bitwise Bitcoin ETF BITB\nFund Details\nData as of\n08/10/2026\nTicker\nBITB\nShares Outstanding\n10,000,000\nMarketing Agent\nSynthetic Test Distributor\nNet Assets (AUM)\n$250,000,000\nDaily Volume (Shares)*\n1,234\nNet Asset Value (NAV) and Market Price\nData as of\n08/10/2026\nNAV:\n$25.00\nMarket Price:\n$25.10\nHistorical Performance\nData as of 08/07/2026",
+    "ARKB": "ARK 21Shares Bitcoin ETF ARKB\nFactsheet\n$\n25.00\nNAV\n$\n250,000,000\nAUM\n-\nManagement fee\n0.21%\nValue as of Aug 10, 2026\nAum\n$\n250,000,000\nSecurities outstanding\n-\nNav per unit\n$\n25.00\nNet assets\n$\n250,000,000\nKey facts\nAs of\nAugust 10, 2026\nSHARES OUTSTANDING\n10000000\nManagement fee\n0.21%"
   },
   "observed_surface_blockers": {
     "FBTC": {

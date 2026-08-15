@@ -143,6 +143,66 @@ class ResearchEtpIssuerAdapterTests(unittest.TestCase):
                     {"nav_per_share", "net_assets", "raw_shares_outstanding"},
                 )
 
+    def test_first_live_layout_regressions_parse_without_provider_artifacts(self):
+        expected = self.vectors["common_expected"]
+        for ticker, text in self.vectors["first_live_layout_regressions"].items():
+            with self.subTest(ticker=ticker):
+                snapshot = self._parse(ticker, text)
+                self.assertEqual(snapshot["observed_on"], expected["observed_on"])
+                self.assertEqual(snapshot["nav_per_share"], expected["nav_per_share"])
+                self.assertEqual(snapshot["net_assets"], expected["net_assets"])
+                self.assertEqual(
+                    snapshot["raw_shares_outstanding"],
+                    expected["raw_shares_outstanding"],
+                )
+                self.assertTrue(
+                    all(
+                        evidence["derived"] is False
+                        for evidence in snapshot["field_evidence"].values()
+                    )
+                )
+
+    def test_live_panel_date_disagreement_or_missing_panel_fails_closed(self):
+        bitb = self.vectors["first_live_layout_regressions"]["BITB"].replace(
+            "Net Asset Value (NAV) and Market Price\nData as of\n08/10/2026",
+            "Net Asset Value (NAV) and Market Price\nData as of\n08/07/2026",
+        )
+        with self.assertRaisesRegex(
+            self.adapters.IssuerAdapterError,
+            "SNAPSHOT_DATE_AMBIGUOUS",
+        ):
+            self._parse("BITB", bitb)
+
+        arkb = self.vectors["first_live_layout_regressions"]["ARKB"].replace(
+            "Key facts\nAs of\nAugust 10, 2026",
+            "Key facts\nAs of\nAugust 07, 2026",
+        )
+        with self.assertRaisesRegex(
+            self.adapters.IssuerAdapterError,
+            "SNAPSHOT_DATE_AMBIGUOUS",
+        ):
+            self._parse("ARKB", arkb)
+
+        bitb_missing = self.vectors["first_live_layout_regressions"]["BITB"].replace(
+            "Net Asset Value (NAV) and Market Price\nData as of\n08/10/2026",
+            "Net Asset Value (NAV) and Market Price\nUpdated\n08/07/2026",
+        )
+        with self.assertRaisesRegex(
+            self.adapters.IssuerAdapterError,
+            "SNAPSHOT_DATE_REQUIRED_PATTERN_MISSING",
+        ):
+            self._parse("BITB", bitb_missing)
+
+        arkb_missing = self.vectors["first_live_layout_regressions"]["ARKB"].replace(
+            "Key facts\nAs of\nAugust 10, 2026",
+            "Key facts\nUpdated\nAugust 07, 2026",
+        )
+        with self.assertRaisesRegex(
+            self.adapters.IssuerAdapterError,
+            "SNAPSHOT_DATE_REQUIRED_PATTERN_MISSING",
+        ):
+            self._parse("ARKB", arkb_missing)
+
     def test_six_observed_surface_gaps_fail_closed_with_precise_codes(self):
         for ticker, item in self.vectors["observed_surface_blockers"].items():
             with self.subTest(ticker=ticker):
@@ -169,7 +229,7 @@ class ResearchEtpIssuerAdapterTests(unittest.TestCase):
         )
         self.assertTrue(current["replay_eligible"])
 
-    def test_abbreviated_net_assets_are_rejected_even_when_arithmetic_looks_plausible(self):
+    def test_abbreviated_or_near_suffix_values_fail_closed(self):
         text = self.vectors["complete_visible_text"]["IBIT"].replace(
             "$250,000,000",
             "$250.00M",
@@ -179,6 +239,27 @@ class ResearchEtpIssuerAdapterTests(unittest.TestCase):
             "NET_ASSETS_ABBREVIATED_FORBIDDEN",
         ):
             self._parse("IBIT", text)
+
+        bitb = self.vectors["first_live_layout_regressions"]["BITB"]
+        for malformed in (
+            "$2.321Bn",
+            "$2.321 Bn",
+            "$2.321 Bn.",
+            "$2.321MM",
+            "$2.321 MM",
+            "$2.321 MM,",
+        ):
+            with self.subTest(malformed=malformed):
+                with self.assertRaisesRegex(
+                    self.adapters.IssuerAdapterError,
+                    "NET_ASSETS_ABBREVIATED_FORBIDDEN",
+                ):
+                    self._parse("BITB", bitb.replace("$250,000,000", malformed))
+        with self.assertRaisesRegex(
+            self.adapters.IssuerAdapterError,
+            "RAW_SHARES_OUTSTANDING_ABBREVIATED_FORBIDDEN",
+        ):
+            self._parse("BITB", bitb.replace("10,000,000", "67MM"))
 
     def test_source_url_identity_date_and_ambiguous_values_fail_closed(self):
         text = self.vectors["complete_visible_text"]["IBIT"]
