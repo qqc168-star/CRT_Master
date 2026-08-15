@@ -215,6 +215,21 @@ def parse_oi(payload: Any) -> dict[str, Any]:
     }
 
 
+def parse_btc_spot_ticker(payload: Any) -> dict[str, Any]:
+    row = _require_mapping(payload, "BTC spot ticker payload")
+    if row.get("symbol") != "BTCUSDT":
+        raise ContractViolation("BTC spot symbol must be BTCUSDT")
+    return {
+        "as_of_ms": _timestamp_ms(row.get("closeTime"), "closeTime"),
+        "symbol": "BTCUSDT",
+        "spot_price_usd": _finite(
+            row.get("lastPrice"),
+            "lastPrice",
+            positive=True,
+        ),
+    }
+
+
 def parse_funding(payload: Any) -> dict[str, Any]:
     if not isinstance(payload, list) or not payload:
         raise ContractViolation("Funding payload must be non-empty list")
@@ -328,6 +343,7 @@ PARSERS: dict[str, Callable[..., dict[str, Any]]] = {
     "FRED_LATEST_CSV_V1": parse_fred_latest,
     "BINANCE_OI_V1": parse_oi,
     "BINANCE_FUNDING_V1": parse_funding,
+    "BINANCE_SPOT_TICKER_24H_V1": parse_btc_spot_ticker,
     "COINMETRICS_CAPS_V1": parse_coinmetrics_caps,
 }
 
