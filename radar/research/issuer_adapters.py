@@ -20,11 +20,12 @@ SNAPSHOT_SCHEMA_VERSION = "CRT_ETP_ISSUER_NORMALIZED_SNAPSHOT_V0.1"
 CONTRACT_SCHEMA_VERSION = "CRT_ETP_ISSUER_ADAPTER_CONTRACT_V0.1"
 CONTRACT_STATUS = "ADAPTER_PROFILES_IMPLEMENTED_CAPTURE_NOT_STARTED_SURFACES_PARTIAL"
 EXPECTED_CONTRACT_SEMANTIC_SHA256 = (
-    "e09a618c9aabb430d2c5b5ac56a97e08bfc7db0c080c1a580d6b8c7e086cc42d"
+    "89bb83ad892929db1c212fe278fe56abeb23d13e18c2ead138eed42592a771f1"
 )
 ALLOWED_CONTENT_TYPES = {"text/html", "text/plain"}
 ALLOWED_EVIDENCE_CLASSES = {"CURRENT_FIRST_SEEN_CAPTURE", "SYNTHETIC_FIXTURE"}
 PROVEN_TICKERS = {"IBIT", "BITB", "ARKB", "HODL", "GBTC", "BTC"}
+REQUIRED_ALL_DATE_PATTERN_TICKERS = {"BITB", "ARKB"}
 BLOCKED_SURFACE_STATES = {
     "FBTC": "CROSS_OFFICIAL_SURFACE_DAILY_ALIGNMENT_NOT_PROVEN",
     "BTCO": "REQUIRED_NAV_AND_SHARES_NOT_PROVEN_ON_STATIC_SURFACE",
@@ -112,9 +113,10 @@ DATE_PATTERN = (
     r"|\d{1,2}/\d{1,2}/\d{4}"
     r"|\d{4}-\d{2}-\d{2})"
 )
+NUMBER_SUFFIX_PATTERN = r"(?:THOUSAND|MILLION|BILLION|BN|MM|MN|K|M|B)"
 NUMBER_PATTERN = (
-    r"(?:USD\s*)?\$?\(?[-+]?[0-9][0-9,]*(?:\.[0-9]+)?\)?"
-    r"(?:\s*(?:K|M|B|THOUSAND|MILLION|BILLION))?"
+    r"(?:USD\s*)?(?:\$\s*){0,2}\(?[-+]?[0-9][0-9,]*(?:\.[0-9]+)?\)?"
+    rf"(?:\s*{NUMBER_SUFFIX_PATTERN}\b|(?!\s*{NUMBER_SUFFIX_PATTERN}\b)(?![\w.,]))"
 )
 FIELD_CODES = {
     "nav_per_share": "NAV_PER_SHARE",
@@ -258,6 +260,9 @@ def _parse_decimal(raw: str, *, allow_abbreviated: bool, scale: Decimal, code: s
         "THOUSAND": Decimal(1_000),
         "MILLION": Decimal(1_000_000),
         "BILLION": Decimal(1_000_000_000),
+        "BN": Decimal(1_000_000_000),
+        "MM": Decimal(1_000_000),
+        "MN": Decimal(1_000_000),
         "K": Decimal(1_000),
         "M": Decimal(1_000_000),
         "B": Decimal(1_000_000_000),
@@ -298,12 +303,19 @@ def _extract_snapshot_date(text: str, profile: dict[str, Any]) -> date:
     patterns = profile.get("snapshot_date_patterns")
     if not isinstance(patterns, list) or not patterns:
         raise IssuerAdapterError("SNAPSHOT_DATE_PATTERN_MISSING")
+    require_all = profile.get("require_all_snapshot_date_patterns", False)
+    if not isinstance(require_all, bool):
+        raise IssuerAdapterError("SNAPSHOT_DATE_POLICY_INVALID")
     values: set[date] = set()
     for template in patterns:
+        pattern_values: set[date] = set()
         for match in _compile_pattern(template).finditer(text):
             raw = match.groupdict().get("date")
             if raw:
-                values.add(_parse_date(raw))
+                pattern_values.add(_parse_date(raw))
+        if require_all and not pattern_values:
+            raise IssuerAdapterError("SNAPSHOT_DATE_REQUIRED_PATTERN_MISSING")
+        values.update(pattern_values)
     if not values:
         raise IssuerAdapterError("SNAPSHOT_DATE_MISSING")
     if len(values) != 1:
@@ -726,6 +738,12 @@ def validate_adapter_contract(
                     _compile_pattern(pattern)
             except IssuerAdapterError:
                 errors.append(f"adapter contract profile {ticker} date patterns invalid")
+        require_all_dates = profile.get("require_all_snapshot_date_patterns", False)
+        if (
+            not isinstance(require_all_dates, bool)
+            or require_all_dates != (ticker in REQUIRED_ALL_DATE_PATTERN_TICKERS)
+        ):
+            errors.append(f"adapter contract profile {ticker} date policy invalid")
 
     btc_splits = profiles.get("BTC", {}).get("split_events")
     expected_btc_splits = [
