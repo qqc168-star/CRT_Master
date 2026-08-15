@@ -115,6 +115,18 @@ No essential CRT knowledge may depend on one chat session.
 
 Unapproved discussion may disappear. Approved knowledge that must survive context loss must be promoted into the repository.
 
+## Finding Retention Filter
+
+Every newly discovered viewpoint, indicator, rule, module, or proposed permanent CRT knowledge item must be re-examined through all three questions before promotion:
+
+1. **Necessity** - If this finding disappeared, would CRT materially lose decision quality, evidence integrity, or the ability to answer a North Star question?
+2. **Purpose** - What exact CRT decision, evidence task, or governance problem does the finding serve?
+3. **Specificity** - Does the finding address a demonstrated CRT gap directly, rather than duplicate an existing capability or expand scope without a concrete need?
+
+Failure on any one question means the finding must not be promoted into permanent CRT structure. It may remain as Research / Observation when it still has evidentiary value, or be discarded when it does not.
+
+Passing all three questions grants only eligibility for verification. It does not automatically create a formal metric, score, threshold, layer, model, production rule, or trading authority.
+
 ## Lean Rule
 
 Before adding a file, module, metric, process, or automation, ask:

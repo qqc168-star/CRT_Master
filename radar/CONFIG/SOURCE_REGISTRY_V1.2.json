@@ -111,6 +111,23 @@
       "role": "Formula-transparent MVRV and NUPL inputs",
       "source_id": "CRT-CONN-BTC-ONCHAIN-COINMETRICS-COMMUNITY-001",
       "transport": "HTTPS_JSON"
+    },
+    {
+      "authentication": "NONE",
+      "criticality": "NONCRITICAL_DISCLOSE_MISSING",
+      "documentation": "https://developers.binance.com/docs/binance-spot-api-docs/rest-api/market-data-endpoints",
+      "endpoint": "https://data-api.binance.vision/api/v3/ticker/24hr?symbol=BTCUSDT",
+      "formal_metric_authority": "NONE",
+      "implementation_state": "OPERATIONAL_WAKE_ONLY",
+      "input_family": "BTC_SPOT_PRICE",
+      "investment_threshold_authority": "NONE",
+      "max_age_seconds": 120,
+      "namespace": "AS-L3",
+      "parser_id": "BINANCE_SPOT_TICKER_24H_V1",
+      "provider": "Binance Spot Public Market Data",
+      "role": "BTCUSDT spot price for read-only intraday reanalysis wake-up",
+      "source_id": "CRT-CONN-BTC-SPOT-BINANCE-WAKE-001",
+      "transport": "HTTPS_JSON"
     }
   ],
   "status": "CANDIDATE_UNMERGED",

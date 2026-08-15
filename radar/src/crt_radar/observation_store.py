@@ -70,6 +70,10 @@ def _metric_rows(family: str, parsed: dict[str, Any]) -> list[tuple[str, float]]
             ("funding_rate", _finite(parsed.get("funding_rate"))),
             ("mark_price", _finite(parsed.get("mark_price"))),
         ]
+    if family == "BTC_SPOT_PRICE":
+        return [
+            ("btc_spot_price_usd", _finite(parsed.get("spot_price_usd"))),
+        ]
     if family == "LIQUIDATION_AGGREGATES":
         windows = parsed.get("windows")
         if not isinstance(windows, dict):
