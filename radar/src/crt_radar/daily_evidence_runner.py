@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .evidence_pack import build_evidence_pack
+from .intraday_reanalysis_runner import run_intraday_reanalysis
 from .liquidation_aggregator import SnapshotCorruption, load_verified_snapshot
+from .maturity_tracker import record_maturity_attempt
+from .observation_store import ObservationStore, extract_observations
+from .plain_language_notice import build_plain_language_notice
+from .private_profile import default_private_profile_path, load_private_profile
 from .runtime_freshness import apply_runtime_checks, assess_file_freshness
 from .source_gate_runner import (
     FetchResult,
@@ -58,6 +63,7 @@ def run_daily_evidence(
     runtime_checks: list[dict[str, Any]] | None = None,
     now_ms: int | None = None,
     generated_at_ms: int | None = None,
+    private_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_gate = run_source_gate(
         registry,
@@ -67,11 +73,40 @@ def run_daily_evidence(
         now_ms=now_ms,
     )
     source_gate = apply_runtime_checks(source_gate, runtime_checks)
+    recorded_at_ms = int(generated_at_ms) if generated_at_ms is not None else None
+    current_observations = extract_observations(source_gate, recorded_at_ms=recorded_at_ms)
+    btc_rows = [
+        row
+        for row in current_observations
+        if row.input_family == "BTC_SPOT_PRICE" and row.metric == "btc_spot_price_usd"
+    ]
+    if btc_rows:
+        current_btc = max(btc_rows, key=lambda row: row.as_of_ms)
+        with ObservationStore(observation_db) as store:
+            reanalysis_wake = run_intraday_reanalysis(store, current_btc)
+    else:
+        reanalysis_wake = {
+            "state": "NO_WAKE",
+            "reason": "BTC_SPOT_OBSERVATION_UNAVAILABLE",
+            "metric": "btc_spot_price_usd",
+            "input_family": "BTC_SPOT_PRICE",
+            "current_value": None,
+            "previous_value": None,
+            "percent_change": None,
+            "historical_percentile": None,
+            "baseline_count": 0,
+            "analyst_reanalysis_requested": False,
+            "action_output": "NONE",
+            "external_action_authority": "NONE",
+            "external_action_performed": False,
+        }
     return build_evidence_pack(
         source_gate,
         observation_db=observation_db,
         generated_at_ms=generated_at_ms,
         reflexivity_input=reflexivity_input,
+        reanalysis_wake=reanalysis_wake,
+        private_context=private_context,
     )
 
 
@@ -90,6 +125,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--liquidation-snapshot", type=Path, default=default_liquidation_snapshot_path())
     parser.add_argument("--observation-db", type=Path, default=default_observation_db_path())
     parser.add_argument("--output", type=Path, default=default_evidence_pack_path())
+    parser.add_argument("--private-profile", type=Path, default=default_private_profile_path())
+    parser.add_argument("--wake-output", type=Path, default=None)
+    parser.add_argument("--notice-output", type=Path, default=None)
+    parser.add_argument("--maturity-ledger", type=Path, default=None)
+    parser.add_argument("--maturity-status", type=Path, default=None)
     parser.add_argument(
         "--phone-l4-freshness-path",
         type=Path,
@@ -116,14 +156,24 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
 
+    private_context = load_private_profile(args.private_profile)
     pack = run_daily_evidence(
         registry,
         observation_db=args.observation_db,
         liquidation_aggregate_payload=liquidation_payload,
         probe_fetcher=probe_liquidation_stream,
         runtime_checks=runtime_checks,
+        private_context=private_context,
     )
     write_json_atomic(args.output, pack)
+    if args.wake_output is not None:
+        write_json_atomic(args.wake_output, pack["reanalysis_wake"])
+    if args.notice_output is not None:
+        write_json_atomic(args.notice_output, build_plain_language_notice(pack))
+    if (args.maturity_ledger is None) != (args.maturity_status is None):
+        raise ValueError("--maturity-ledger and --maturity-status must be supplied together")
+    if args.maturity_ledger is not None and args.maturity_status is not None:
+        record_maturity_attempt(args.maturity_ledger, args.maturity_status, pack)
     print(json.dumps(pack, ensure_ascii=False, indent=2))
 
     return 0 if pack.get("pack_state") in {"READY_FOR_ANALYST", "PARTIAL_FOR_ANALYST", "BLOCKED"} else 1

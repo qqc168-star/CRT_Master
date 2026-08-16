@@ -1,0 +1,128 @@
+{
+  "schema_version": "CRT_ISSUER_ANNOUNCEMENT_REGISTRY_V1",
+  "poll_policy": {
+    "baseline_rule": "FIRST_SUCCESSFUL_POLL_ESTABLISHES_BASELINE_WITHOUT_WAKE",
+    "new_event_rule": "ONLY_PREVIOUSLY_UNSEEN_OFFICIAL_EVENTS_REQUEST_REANALYSIS",
+    "source_failure_rule": "DISCLOSE_COVERAGE_GAP_WITHOUT_INVENTING_NO_EVENT",
+    "maximum_response_bytes": 5000000,
+    "timeout_seconds": 20
+  },
+  "material_forms": [
+    "8-K",
+    "10-Q",
+    "10-K",
+    "424B2",
+    "424B3",
+    "424B5",
+    "FWP",
+    "S-1",
+    "S-3",
+    "EFFECT",
+    "DEF 14A",
+    "PRE 14A"
+  ],
+  "material_title_keywords": [
+    "strc",
+    "strk",
+    "strf",
+    "strd",
+    "stre",
+    "sata",
+    "asst",
+    "dividend",
+    "distribution",
+    "return of capital",
+    "repurchase",
+    "buyback",
+    "offering",
+    "at-the-market",
+    "atm",
+    "capital",
+    "debt",
+    "bitcoin",
+    "btc",
+    "financial results",
+    "acquisition",
+    "merger",
+    "treasury",
+    "preferred",
+    "reserve policy",
+    "monetization",
+    "yield"
+  ],
+  "issuers": [
+    {
+      "issuer_id": "STRATEGY_INC",
+      "official_name": "Strategy Inc",
+      "name_aliases": [
+        "STRATEGY INC",
+        "MICROSTRATEGY INC"
+      ],
+      "cik": "0001050446",
+      "symbols": [
+        "MSTR",
+        "STRC",
+        "STRK",
+        "STRF",
+        "STRD",
+        "STRE"
+      ],
+      "position_relevance": [
+        "STRC_ISSUER",
+        "DIVIDEND_POLICY",
+        "RETURN_OF_CAPITAL",
+        "REPURCHASE",
+        "CAPITAL_STRUCTURE",
+        "BTC_TREASURY"
+      ],
+      "sec_submissions_url": "https://data.sec.gov/submissions/CIK0001050446.json",
+      "sec_allowed_hosts": [
+        "data.sec.gov",
+        "www.sec.gov"
+      ],
+      "press_archive_url": "https://www.strategy.com/press",
+      "press_mode": "DISCOVER_LINKS",
+      "press_allowed_hosts": [
+        "www.strategy.com",
+        "strategy.com"
+      ]
+    },
+    {
+      "issuer_id": "STRIVE_INC",
+      "official_name": "Strive, Inc.",
+      "name_aliases": [
+        "STRIVE, INC.",
+        "ASSET ENTITIES INC."
+      ],
+      "cik": "0001920406",
+      "symbols": [
+        "ASST",
+        "SATA"
+      ],
+      "position_relevance": [
+        "STRC_CORPORATE_HOLDER",
+        "BTC_TREASURY",
+        "CAPITAL_STRUCTURE",
+        "SATA_DIVIDEND_POLICY"
+      ],
+      "sec_submissions_url": "https://data.sec.gov/submissions/CIK0001920406.json",
+      "sec_allowed_hosts": [
+        "data.sec.gov",
+        "www.sec.gov"
+      ],
+      "press_archive_url": "https://investors.strive.com/news-events/news-releases/",
+      "press_feed_url": "https://investors.strive.com/feed/PressRelease.svc/GetPressReleaseList?LanguageId=1&bodyType=0&pressReleaseDateFilter=1&categoryId=00000000-0000-0000-0000-000000000000&pageSize=-1&pageNumber=0&tagList=&includeTags=true&year=-1&excludeSelection=1",
+      "press_mode": "Q4_PUBLIC_JSON",
+      "press_allowed_hosts": [
+        "investors.strive.com"
+      ]
+    }
+  ],
+  "authority": {
+    "action_output": "NONE",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "formal_score_authority": "NONE",
+    "production": "NOT_APPROVED"
+  }
+}

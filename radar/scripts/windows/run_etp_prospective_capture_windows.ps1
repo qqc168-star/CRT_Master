@@ -8,7 +8,11 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 Set-Location $Root
 $Python = Join-Path $Root ".venv\Scripts\python.exe"
 if (-not (Test-Path $Python)) {
-    throw "PYTHON_VENV_MISSING_RUN_SETUP_WINDOWS_PS1"
+    $PythonCommand = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $PythonCommand) {
+        throw "PYTHON_NOT_FOUND"
+    }
+    $Python = $PythonCommand.Source
 }
 if (-not $ArchiveRoot) {
     $ArchiveRoot = Join-Path $Root "runtime\etp_prospective_capture"

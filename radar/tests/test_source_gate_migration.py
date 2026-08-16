@@ -9,9 +9,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from crt_radar.source_gate_runner import FetchResult, parse_coinmetrics_caps, run_source_gate
+from crt_radar.source_gate_runner import FetchResult, parse_coinmetrics_caps, parse_funding, run_source_gate
 from crt_radar.liquidation_aggregator import canonical_json_bytes, sha256_hex
 from crt_radar.source_registry import RegistryError, SourceRegistry
+from layer_fixtures import supplemental_overrides
 
 
 REGISTRY_PATH = ROOT / "CONFIG" / "SOURCE_REGISTRY_V1.2.json"
@@ -73,6 +74,7 @@ class SourceGateMigrationTests(unittest.TestCase):
                 },
             ),
         }
+        self.overrides.update(supplemental_overrides(self.registry, NOW_MS))
 
     def aggregate(self, *, coverage=1.0, as_of_ms=NOW_MS - 30_000):
         blocked = [] if coverage >= 0.95 else ["COVERAGE_BELOW_0.95"]
@@ -122,6 +124,40 @@ class SourceGateMigrationTests(unittest.TestCase):
         base["snapshot_id"] = sha256_hex(canonical_json_bytes(base))
         base["snapshot_hash"] = sha256_hex(canonical_json_bytes(base))
         return base
+
+    def test_funding_three_day_mean_accepts_exchange_millisecond_jitter(self):
+        start = NOW_MS - 8 * 28_800_000
+        jitter_ms = [0, 0, 1, 1, 3, 2, 0, 0, 2]
+        rates = [0.00001 * index for index in range(1, 10)]
+        payload = [
+            {
+                "symbol": "BTCUSDT",
+                "fundingRate": str(rate),
+                "fundingTime": start + index * 28_800_000 + jitter_ms[index],
+                "markPrice": "64000",
+            }
+            for index, rate in enumerate(rates)
+        ]
+
+        parsed = parse_funding(payload)
+
+        self.assertAlmostEqual(parsed["abs_funding_3d_mean_bp"], 10_000 * sum(rates) / len(rates))
+
+    def test_funding_three_day_mean_rejects_missing_interval(self):
+        start = NOW_MS - 8 * 28_800_000
+        payload = [
+            {
+                "symbol": "BTCUSDT",
+                "fundingRate": "0.0001",
+                "fundingTime": start + index * 28_800_000 + (60_000 if index >= 4 else 0),
+                "markPrice": "64000",
+            }
+            for index in range(9)
+        ]
+
+        parsed = parse_funding(payload)
+
+        self.assertNotIn("abs_funding_3d_mean_bp", parsed)
 
     def test_registry_uses_market_route_for_force_order(self):
         self.assertEqual(self.probe.raw["endpoint_category"], "MARKET")

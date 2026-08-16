@@ -21,6 +21,38 @@ FIRST_SLICE_REQUIRED_FAMILIES = {
     "LIQUIDATION_AGGREGATES",
 }
 FIRST_SLICE_OPTIONAL_FAMILIES = {"ONCHAIN_VALUE"}
+SIX_LAYER_REQUIRED_METRICS = {
+    "L1": {
+        "core_inflation_acceleration",
+        "unemployment_deterioration",
+        "real_policy_rate",
+    },
+    "L2": {
+        "broad_usd_20d_log_change",
+        "real_10y_yield_20d_change_bp",
+        "nominal_2y_yield_20d_change_bp",
+    },
+    "L3": {
+        "stablecoin_supply_30d_log_change",
+        "spot_btc_etp_flow_20d_pct_aum",
+        "high_yield_oas_20d_change_bp",
+    },
+    "L4": {
+        "oi_to_market_cap_pct",
+        "abs_funding_3d_mean_bp",
+        "liquidation_intensity_24h_pct",
+        "short_minus_long_liquidation_share_24h",
+    },
+    "L5": {"mvrv", "nupl", "realized_cap_30d_log_change"},
+    "L6": {
+        "close_minus_sma200_over_atr20",
+        "sma50_minus_sma200_over_atr20",
+        "return_20d_over_atr_vol",
+        "cvd_20d_share",
+    },
+}
+LOCKED_LAYER_WEIGHTS = {"L1": 20, "L2": 20, "L3": 17, "L4": 25, "L5": 13, "L6": 5}
+LOCKED_LIGHT_THRESHOLDS = [-60, -35, 35, 60]
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -67,7 +99,51 @@ def _group_layers(observations: list[Observation]) -> dict[str, Any]:
             "quality_state": obs.quality_state,
             "evidence_hash": obs.evidence_hash,
         }
+    for layer_name, layer in layers.items():
+        required = SIX_LAYER_REQUIRED_METRICS.get(layer_name, set())
+        missing = sorted(required - set(layer["metrics"]))
+        layer["required_metrics"] = sorted(required)
+        layer["missing_required_metrics"] = missing
+        layer["status"] = "VALID" if not missing else "PARTIAL"
     return layers
+
+
+def _model_status(layers: dict[str, Any]) -> dict[str, Any]:
+    missing_by_layer: dict[str, list[str]] = {}
+    for layer_name, required in SIX_LAYER_REQUIRED_METRICS.items():
+        present = set(layers.get(layer_name, {}).get("metrics", {}))
+        missing = sorted(required - present)
+        if missing:
+            missing_by_layer[layer_name] = missing
+
+    evidence_blockers = [
+        f"{layer_name}_{metric}_MISSING"
+        for layer_name, metrics in missing_by_layer.items()
+        for metric in metrics
+    ]
+    if "L6" in layers:
+        evidence_blockers.append("L6_FORMAL_THREE_VENUE_COMPOSITE_UNAVAILABLE")
+    return {
+        "six_layer_evidence": {
+            "state": "COMPLETE_DIRECTIONAL" if not missing_by_layer else "BLOCKED",
+            "missing_by_layer": missing_by_layer,
+            "blocked_reasons": sorted(set(evidence_blockers)),
+        },
+        "locked_formal_scoring": {
+            "state": "BLOCKED",
+            "reason": "LOCKED_FORMAL_SCORING_EXECUTABLE_UNAVAILABLE_IN_CURRENT_MAIN",
+            "layer_weights_percent": LOCKED_LAYER_WEIGHTS,
+            "light_thresholds": LOCKED_LIGHT_THRESHOLDS,
+            "modification_authority": "NONE",
+            "score": None,
+        },
+        "btc_season_router": {
+            "state": "BLOCKED",
+            "reason": "BTC_SEASON_ROUTER_EXECUTABLE_UNAVAILABLE_IN_CURRENT_MAIN",
+            "season": None,
+            "analyst_judgment_required": True,
+        },
+    }
 
 
 def _data_health(source_gate: dict[str, Any]) -> dict[str, Any]:
@@ -134,6 +210,8 @@ def build_evidence_pack(
     observation_db: str | Path,
     generated_at_ms: int | None = None,
     reflexivity_input: dict[str, Any] | None = None,
+    reanalysis_wake: dict[str, Any] | None = None,
+    private_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
         raise ValueError("source_gate must be an object")
@@ -147,6 +225,7 @@ def build_evidence_pack(
         changes = compute_changes(store, observations)
         top_changes = distill_top_changes(changes, limit=8)
 
+    layers = _group_layers(observations)
     pack: dict[str, Any] = {
         "schema_version": PACK_SCHEMA_VERSION,
         "action_output": "NONE",
@@ -154,10 +233,10 @@ def build_evidence_pack(
         "source_gate_run_id": source_gate.get("run_id"),
         "source_gate_idempotency_key": source_gate.get("idempotency_key"),
         "scope": {
-            "slice": "L2_L4_L5_FIRST_SLICE",
-            "available_layers": ["L2", "L4", "L5"],
-            "not_yet_in_slice": ["L1", "L3", "L6"],
-            "note": "This pack is not a complete six-layer CRT judgment input yet.",
+            "slice": "SIX_LAYER_EVIDENCE_TRANSITION_V0.3",
+            "available_layers": sorted(layers),
+            "not_yet_in_slice": sorted(set(SIX_LAYER_REQUIRED_METRICS) - set(layers)),
+            "note": "All available layers remain evidence only; formal scoring and BTC season routing stay fail-closed until their verified executables are recovered.",
         },
         "authority": {
             "production": "NOT_APPROVED",
@@ -166,7 +245,8 @@ def build_evidence_pack(
             "analyst_judgment_required": True,
         },
         "data_health": _data_health(source_gate),
-        "layers": _group_layers(observations),
+        "layers": layers,
+        "model_status": _model_status(layers),
         "changes": changes,
         "distillation": {
             "top_changes": top_changes,
@@ -184,6 +264,10 @@ def build_evidence_pack(
             "capital_strategy": None,
         },
     }
+    if reanalysis_wake is not None:
+        pack["reanalysis_wake"] = deepcopy(reanalysis_wake)
+    if private_context is not None:
+        pack["private_context"] = deepcopy(private_context)
     pack["pack_state"] = _pack_state(source_gate, evidence_by_family, changes)
     pack["evidence_pack_hash"] = _sha256(pack)
     return pack

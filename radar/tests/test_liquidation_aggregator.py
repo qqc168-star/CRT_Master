@@ -20,6 +20,7 @@ from crt_radar.liquidation_aggregator import (
 from crt_radar.liquidation_collector import PersistentLiquidationCollector
 from crt_radar.source_gate_runner import FetchResult, run_source_gate
 from crt_radar.source_registry import SourceRegistry
+from layer_fixtures import supplemental_overrides
 
 NOW_MS = 1785549120000
 REGISTRY_PATH = ROOT / "CONFIG" / "SOURCE_REGISTRY_V1.2.json"
@@ -177,6 +178,7 @@ class LiquidationAggregatorTests(unittest.TestCase):
             oi.source_id: FetchResult(oi.source_id, "OK", payload={"symbol":"BTCUSDT","openInterest":"100","time":NOW_MS-1000}),
             funding.source_id: FetchResult(funding.source_id, "OK", payload=[{"symbol":"BTCUSDT","fundingRate":"0.0001","fundingTime":NOW_MS-1000,"markPrice":"64000"}]),
         }
+        overrides.update(supplemental_overrides(self.registry, NOW_MS))
         result = run_source_gate(
             self.registry,
             fetch_overrides=overrides,
@@ -197,9 +199,9 @@ class LiquidationAggregatorTests(unittest.TestCase):
         for forbidden in ("place_order", "create_order", "cancel_order", "api_key", "secret_key"):
             self.assertNotIn(forbidden, text.lower())
 
-    def test_registry_declares_live_shadow_harness_ready_not_run(self):
+    def test_registry_declares_live_read_only_collector(self):
         aggregate = self.registry.by_input_family("LIQUIDATION_AGGREGATES")
-        self.assertEqual(aggregate.raw["implementation_state"], "LIVE_SHADOW_HARNESS_READY_NOT_RUN")
+        self.assertEqual(aggregate.raw["implementation_state"], "LIVE_READ_ONLY_COLLECTOR")
         self.assertEqual(aggregate.raw["snapshot_schema"], "CRT_LIQ_AGGREGATE_SNAPSHOT_V1")
 
     def test_source_gate_rejects_aggregator_snapshot_with_blocked_quality(self):
@@ -219,6 +221,7 @@ class LiquidationAggregatorTests(unittest.TestCase):
             oi.source_id: FetchResult(oi.source_id, "OK", payload={"symbol":"BTCUSDT","openInterest":"100","time":NOW_MS-1000}),
             funding.source_id: FetchResult(funding.source_id, "OK", payload=[{"symbol":"BTCUSDT","fundingRate":"0.0001","fundingTime":NOW_MS-1000,"markPrice":"64000"}]),
         }
+        overrides.update(supplemental_overrides(self.registry, NOW_MS))
         result = run_source_gate(
             self.registry,
             fetch_overrides=overrides,

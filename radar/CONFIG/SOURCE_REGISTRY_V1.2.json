@@ -7,7 +7,7 @@
   "formal_parent": "CRT Master V1.9",
   "generated_at": "2026-08-01T08:20:00+08:00",
   "production_profile": "READ_ONLY_DECISION_SUPPORT",
-  "registry_id": "CRT-RADAR-SOURCE-REGISTRY-V1.3-WIP",
+  "registry_id": "CRT-RADAR-SOURCE-REGISTRY-V1.4-WIP",
   "sources": [
     {
       "authentication": "NONE",
@@ -42,7 +42,7 @@
       "authentication": "NONE",
       "criticality": "CRITICAL_FAIL_CLOSED",
       "documentation": "https://developers.binance.com/en/docs/products/derivatives-trading-usds-futures/market-data/rest-api/Get-Funding-Rate-History",
-      "endpoint": "https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=3",
+      "endpoint": "https://fapi.binance.com/fapi/v1/fundingRate?symbol=BTCUSDT&limit=9",
       "input_family": "FUNDING_RATE",
       "max_age_seconds": 32400,
       "namespace": "AS-L4",
@@ -77,7 +77,7 @@
       "criticality": "CRITICAL_FAIL_CLOSED",
       "documentation": "DATA_CONTRACT.md; OPERATIONS.md; CONFIG/LIVE_SHADOW_POLICY_V1.json",
       "endpoint": "runtime/snapshots/latest.json",
-      "implementation_state": "LIVE_SHADOW_HARNESS_READY_NOT_RUN",
+      "implementation_state": "LIVE_READ_ONLY_COLLECTOR",
       "input_family": "LIQUIDATION_AGGREGATES",
       "integrity_rule": "snapshot_hash must verify; coverage, freshness and anomalies fail closed",
       "live_shadow_authority": "NO_FORMAL_AUTHORITY",
@@ -94,22 +94,126 @@
     },
     {
       "authentication": "NONE",
+      "criticality": "CRITICAL_FAIL_CLOSED",
+      "documentation": "https://fred.stlouisfed.org/series/CPILFESL; https://fred.stlouisfed.org/series/UNRATE; https://fred.stlouisfed.org/series/EFFR; https://fred.stlouisfed.org/series/PCEPILFE",
+      "endpoint": null,
+      "endpoints": {
+        "core_cpi": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=CPILFESL",
+        "unemployment": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=UNRATE",
+        "effr": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=EFFR",
+        "core_pce": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=PCEPILFE"
+      },
+      "endpoint_transports": {
+        "core_cpi": "HTTPS_CSV",
+        "unemployment": "HTTPS_CSV",
+        "effr": "HTTPS_CSV",
+        "core_pce": "HTTPS_CSV"
+      },
+      "input_family": "MACRO_CONTEXT",
+      "max_age_seconds": 4000000,
+      "namespace": "AS-L1",
+      "parser_id": "FRED_MACRO_CONTEXT_V1",
+      "provider": "Federal Reserve Bank of St. Louis / official statistical agencies",
+      "role": "Current L1 macro evidence with locked candidate formulas",
+      "source_id": "CRT-CONN-MACRO-FRED-CONTEXT-001",
+      "transport": "MULTI_HTTPS_CSV"
+    },
+    {
+      "authentication": "NONE",
+      "criticality": "CRITICAL_FAIL_CLOSED",
+      "documentation": "https://fred.stlouisfed.org/series/DTWEXBGS; https://fred.stlouisfed.org/series/DFII10; https://fred.stlouisfed.org/series/DGS2",
+      "endpoint": null,
+      "endpoints": {
+        "broad_usd": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DTWEXBGS",
+        "real_10y": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DFII10",
+        "nominal_2y": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS2"
+      },
+      "endpoint_transports": {
+        "broad_usd": "HTTPS_CSV",
+        "real_10y": "HTTPS_CSV",
+        "nominal_2y": "HTTPS_CSV"
+      },
+      "input_family": "RATES_CONTEXT",
+      "max_age_seconds": 864000,
+      "namespace": "AS-L2",
+      "parser_id": "FRED_RATES_CONTEXT_V1",
+      "provider": "Federal Reserve Bank of St. Louis / Board of Governors",
+      "role": "Twenty-trading-day USD and rates evidence",
+      "source_id": "CRT-CONN-RATES-FRED-CONTEXT-001",
+      "transport": "MULTI_HTTPS_CSV"
+    },
+    {
+      "authentication": "NONE",
+      "criticality": "CRITICAL_FAIL_CLOSED",
+      "documentation": "https://github.com/DefiLlama/peggedassets-server; https://fred.stlouisfed.org/series/BAMLH0A0HYM2",
+      "endpoint": null,
+      "endpoints": {
+        "usdt": "https://stablecoins.llama.fi/stablecoincharts/all?stablecoin=1",
+        "usdc": "https://stablecoins.llama.fi/stablecoincharts/all?stablecoin=2",
+        "high_yield_oas": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=BAMLH0A0HYM2"
+      },
+      "endpoint_transports": {
+        "usdt": "HTTPS_JSON",
+        "usdc": "HTTPS_JSON",
+        "high_yield_oas": "HTTPS_CSV"
+      },
+      "input_family": "CREDIT_LIQUIDITY_CONTEXT",
+      "max_age_seconds": 864000,
+      "namespace": "AS-L3",
+      "parser_id": "CRT_CREDIT_LIQUIDITY_CONTEXT_V1",
+      "provider": "DefiLlama peggedassets-server / Federal Reserve Bank of St. Louis",
+      "role": "USDT plus USDC supply and high-yield credit context; official ETP history remains separately fail-closed",
+      "source_id": "CRT-CONN-CREDIT-LIQUIDITY-CONTEXT-001",
+      "transport": "MULTI_HTTPS_MIXED"
+    },
+    {
+      "authentication": "NONE",
+      "criticality": "CRITICAL_FAIL_CLOSED",
+      "documentation": "https://developers.binance.com/en/docs/derivatives/usds-margined-futures/market-data/rest-api/Open-Interest-Statistics",
+      "endpoint": "https://fapi.binance.com/futures/data/openInterestHist?symbol=BTCUSDT&period=5m&limit=1",
+      "input_family": "OPEN_INTEREST_NOTIONAL",
+      "max_age_seconds": 900,
+      "namespace": "AS-L4",
+      "parser_id": "BINANCE_OI_NOTIONAL_V1",
+      "provider": "Binance USD-M Futures",
+      "role": "BTCUSDT open-interest notional for leverage normalization",
+      "source_id": "CRT-CONN-BTC-DERIV-BINANCE-OI-NOTIONAL-001",
+      "transport": "HTTPS_JSON"
+    },
+    {
+      "authentication": "NONE",
       "criticality": "NONCRITICAL_DISCLOSE_MISSING",
       "documentation": "https://docs.coinmetrics.io/access-our-data/api",
-      "documentation_secondary": "https://docs.coinmetrics.io/asset-metrics/economics/rvtadj",
-      "endpoint": "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics?assets=btc&metrics=CapMrktCurUSD%2CCapRealUSD&frequency=1d&page_size=2&paging_from=end",
+      "documentation_secondary": "https://docs.coinmetrics.io/asset-metrics/economics/rvtadj; https://docs.coinmetrics.io/api/v4/",
+      "endpoint": "https://community-api.coinmetrics.io/v4/timeseries/asset-metrics?assets=btc&metrics=CapMVRVCur%2CCapMrktCurUSD&frequency=1d&limit_per_asset=40&paging_from=end",
       "formula_contract": {
-        "mvrv": "CapMrktCurUSD / CapRealUSD",
-        "nupl": "(CapMrktCurUSD - CapRealUSD) / CapMrktCurUSD"
+        "mvrv": "Coin Metrics CapMVRVCur",
+        "nupl": "1 - 1 / CapMVRVCur",
+        "realized_cap_usd": "CapMrktCurUSD / CapMVRVCur"
       },
-      "implementation_state": "PARSER_OFFLINE_PASS_LIVE_NOT_RUN",
+      "implementation_state": "COMMUNITY_DIRECT_MVRV_WITH_EQUIVALENT_NUPL_IDENTITY",
       "input_family": "ONCHAIN_VALUE",
       "max_age_seconds": 172800,
       "namespace": "AS-L5",
-      "parser_id": "COINMETRICS_CAPS_V1",
+      "parser_id": "COINMETRICS_MVRV_COMMUNITY_V1",
       "provider": "Coin Metrics Community API",
       "role": "Formula-transparent MVRV and NUPL inputs",
       "source_id": "CRT-CONN-BTC-ONCHAIN-COINMETRICS-COMMUNITY-001",
+      "transport": "HTTPS_JSON"
+    },
+    {
+      "authentication": "NONE",
+      "criticality": "CRITICAL_FAIL_CLOSED",
+      "documentation": "https://developers.binance.com/docs/binance-spot-api-docs/rest-api/market-data-endpoints",
+      "endpoint": "https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=1d&limit=210",
+      "formal_composite_authority": "NONE",
+      "input_family": "PRICE_STRUCTURE_CONTEXT",
+      "max_age_seconds": 172800,
+      "namespace": "AS-L6",
+      "parser_id": "BINANCE_PRICE_STRUCTURE_PROXY_V1",
+      "provider": "Binance Spot Public Market Data",
+      "role": "Directional L6 price structure and taker-volume proxy pending three-venue formal composite recovery",
+      "source_id": "CRT-CONN-BTC-SPOT-PRICE-STRUCTURE-PROXY-001",
       "transport": "HTTPS_JSON"
     },
     {
@@ -131,5 +235,5 @@
     }
   ],
   "status": "CANDIDATE_UNMERGED",
-  "version": "1.3-wip"
+  "version": "1.4-wip"
 }
