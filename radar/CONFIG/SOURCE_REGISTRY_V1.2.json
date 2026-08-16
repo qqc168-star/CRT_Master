@@ -77,7 +77,7 @@
       "criticality": "CRITICAL_FAIL_CLOSED",
       "documentation": "DATA_CONTRACT.md; OPERATIONS.md; CONFIG/LIVE_SHADOW_POLICY_V1.json",
       "endpoint": "runtime/snapshots/latest.json",
-      "implementation_state": "LIVE_SHADOW_HARNESS_READY_NOT_RUN",
+      "implementation_state": "LIVE_READ_ONLY_COLLECTOR",
       "input_family": "LIQUIDATION_AGGREGATES",
       "integrity_rule": "snapshot_hash must verify; coverage, freshness and anomalies fail closed",
       "live_shadow_authority": "NO_FORMAL_AUTHORITY",

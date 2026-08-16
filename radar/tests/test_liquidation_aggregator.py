@@ -199,9 +199,9 @@ class LiquidationAggregatorTests(unittest.TestCase):
         for forbidden in ("place_order", "create_order", "cancel_order", "api_key", "secret_key"):
             self.assertNotIn(forbidden, text.lower())
 
-    def test_registry_declares_live_shadow_harness_ready_not_run(self):
+    def test_registry_declares_live_read_only_collector(self):
         aggregate = self.registry.by_input_family("LIQUIDATION_AGGREGATES")
-        self.assertEqual(aggregate.raw["implementation_state"], "LIVE_SHADOW_HARNESS_READY_NOT_RUN")
+        self.assertEqual(aggregate.raw["implementation_state"], "LIVE_READ_ONLY_COLLECTOR")
         self.assertEqual(aggregate.raw["snapshot_schema"], "CRT_LIQ_AGGREGATE_SNAPSHOT_V1")
 
     def test_source_gate_rejects_aggregator_snapshot_with_blocked_quality(self):

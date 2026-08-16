@@ -392,7 +392,13 @@ def parse_funding(payload: Any) -> dict[str, Any]:
     if len(payload) >= 9:
         selected = payload[-9:]
         timestamps = [_timestamp_ms(item.get("fundingTime"), "fundingTime") for item in selected]
-        if all(right - left == 28_800_000 for left, right in zip(timestamps, timestamps[1:])):
+        # Binance settlement timestamps can differ from the nominal eight-hour
+        # boundary by a few milliseconds. Preserve the locked three-day window
+        # while accepting transport timestamp jitter, never a missing interval.
+        if all(
+            abs((right - left) - 28_800_000) <= 5_000
+            for left, right in zip(timestamps, timestamps[1:])
+        ):
             result["abs_funding_3d_mean_bp"] = 10_000.0 * abs(
                 statistics.fmean(_finite(item.get("fundingRate"), "fundingRate") for item in selected)
             )
