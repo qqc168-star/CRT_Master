@@ -13,6 +13,7 @@ from crt_radar.daily_evidence_runner import run_daily_evidence, write_json_atomi
 from crt_radar.liquidation_aggregator import canonical_json_bytes, sha256_hex
 from crt_radar.source_gate_runner import FetchResult
 from crt_radar.source_registry import SourceRegistry
+from layer_fixtures import supplemental_overrides
 
 
 REGISTRY_PATH = ROOT / "CONFIG" / "SOURCE_REGISTRY_V1.2.json"
@@ -64,6 +65,7 @@ class DailyEvidenceRunnerTests(unittest.TestCase):
                 },
             ),
         }
+        self.overrides.update(supplemental_overrides(self.registry, NOW_MS))
 
     def aggregate(self) -> dict:
         as_of_ms = NOW_MS - 30_000

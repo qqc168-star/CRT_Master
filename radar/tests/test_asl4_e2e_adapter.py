@@ -13,6 +13,7 @@ from crt_radar.e2e_bridge import build_bridge_payload
 from crt_radar.liquidation_aggregator import canonical_json_bytes, sha256_hex
 from crt_radar.source_gate_runner import FetchResult, run_source_gate
 from crt_radar.source_registry import SourceRegistry
+from layer_fixtures import supplemental_overrides
 
 
 REGISTRY_PATH = ROOT / "CONFIG" / "SOURCE_REGISTRY_V1.2.json"
@@ -53,6 +54,7 @@ class ASL4AdapterTests(unittest.TestCase):
                 payload={"connected": True, "message_count": 0, "metric_authority": "NONE"},
             ),
         }
+        self.overrides.update(supplemental_overrides(self.registry, NOW_MS))
 
     def aggregate(self, *, coverage=1.0, as_of_ms=NOW_MS - 30_000):
         blocked = [] if coverage >= 0.95 else ["COVERAGE_BELOW_0.95"]

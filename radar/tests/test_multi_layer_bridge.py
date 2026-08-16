@@ -9,6 +9,7 @@ from crt_radar.liquidation_aggregator import canonical_json_bytes, sha256_hex
 from crt_radar.multi_layer_bridge import build_multi_layer_bridge
 from crt_radar.source_gate_runner import FetchResult, run_source_gate
 from crt_radar.source_registry import SourceRegistry
+from layer_fixtures import supplemental_overrides
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,6 +61,7 @@ class MultiLayerBridgeTests(unittest.TestCase):
                 },
             ),
         }
+        self.overrides.update(supplemental_overrides(self.registry, NOW_MS))
 
     def aggregate(self):
         as_of_ms = NOW_MS - 30_000

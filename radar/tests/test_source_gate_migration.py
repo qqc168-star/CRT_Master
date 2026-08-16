@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from crt_radar.source_gate_runner import FetchResult, parse_coinmetrics_caps, run_source_gate
 from crt_radar.liquidation_aggregator import canonical_json_bytes, sha256_hex
 from crt_radar.source_registry import RegistryError, SourceRegistry
+from layer_fixtures import supplemental_overrides
 
 
 REGISTRY_PATH = ROOT / "CONFIG" / "SOURCE_REGISTRY_V1.2.json"
@@ -73,6 +74,7 @@ class SourceGateMigrationTests(unittest.TestCase):
                 },
             ),
         }
+        self.overrides.update(supplemental_overrides(self.registry, NOW_MS))
 
     def aggregate(self, *, coverage=1.0, as_of_ms=NOW_MS - 30_000):
         blocked = [] if coverage >= 0.95 else ["COVERAGE_BELOW_0.95"]

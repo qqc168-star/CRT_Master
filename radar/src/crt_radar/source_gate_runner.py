@@ -8,6 +8,7 @@ import json
 import math
 import random
 import re
+import statistics
 import time
 import urllib.error
 import urllib.request
@@ -56,22 +57,35 @@ def _http_get(
     max_attempts: int = 3,
     base_backoff_s: float = 0.25,
 ) -> FetchResult:
-    if not spec.endpoint:
+    endpoint_map = spec.raw.get("endpoints")
+    if endpoint_map is not None and not (
+        isinstance(endpoint_map, dict)
+        and endpoint_map
+        and all(isinstance(key, str) and isinstance(value, str) for key, value in endpoint_map.items())
+    ):
+        return FetchResult(spec.source_id, "ERROR", error="endpoints must be a non-empty string map")
+    if endpoint_map is None and not spec.endpoint:
         return FetchResult(spec.source_id, "ERROR", error="endpoint missing")
-    request = urllib.request.Request(
-        spec.endpoint,
-        headers={"User-Agent": USER_AGENT, "Accept": "application/json,text/csv,*/*"},
-    )
+    endpoints = endpoint_map or {"default": spec.endpoint}
+    endpoint_transports = spec.raw.get("endpoint_transports", {})
     started = time.perf_counter()
     last_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                raw = response.read()
-            if spec.transport == "HTTPS_CSV":
-                payload: Any = raw.decode("utf-8-sig")
-            else:
-                payload = json.loads(raw.decode("utf-8"))
+            fetched_payloads: dict[str, Any] = {}
+            for key, endpoint in endpoints.items():
+                request = urllib.request.Request(
+                    endpoint,
+                    headers={"User-Agent": USER_AGENT, "Accept": "application/json,text/csv,*/*"},
+                )
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    raw = response.read()
+                endpoint_transport = endpoint_transports.get(key, spec.transport)
+                if endpoint_transport in {"HTTPS_CSV", "MULTI_HTTPS_CSV"}:
+                    fetched_payloads[key] = raw.decode("utf-8-sig")
+                else:
+                    fetched_payloads[key] = json.loads(raw.decode("utf-8"))
+            payload: Any = fetched_payloads if endpoint_map is not None else fetched_payloads["default"]
             return FetchResult(
                 spec.source_id,
                 "OK",
@@ -204,6 +218,139 @@ def parse_fred_latest(payload: Any) -> dict[str, Any]:
     }
 
 
+def _fred_history(payload: Any, expected_series: str) -> list[tuple[int, float]]:
+    if not isinstance(payload, str) or not payload.strip():
+        raise ContractViolation(f"{expected_series} FRED payload empty")
+    rows = list(csv.DictReader(io.StringIO(payload)))
+    if not rows:
+        raise ContractViolation(f"{expected_series} FRED rows missing")
+    keys = list(rows[0])
+    if len(keys) < 2 or expected_series not in keys:
+        raise ContractViolation(f"{expected_series} FRED column missing")
+    result: list[tuple[int, float]] = []
+    for row in rows:
+        raw_value = row.get(expected_series)
+        if raw_value in {None, "", ".", "NA"}:
+            continue
+        date = datetime.strptime(str(row[keys[0]]), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        result.append((int(date.timestamp() * 1000), _finite(raw_value, expected_series)))
+    if not result:
+        raise ContractViolation(f"{expected_series} has no valid observations")
+    result.sort(key=lambda item: item[0])
+    return result
+
+
+def _last_values(rows: list[tuple[int, float]], count: int, field: str) -> list[tuple[int, float]]:
+    if len(rows) < count:
+        raise ContractViolation(f"{field} history requires {count} observations")
+    return rows[-count:]
+
+
+def parse_macro_context(payload: Any) -> dict[str, Any]:
+    row = _require_mapping(payload, "macro context payload")
+    cpi = _last_values(_fred_history(row.get("core_cpi"), "CPILFESL"), 13, "CPILFESL")
+    unemployment = _last_values(_fred_history(row.get("unemployment"), "UNRATE"), 15, "UNRATE")
+    effr = _fred_history(row.get("effr"), "EFFR")[-1]
+    core_pce = _last_values(_fred_history(row.get("core_pce"), "PCEPILFE"), 13, "PCEPILFE")
+
+    cpi_values = [value for _, value in cpi]
+    core_inflation_acceleration = (
+        100.0 * ((cpi_values[-1] / cpi_values[-4]) ** 4 - 1.0)
+        - 100.0 * (cpi_values[-1] / cpi_values[-13] - 1.0)
+    )
+    unrate_values = [value for _, value in unemployment]
+    current_unemployment_mean = statistics.fmean(unrate_values[-3:])
+    prior_unemployment_means = [
+        statistics.fmean(unrate_values[index - 2 : index + 1])
+        for index in range(len(unrate_values) - 2, 1, -1)
+    ]
+    if len(prior_unemployment_means) != 12:
+        raise ContractViolation("UNRATE prior-window count invalid")
+    unemployment_deterioration = current_unemployment_mean - min(prior_unemployment_means)
+    pce_values = [value for _, value in core_pce]
+    core_pce_yoy = 100.0 * (pce_values[-1] / pce_values[-13] - 1.0)
+    real_policy_rate = effr[1] - core_pce_yoy
+
+    return {
+        "as_of_ms": max(cpi[-1][0], unemployment[-1][0], effr[0], core_pce[-1][0]),
+        "core_inflation_acceleration": core_inflation_acceleration,
+        "unemployment_deterioration": unemployment_deterioration,
+        "real_policy_rate": real_policy_rate,
+        "source_series": ["CPILFESL", "UNRATE", "EFFR", "PCEPILFE"],
+    }
+
+
+def parse_rates_context(payload: Any) -> dict[str, Any]:
+    row = _require_mapping(payload, "rates context payload")
+    usd = _last_values(_fred_history(row.get("broad_usd"), "DTWEXBGS"), 21, "DTWEXBGS")
+    real_10y = _last_values(_fred_history(row.get("real_10y"), "DFII10"), 21, "DFII10")
+    nominal_2y = _last_values(_fred_history(row.get("nominal_2y"), "DGS2"), 21, "DGS2")
+    return {
+        "as_of_ms": max(usd[-1][0], real_10y[-1][0], nominal_2y[-1][0]),
+        "broad_usd_20d_log_change": 100.0 * math.log(usd[-1][1] / usd[0][1]),
+        "real_10y_yield_20d_change_bp": 100.0 * (real_10y[-1][1] - real_10y[0][1]),
+        "nominal_2y_yield_20d_change_bp": 100.0 * (nominal_2y[-1][1] - nominal_2y[0][1]),
+    }
+
+
+def _stablecoin_series(payload: Any, field: str) -> list[tuple[int, float]]:
+    if not isinstance(payload, list) or not payload:
+        raise ContractViolation(f"{field} stablecoin history missing")
+    result: list[tuple[int, float]] = []
+    for raw in payload:
+        if not isinstance(raw, dict):
+            continue
+        totals = raw.get("totalCirculatingUSD")
+        if not isinstance(totals, dict) or totals.get("peggedUSD") is None:
+            continue
+        timestamp_ms = int(_finite(raw.get("date"), f"{field}.date", positive=True) * 1000)
+        result.append((timestamp_ms, _finite(totals.get("peggedUSD"), f"{field}.peggedUSD", nonnegative=True)))
+    if not result:
+        raise ContractViolation(f"{field} stablecoin history has no valid rows")
+    result.sort(key=lambda item: item[0])
+    return result
+
+
+def parse_credit_liquidity_context(payload: Any) -> dict[str, Any]:
+    row = _require_mapping(payload, "credit liquidity context payload")
+    usdt = _stablecoin_series(row.get("usdt"), "USDT")
+    usdc = _stablecoin_series(row.get("usdc"), "USDC")
+    latest_ms = min(usdt[-1][0], usdc[-1][0])
+    prior_ms = latest_ms - 30 * 86_400_000
+
+    def exact_value(series: list[tuple[int, float]], timestamp_ms: int, field: str) -> float:
+        match = next((value for observed_ms, value in series if observed_ms == timestamp_ms), None)
+        if match is None:
+            raise ContractViolation(f"{field} exact 30-day observation missing")
+        return match
+
+    current_total = exact_value(usdt, latest_ms, "USDT") + exact_value(usdc, latest_ms, "USDC")
+    prior_total = exact_value(usdt, prior_ms, "USDT") + exact_value(usdc, prior_ms, "USDC")
+    if current_total <= 0 or prior_total <= 0:
+        raise ContractViolation("stablecoin aggregate must be positive")
+    high_yield = _last_values(_fred_history(row.get("high_yield_oas"), "BAMLH0A0HYM2"), 21, "BAMLH0A0HYM2")
+    return {
+        "as_of_ms": max(latest_ms, high_yield[-1][0]),
+        "stablecoin_supply_30d_log_change": 100.0 * math.log(current_total / prior_total),
+        "high_yield_oas_20d_change_bp": 100.0 * (high_yield[-1][1] - high_yield[0][1]),
+        "spot_btc_etp_flow_20d_pct_aum": None,
+        "spot_btc_etp_flow_state": "COLLECTING_OFFICIAL_ISSUER_HISTORY",
+        "stablecoin_universe": ["1:USDT", "2:USDC"],
+    }
+
+
+def parse_open_interest_notional(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, list) or not payload:
+        raise ContractViolation("OI notional payload must be a non-empty list")
+    row = _require_mapping(payload[-1], "OI notional observation")
+    if row.get("symbol") != "BTCUSDT":
+        raise ContractViolation("OI notional symbol must be BTCUSDT")
+    return {
+        "as_of_ms": _timestamp_ms(row.get("timestamp"), "timestamp"),
+        "open_interest_notional_usd": _finite(row.get("sumOpenInterestValue"), "sumOpenInterestValue", nonnegative=True),
+    }
+
+
 def parse_oi(payload: Any) -> dict[str, Any]:
     row = _require_mapping(payload, "OI payload")
     if row.get("symbol") != "BTCUSDT":
@@ -236,12 +383,20 @@ def parse_funding(payload: Any) -> dict[str, Any]:
     row = _require_mapping(payload[-1], "Funding observation")
     if row.get("symbol") != "BTCUSDT":
         raise ContractViolation("Funding symbol must be BTCUSDT")
-    return {
+    result = {
         "as_of_ms": _timestamp_ms(row.get("fundingTime"), "fundingTime"),
         "symbol": "BTCUSDT",
         "funding_rate": _finite(row.get("fundingRate"), "fundingRate"),
         "mark_price": _finite(row.get("markPrice"), "markPrice", positive=True),
     }
+    if len(payload) >= 9:
+        selected = payload[-9:]
+        timestamps = [_timestamp_ms(item.get("fundingTime"), "fundingTime") for item in selected]
+        if all(right - left == 28_800_000 for left, right in zip(timestamps, timestamps[1:])):
+            result["abs_funding_3d_mean_bp"] = 10_000.0 * abs(
+                statistics.fmean(_finite(item.get("fundingRate"), "fundingRate") for item in selected)
+            )
+    return result
 
 
 def _iso8601_ms(value: Any, field: str) -> int:
@@ -271,28 +426,118 @@ def parse_coinmetrics_caps(payload: Any) -> dict[str, Any]:
     for raw in data:
         if not isinstance(raw, dict) or raw.get("asset") != "btc":
             continue
-        if raw.get("CapMrktCurUSD") in {None, ""} or raw.get("CapRealUSD") in {None, ""}:
+        direct_mvrv = raw.get("CapMVRVCur") not in {None, ""}
+        legacy_caps = raw.get("CapMrktCurUSD") not in {None, ""} and raw.get("CapRealUSD") not in {None, ""}
+        if not direct_mvrv and not legacy_caps:
             continue
         as_of_ms = _iso8601_ms(raw.get("time"), "time")
         candidates.append((as_of_ms, raw))
     if not candidates:
         raise ContractViolation("No complete BTC CapMrktCurUSD/CapRealUSD observation")
     as_of_ms, latest = max(candidates, key=lambda item: item[0])
-    market_cap = _finite(latest.get("CapMrktCurUSD"), "CapMrktCurUSD", positive=True)
-    realized_cap = _finite(latest.get("CapRealUSD"), "CapRealUSD", positive=True)
-    mvrv = market_cap / realized_cap
-    nupl = (market_cap - realized_cap) / market_cap
-    return {
+    if latest.get("CapMVRVCur") not in {None, ""}:
+        mvrv = _finite(latest.get("CapMVRVCur"), "CapMVRVCur", positive=True)
+    else:
+        mvrv = _finite(latest.get("CapMrktCurUSD"), "CapMrktCurUSD", positive=True) / _finite(
+            latest.get("CapRealUSD"), "CapRealUSD", positive=True
+        )
+    market_cap = None
+    realized_cap = None
+    if latest.get("CapMrktCurUSD") not in {None, ""}:
+        market_cap = _finite(latest.get("CapMrktCurUSD"), "CapMrktCurUSD", positive=True)
+        realized_cap = (
+            _finite(latest.get("CapRealUSD"), "CapRealUSD", positive=True)
+            if latest.get("CapRealUSD") not in {None, ""}
+            else market_cap / mvrv
+        )
+    result = {
         "as_of_ms": as_of_ms,
         "asset": "btc",
         "market_cap_usd": market_cap,
         "realized_cap_usd": realized_cap,
         "mvrv": mvrv,
-        "nupl": nupl,
+        "nupl": 1.0 - 1.0 / mvrv,
         "formula_contract": {
-            "mvrv": "CapMrktCurUSD / CapRealUSD",
-            "nupl": "(CapMrktCurUSD - CapRealUSD) / CapMrktCurUSD",
+            "mvrv": "Coin Metrics CapMVRVCur",
+            "nupl": "1 - 1 / CapMVRVCur",
+            "realized_cap_usd": "CapMrktCurUSD / CapMVRVCur when CapMrktCurUSD is available",
         },
+    }
+    complete_caps = [
+        (timestamp_ms, raw)
+        for timestamp_ms, raw in candidates
+        if raw.get("CapMrktCurUSD") not in {None, ""}
+    ]
+    prior = next((raw for timestamp_ms, raw in complete_caps if timestamp_ms == as_of_ms - 30 * 86_400_000), None)
+    if realized_cap is not None and prior is not None:
+        prior_market_cap = _finite(prior.get("CapMrktCurUSD"), "CapMrktCurUSD", positive=True)
+        if prior.get("CapMVRVCur") not in {None, ""}:
+            prior_realized_cap = prior_market_cap / _finite(prior.get("CapMVRVCur"), "CapMVRVCur", positive=True)
+        else:
+            prior_realized_cap = _finite(prior.get("CapRealUSD"), "CapRealUSD", positive=True)
+        result["realized_cap_30d_log_change"] = 100.0 * math.log(realized_cap / prior_realized_cap)
+    return result
+
+
+def parse_price_structure(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, list):
+        raise ContractViolation("BTC kline payload must be a list")
+    now_ms = int(time.time() * 1000)
+    complete = [row for row in payload if isinstance(row, list) and len(row) >= 11 and int(row[6]) < now_ms]
+    if len(complete) < 201:
+        raise ContractViolation("BTC price structure requires 201 complete daily bars")
+    bars = complete[-201:]
+    parsed: list[dict[str, float]] = []
+    for row in bars:
+        open_value = _finite(row[1], "open", positive=True)
+        high = _finite(row[2], "high", positive=True)
+        low = _finite(row[3], "low", positive=True)
+        close = _finite(row[4], "close", positive=True)
+        quote_volume = _finite(row[7], "quote_volume", nonnegative=True)
+        taker_buy_quote = _finite(row[10], "taker_buy_quote_volume", nonnegative=True)
+        if high < max(open_value, low, close) or low > min(open_value, high, close):
+            raise ContractViolation("BTC kline geometry invalid")
+        if taker_buy_quote > quote_volume:
+            raise ContractViolation("taker buy quote volume exceeds total quote volume")
+        parsed.append(
+            {
+                "open": open_value,
+                "high": high,
+                "low": low,
+                "close": close,
+                "quote_volume": quote_volume,
+                "taker_buy_quote": taker_buy_quote,
+            }
+        )
+    true_ranges = []
+    for index in range(len(parsed) - 20, len(parsed)):
+        current = parsed[index]
+        previous_close = parsed[index - 1]["close"]
+        true_ranges.append(
+            max(
+                current["high"] - current["low"],
+                abs(current["high"] - previous_close),
+                abs(current["low"] - previous_close),
+            )
+        )
+    atr20 = statistics.fmean(true_ranges)
+    if atr20 <= 0:
+        raise ContractViolation("ATR20 must be positive")
+    closes = [bar["close"] for bar in parsed]
+    signed_quote_volume = sum(2.0 * bar["taker_buy_quote"] - bar["quote_volume"] for bar in parsed[-20:])
+    total_quote_volume = sum(bar["quote_volume"] for bar in parsed[-20:])
+    if total_quote_volume <= 0:
+        raise ContractViolation("20-day quote volume must be positive")
+    return {
+        "as_of_ms": int(bars[-1][6]),
+        "close_minus_sma200_over_atr20": (closes[-1] - statistics.fmean(closes[-200:])) / atr20,
+        "sma50_minus_sma200_over_atr20": (
+            statistics.fmean(closes[-50:]) - statistics.fmean(closes[-200:])
+        ) / atr20,
+        "return_20d_over_atr_vol": math.log(closes[-1] / closes[-21]) / ((atr20 / closes[-1]) * math.sqrt(20.0)),
+        "cvd_20d_share": signed_quote_volume / total_quote_volume,
+        "source_scope": "BINANCE_BTCUSDT_DIRECTIONAL_PROXY",
+        "formal_composite_authority": "NONE",
     }
 
 
@@ -344,8 +589,34 @@ PARSERS: dict[str, Callable[..., dict[str, Any]]] = {
     "BINANCE_OI_V1": parse_oi,
     "BINANCE_FUNDING_V1": parse_funding,
     "BINANCE_SPOT_TICKER_24H_V1": parse_btc_spot_ticker,
-    "COINMETRICS_CAPS_V1": parse_coinmetrics_caps,
+    "FRED_MACRO_CONTEXT_V1": parse_macro_context,
+    "FRED_RATES_CONTEXT_V1": parse_rates_context,
+    "CRT_CREDIT_LIQUIDITY_CONTEXT_V1": parse_credit_liquidity_context,
+    "BINANCE_OI_NOTIONAL_V1": parse_open_interest_notional,
+    "COINMETRICS_MVRV_COMMUNITY_V1": parse_coinmetrics_caps,
+    "BINANCE_PRICE_STRUCTURE_PROXY_V1": parse_price_structure,
 }
+
+
+def _derive_cross_family_metrics(parsed: dict[str, Any]) -> None:
+    oi = parsed.get("OPEN_INTEREST_NOTIONAL")
+    onchain = parsed.get("ONCHAIN_VALUE")
+    liquidation = parsed.get("LIQUIDATION_AGGREGATES")
+    if isinstance(oi, dict) and isinstance(onchain, dict):
+        market_cap = onchain.get("market_cap_usd")
+        if isinstance(market_cap, (int, float)) and market_cap > 0:
+            oi["oi_to_market_cap_pct"] = 100.0 * float(oi["open_interest_notional_usd"]) / float(market_cap)
+    if isinstance(oi, dict) and isinstance(liquidation, dict):
+        notional = float(oi.get("open_interest_notional_usd", 0.0))
+        bucket = liquidation.get("windows", {}).get("24h", {})
+        total = float(bucket.get("total_liquidation_usd", 0.0))
+        long_value = float(bucket.get("long_liquidation_usd", 0.0))
+        short_value = float(bucket.get("short_liquidation_usd", 0.0))
+        if notional > 0:
+            liquidation["liquidation_intensity_24h_pct"] = 100.0 * total / notional
+        liquidation["short_minus_long_liquidation_share_24h"] = (
+            0.0 if total == 0 else (short_value - long_value) / total
+        )
 
 
 def _assert_fresh(as_of_ms: int, *, now_ms: int, max_age_seconds: int) -> None:
@@ -537,6 +808,8 @@ def run_source_gate(
                 quality_error=quality_error,
             )
         )
+
+    _derive_cross_family_metrics(parsed)
 
     idempotency_material = {
         "registry_hash": registry.hash,

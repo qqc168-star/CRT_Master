@@ -24,13 +24,31 @@ class Observation:
 
 
 COMPARABLE_METRICS = {
+    ("MACRO_CONTEXT", "core_inflation_acceleration"),
+    ("MACRO_CONTEXT", "unemployment_deterioration"),
+    ("MACRO_CONTEXT", "real_policy_rate"),
     ("DOLLAR_STRENGTH_PROXY", "broad_usd_proxy"),
+    ("RATES_CONTEXT", "broad_usd_20d_log_change"),
+    ("RATES_CONTEXT", "real_10y_yield_20d_change_bp"),
+    ("RATES_CONTEXT", "nominal_2y_yield_20d_change_bp"),
+    ("CREDIT_LIQUIDITY_CONTEXT", "stablecoin_supply_30d_log_change"),
+    ("CREDIT_LIQUIDITY_CONTEXT", "high_yield_oas_20d_change_bp"),
     ("OPEN_INTEREST", "open_interest_contracts"),
+    ("OPEN_INTEREST_NOTIONAL", "open_interest_notional_usd"),
+    ("OPEN_INTEREST_NOTIONAL", "oi_to_market_cap_pct"),
     ("FUNDING_RATE", "funding_rate"),
+    ("FUNDING_RATE", "abs_funding_3d_mean_bp"),
     ("LIQUIDATION_AGGREGATES", "liquidation_1h_total_usd"),
     ("LIQUIDATION_AGGREGATES", "liquidation_24h_total_usd"),
+    ("LIQUIDATION_AGGREGATES", "liquidation_intensity_24h_pct"),
+    ("LIQUIDATION_AGGREGATES", "short_minus_long_liquidation_share_24h"),
     ("ONCHAIN_VALUE", "mvrv"),
     ("ONCHAIN_VALUE", "nupl"),
+    ("ONCHAIN_VALUE", "realized_cap_30d_log_change"),
+    ("PRICE_STRUCTURE_CONTEXT", "close_minus_sma200_over_atr20"),
+    ("PRICE_STRUCTURE_CONTEXT", "sma50_minus_sma200_over_atr20"),
+    ("PRICE_STRUCTURE_CONTEXT", "return_20d_over_atr_vol"),
+    ("PRICE_STRUCTURE_CONTEXT", "cvd_20d_share"),
 }
 
 
@@ -61,15 +79,43 @@ def _family_evidence(source_gate: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _metric_rows(family: str, parsed: dict[str, Any]) -> list[tuple[str, float]]:
+    if family == "MACRO_CONTEXT":
+        return [
+            ("core_inflation_acceleration", _finite(parsed.get("core_inflation_acceleration"))),
+            ("unemployment_deterioration", _finite(parsed.get("unemployment_deterioration"))),
+            ("real_policy_rate", _finite(parsed.get("real_policy_rate"))),
+        ]
     if family == "DOLLAR_STRENGTH_PROXY":
         return [("broad_usd_proxy", _finite(parsed.get("value")))]
+    if family == "RATES_CONTEXT":
+        return [
+            ("broad_usd_20d_log_change", _finite(parsed.get("broad_usd_20d_log_change"))),
+            ("real_10y_yield_20d_change_bp", _finite(parsed.get("real_10y_yield_20d_change_bp"))),
+            ("nominal_2y_yield_20d_change_bp", _finite(parsed.get("nominal_2y_yield_20d_change_bp"))),
+        ]
+    if family == "CREDIT_LIQUIDITY_CONTEXT":
+        rows = [
+            ("stablecoin_supply_30d_log_change", _finite(parsed.get("stablecoin_supply_30d_log_change"))),
+            ("high_yield_oas_20d_change_bp", _finite(parsed.get("high_yield_oas_20d_change_bp"))),
+        ]
+        if parsed.get("spot_btc_etp_flow_20d_pct_aum") is not None:
+            rows.append(("spot_btc_etp_flow_20d_pct_aum", _finite(parsed.get("spot_btc_etp_flow_20d_pct_aum"))))
+        return rows
     if family == "OPEN_INTEREST":
         return [("open_interest_contracts", _finite(parsed.get("open_interest_contracts")))]
+    if family == "OPEN_INTEREST_NOTIONAL":
+        rows = [("open_interest_notional_usd", _finite(parsed.get("open_interest_notional_usd")))]
+        if parsed.get("oi_to_market_cap_pct") is not None:
+            rows.append(("oi_to_market_cap_pct", _finite(parsed.get("oi_to_market_cap_pct"))))
+        return rows
     if family == "FUNDING_RATE":
-        return [
+        rows = [
             ("funding_rate", _finite(parsed.get("funding_rate"))),
             ("mark_price", _finite(parsed.get("mark_price"))),
         ]
+        if parsed.get("abs_funding_3d_mean_bp") is not None:
+            rows.append(("abs_funding_3d_mean_bp", _finite(parsed.get("abs_funding_3d_mean_bp"))))
+        return rows
     if family == "BTC_SPOT_PRICE":
         return [
             ("btc_spot_price_usd", _finite(parsed.get("spot_price_usd"))),
@@ -91,13 +137,31 @@ def _metric_rows(family: str, parsed: dict[str, Any]) -> list[tuple[str, float]]
                     (f"liquidation_{label}_event_count", _finite(bucket.get("event_count"))),
                 ]
             )
+        if parsed.get("liquidation_intensity_24h_pct") is not None:
+            rows.append(("liquidation_intensity_24h_pct", _finite(parsed.get("liquidation_intensity_24h_pct"))))
+        if parsed.get("short_minus_long_liquidation_share_24h") is not None:
+            rows.append(
+                (
+                    "short_minus_long_liquidation_share_24h",
+                    _finite(parsed.get("short_minus_long_liquidation_share_24h")),
+                )
+            )
         return rows
     if family == "ONCHAIN_VALUE":
-        return [
+        rows = [
             ("mvrv", _finite(parsed.get("mvrv"))),
             ("nupl", _finite(parsed.get("nupl"))),
-            ("market_cap_usd", _finite(parsed.get("market_cap_usd"))),
-            ("realized_cap_usd", _finite(parsed.get("realized_cap_usd"))),
+        ]
+        for metric in ("market_cap_usd", "realized_cap_usd", "realized_cap_30d_log_change"):
+            if parsed.get(metric) is not None:
+                rows.append((metric, _finite(parsed.get(metric))))
+        return rows
+    if family == "PRICE_STRUCTURE_CONTEXT":
+        return [
+            ("close_minus_sma200_over_atr20", _finite(parsed.get("close_minus_sma200_over_atr20"))),
+            ("sma50_minus_sma200_over_atr20", _finite(parsed.get("sma50_minus_sma200_over_atr20"))),
+            ("return_20d_over_atr_vol", _finite(parsed.get("return_20d_over_atr_vol"))),
+            ("cvd_20d_share", _finite(parsed.get("cvd_20d_share"))),
         ]
     return []
 
