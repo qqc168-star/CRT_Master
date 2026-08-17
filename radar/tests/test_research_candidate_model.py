@@ -180,13 +180,15 @@ class ResearchCandidateModelTests(unittest.TestCase):
         self.assertEqual(result["model_state"], "BLOCKED")
         self.assertIn("L6_CVD_20D_SHARE_AS_OF_INVALID", result["blocked_reasons"])
 
-    def test_runtime_source_does_not_import_research_candidate(self):
+    def test_only_v110_adapter_may_reference_candidate_registry_without_importing_research_code(self):
         mentions = []
         for path in sorted((ROOT / "src").rglob("*.py")):
             text = path.read_text(encoding="utf-8")
             if "candidate_model" in text or "CRT_SIX_LAYER_CANDIDATE" in text:
                 mentions.append(str(path.relative_to(ROOT)))
-        self.assertEqual(mentions, [])
+                self.assertNotIn("from research", text)
+                self.assertNotIn("import research", text)
+        self.assertEqual(mentions, [str(Path("src") / "crt_radar" / "v110_candidate.py")])
 
 
 if __name__ == "__main__":

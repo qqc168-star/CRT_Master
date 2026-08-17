@@ -1,0 +1,188 @@
+{
+  "schema_version": "CRT_V110_FORMAL_CANDIDATE_RUNTIME_V0.1",
+  "candidate_id": "CRT-V110-FORMAL-CANDIDATE-RUNTIME-V0.1",
+  "status": "FORMAL_CANDIDATE_NOT_APPROVED",
+  "base_main_sha": "dc49442efa4a2b2cc442f77e13f4bb7b91b33e77",
+  "approval": {
+    "candidate_rebuild": "USER_APPROVED_2026-08-17",
+    "exact_candidate_hash": "NOT_YET_APPROVED",
+    "formal_model": "NOT_APPROVED",
+    "production": "NOT_APPROVED",
+    "capital_decision_authority": "USER_ONLY",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "action_output": "NONE"
+  },
+  "parent_research_registry": {
+    "path": "research/CRT_SIX_LAYER_CANDIDATE_V0.1.json",
+    "canonical_sha256": "62497bab3e7d551f45e6b3bc23b367575927d5be6be9f25a0956566e1d64c2ee",
+    "status_required": "RESEARCH_ONLY_NOT_APPROVED"
+  },
+  "inherited_formal_constants": {
+    "source": "RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md",
+    "layer_weights_percent": {
+      "L1": 20,
+      "L2": 20,
+      "L3": 17,
+      "L4": 25,
+      "L5": 13,
+      "L6": 5
+    },
+    "light_thresholds": [-60, -35, 35, 60],
+    "mnav_semantics": "Diluted Equity mNAV",
+    "modification_authority": "NONE"
+  },
+  "season_router": {
+    "status": "SPEC_NOT_RECOVERED_CANDIDATE_FAIL_CLOSED",
+    "score_may_supply_weather_bucket": true,
+    "score_may_determine_btc_season": false,
+    "blocked_reason": "V110_SEASON_STATE_TRANSITION_CONTRACT_NOT_RECOVERED",
+    "analyst_judgment_required": true
+  },
+  "feature_bindings": [
+    {
+      "feature_id": "L1_CORE_INFLATION_ACCELERATION",
+      "layer_id": "L1",
+      "metric": "core_inflation_acceleration",
+      "input_family": "MACRO_CONTEXT",
+      "allowed_source_ids": ["CRT-CONN-MACRO-FRED-CONTEXT-001"]
+    },
+    {
+      "feature_id": "L1_UNEMPLOYMENT_DETERIORATION",
+      "layer_id": "L1",
+      "metric": "unemployment_deterioration",
+      "input_family": "MACRO_CONTEXT",
+      "allowed_source_ids": ["CRT-CONN-MACRO-FRED-CONTEXT-001"]
+    },
+    {
+      "feature_id": "L1_REAL_POLICY_RATE",
+      "layer_id": "L1",
+      "metric": "real_policy_rate",
+      "input_family": "MACRO_CONTEXT",
+      "allowed_source_ids": ["CRT-CONN-MACRO-FRED-CONTEXT-001"]
+    },
+    {
+      "feature_id": "L2_BROAD_USD_20D_LOG_CHANGE",
+      "layer_id": "L2",
+      "metric": "broad_usd_20d_log_change",
+      "input_family": "RATES_CONTEXT",
+      "allowed_source_ids": ["CRT-CONN-RATES-FRED-CONTEXT-001"]
+    },
+    {
+      "feature_id": "L2_REAL_10Y_YIELD_20D_CHANGE_BP",
+      "layer_id": "L2",
+      "metric": "real_10y_yield_20d_change_bp",
+      "input_family": "RATES_CONTEXT",
+      "allowed_source_ids": ["CRT-CONN-RATES-FRED-CONTEXT-001"]
+    },
+    {
+      "feature_id": "L2_NOMINAL_2Y_YIELD_20D_CHANGE_BP",
+      "layer_id": "L2",
+      "metric": "nominal_2y_yield_20d_change_bp",
+      "input_family": "RATES_CONTEXT",
+      "allowed_source_ids": ["CRT-CONN-RATES-FRED-CONTEXT-001"]
+    },
+    {
+      "feature_id": "L3_STABLECOIN_SUPPLY_30D_LOG_CHANGE",
+      "layer_id": "L3",
+      "metric": "stablecoin_supply_30d_log_change",
+      "input_family": "CREDIT_LIQUIDITY_CONTEXT",
+      "allowed_source_ids": ["CRT-CONN-CREDIT-LIQUIDITY-CONTEXT-001"]
+    },
+    {
+      "feature_id": "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM",
+      "layer_id": "L3",
+      "metric": "spot_btc_etp_flow_20d_pct_aum",
+      "input_family": "SPOT_BTC_ETP_FLOW",
+      "allowed_source_ids": ["CRT-CONN-BTC-ETP-OFFICIAL-POINT-IN-TIME-001"]
+    },
+    {
+      "feature_id": "L3_HIGH_YIELD_OAS_20D_CHANGE_BP",
+      "layer_id": "L3",
+      "metric": "high_yield_oas_20d_change_bp",
+      "input_family": "CREDIT_LIQUIDITY_CONTEXT",
+      "allowed_source_ids": ["CRT-CONN-CREDIT-LIQUIDITY-CONTEXT-001"]
+    },
+    {
+      "feature_id": "L4_OI_TO_MARKET_CAP",
+      "layer_id": "L4",
+      "metric": "oi_to_market_cap_pct",
+      "input_family": "OPEN_INTEREST_NOTIONAL",
+      "allowed_source_ids": ["CRT-CONN-BTC-DERIV-BINANCE-OI-NOTIONAL-001"]
+    },
+    {
+      "feature_id": "L4_ABS_FUNDING_3D_MEAN_BP",
+      "layer_id": "L4",
+      "metric": "abs_funding_3d_mean_bp",
+      "input_family": "FUNDING_RATE",
+      "allowed_source_ids": ["CRT-CONN-BTC-DERIV-BINANCE-FUNDING-001"]
+    },
+    {
+      "feature_id": "L4_LIQUIDATION_INTENSITY_24H",
+      "layer_id": "L4",
+      "metric": "liquidation_intensity_24h_pct",
+      "input_family": "LIQUIDATION_AGGREGATES",
+      "allowed_source_ids": ["CRT-CONN-BTC-DERIV-LIQ-AGGREGATOR-001"]
+    },
+    {
+      "feature_id": "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H",
+      "layer_id": "L4",
+      "metric": "short_minus_long_liquidation_share_24h",
+      "input_family": "LIQUIDATION_AGGREGATES",
+      "allowed_source_ids": ["CRT-CONN-BTC-DERIV-LIQ-AGGREGATOR-001"]
+    },
+    {
+      "feature_id": "L5_MVRV_LEVEL",
+      "layer_id": "L5",
+      "metric": "mvrv",
+      "input_family": "ONCHAIN_VALUE",
+      "allowed_source_ids": ["CRT-CONN-BTC-ONCHAIN-COINMETRICS-COMMUNITY-001"]
+    },
+    {
+      "feature_id": "L5_REALIZED_CAP_30D_LOG_CHANGE",
+      "layer_id": "L5",
+      "metric": "realized_cap_30d_log_change",
+      "input_family": "ONCHAIN_VALUE",
+      "allowed_source_ids": ["CRT-CONN-BTC-ONCHAIN-COINMETRICS-COMMUNITY-001"]
+    },
+    {
+      "feature_id": "L6_CLOSE_MINUS_SMA200_OVER_ATR20",
+      "layer_id": "L6",
+      "metric": "close_minus_sma200_over_atr20",
+      "input_family": "BTC_SPOT_COMPOSITE_OHLCV",
+      "allowed_source_ids": ["CRT-CONN-BTC-SPOT-THREE-VENUE-COMPOSITE-001"]
+    },
+    {
+      "feature_id": "L6_SMA50_MINUS_SMA200_OVER_ATR20",
+      "layer_id": "L6",
+      "metric": "sma50_minus_sma200_over_atr20",
+      "input_family": "BTC_SPOT_COMPOSITE_OHLCV",
+      "allowed_source_ids": ["CRT-CONN-BTC-SPOT-THREE-VENUE-COMPOSITE-001"]
+    },
+    {
+      "feature_id": "L6_RETURN_20D_OVER_ATR_VOL",
+      "layer_id": "L6",
+      "metric": "return_20d_over_atr_vol",
+      "input_family": "BTC_SPOT_COMPOSITE_OHLCV",
+      "allowed_source_ids": ["CRT-CONN-BTC-SPOT-THREE-VENUE-COMPOSITE-001"]
+    },
+    {
+      "feature_id": "L6_CVD_20D_SHARE",
+      "layer_id": "L6",
+      "metric": "cvd_20d_share",
+      "input_family": "BTC_SPOT_AGGRESSOR_DAILY",
+      "allowed_source_ids": ["CRT-CONN-BTC-SPOT-AGGRESSOR-BINANCE-001"]
+    }
+  ],
+  "validation_bindings": [
+    {
+      "validation_id": "L5_MVRV_NUPL_IDENTITY",
+      "observation_id": "L5_NUPL_OBSERVED",
+      "layer_id": "L5",
+      "metric": "nupl",
+      "input_family": "ONCHAIN_VALUE",
+      "allowed_source_ids": ["CRT-CONN-BTC-ONCHAIN-COINMETRICS-COMMUNITY-001"]
+    }
+  ]
+}
+

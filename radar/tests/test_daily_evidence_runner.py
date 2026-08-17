@@ -135,6 +135,23 @@ class DailyEvidenceRunnerTests(unittest.TestCase):
         self.assertIn("L5", pack["layers"])
         self.assertIsNone(pack["analyst_output"]["season"])
         self.assertIsNone(pack["analyst_output"]["capital_strategy"])
+        candidate = pack["formal_candidate"]
+        self.assertEqual(candidate["candidate_status"], "FORMAL_CANDIDATE_NOT_APPROVED")
+        self.assertEqual(candidate["model_state"], "BLOCKED")
+        self.assertIsNone(candidate["formal_score"])
+        self.assertEqual(candidate["formal_model"], "NOT_APPROVED")
+        self.assertEqual(candidate["production"], "NOT_APPROVED")
+        self.assertEqual(candidate["action_output"], "NONE")
+        self.assertEqual(candidate["external_action_authority"], "NONE")
+        self.assertFalse(candidate["external_action_performed"])
+        scoring = pack["model_status"]["locked_formal_scoring"]
+        self.assertEqual(scoring["state"], "CANDIDATE_BLOCKED")
+        self.assertIsNone(scoring["score"])
+        self.assertEqual(scoring["formal_model"], "NOT_APPROVED")
+        router = pack["model_status"]["btc_season_router"]
+        self.assertEqual(router["state"], "CANDIDATE_BLOCKED")
+        self.assertEqual(router["reason"], "V110_SEASON_STATE_TRANSITION_CONTRACT_NOT_RECOVERED")
+        self.assertIsNone(router["season"])
 
     def test_critical_source_failure_propagates_blocked(self):
         self.overrides[self.oi.source_id] = FetchResult(self.oi.source_id, "ERROR", error="timeout")

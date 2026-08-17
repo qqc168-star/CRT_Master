@@ -10,6 +10,7 @@ from typing import Any
 from .change_engine import compute_changes, distill_top_changes
 from .observation_store import Observation, ObservationStore, extract_observations
 from .reflexivity_overlay import build_reflexivity_overlay
+from .v110_candidate import evaluate_v110_candidate
 
 
 PACK_SCHEMA_VERSION = "CRT_EVIDENCE_PACK_V0.2"
@@ -108,7 +109,7 @@ def _group_layers(observations: list[Observation]) -> dict[str, Any]:
     return layers
 
 
-def _model_status(layers: dict[str, Any]) -> dict[str, Any]:
+def _model_status(layers: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
     missing_by_layer: dict[str, list[str]] = {}
     for layer_name, required in SIX_LAYER_REQUIRED_METRICS.items():
         present = set(layers.get(layer_name, {}).get("metrics", {}))
@@ -121,27 +122,43 @@ def _model_status(layers: dict[str, Any]) -> dict[str, Any]:
         for layer_name, metrics in missing_by_layer.items()
         for metric in metrics
     ]
-    if "L6" in layers:
-        evidence_blockers.append("L6_FORMAL_THREE_VENUE_COMPOSITE_UNAVAILABLE")
+    evidence_blockers.extend(candidate["input_blocked_reasons"])
+    evidence_complete = not missing_by_layer and candidate["input_state"] == "COMPLETE"
+    candidate_valid = candidate["model_state"] == "VALID_CANDIDATE_OUTPUT"
+    router = candidate["season_router"]
     return {
         "six_layer_evidence": {
-            "state": "COMPLETE_DIRECTIONAL" if not missing_by_layer else "BLOCKED",
+            "state": "COMPLETE_DIRECTIONAL" if evidence_complete else "BLOCKED",
             "missing_by_layer": missing_by_layer,
             "blocked_reasons": sorted(set(evidence_blockers)),
         },
         "locked_formal_scoring": {
-            "state": "BLOCKED",
-            "reason": "LOCKED_FORMAL_SCORING_EXECUTABLE_UNAVAILABLE_IN_CURRENT_MAIN",
+            "state": "VALID_CANDIDATE_EXECUTABLE" if candidate_valid else "CANDIDATE_BLOCKED",
+            "reason": (
+                "FORMAL_CANDIDATE_AWAITING_EXACT_HASH_APPROVAL"
+                if candidate_valid
+                else "FORMAL_CANDIDATE_INPUT_OR_HISTORY_BLOCKED"
+            ),
             "layer_weights_percent": LOCKED_LAYER_WEIGHTS,
             "light_thresholds": LOCKED_LIGHT_THRESHOLDS,
             "modification_authority": "NONE",
             "score": None,
+            "candidate_score": candidate["candidate_score"],
+            "candidate_threshold_bucket": candidate["threshold_bucket"],
+            "candidate_contract_hash": candidate["candidate_contract_hash"],
+            "candidate_output_hash": candidate["candidate_output_hash"],
+            "formal_model": "NOT_APPROVED",
+            "production": "NOT_APPROVED",
         },
         "btc_season_router": {
-            "state": "BLOCKED",
-            "reason": "BTC_SEASON_ROUTER_EXECUTABLE_UNAVAILABLE_IN_CURRENT_MAIN",
+            "state": "CANDIDATE_BLOCKED",
+            "reason": router["reason"],
             "season": None,
+            "candidate_weather_bucket": router["candidate_weather_bucket"],
             "analyst_judgment_required": True,
+            "score_may_determine_btc_season": False,
+            "formal_model": "NOT_APPROVED",
+            "production": "NOT_APPROVED",
         },
     }
 
@@ -220,12 +237,13 @@ def build_evidence_pack(
     observations = extract_observations(source_gate, recorded_at_ms=generated_at)
     evidence_by_family = _evidence_by_family(source_gate)
 
+    layers = _group_layers(observations)
     with ObservationStore(observation_db) as store:
         store.record(observations)
         changes = compute_changes(store, observations)
         top_changes = distill_top_changes(changes, limit=8)
+        formal_candidate = evaluate_v110_candidate(layers, store)
 
-    layers = _group_layers(observations)
     pack: dict[str, Any] = {
         "schema_version": PACK_SCHEMA_VERSION,
         "action_output": "NONE",
@@ -236,7 +254,7 @@ def build_evidence_pack(
             "slice": "SIX_LAYER_EVIDENCE_TRANSITION_V0.3",
             "available_layers": sorted(layers),
             "not_yet_in_slice": sorted(set(SIX_LAYER_REQUIRED_METRICS) - set(layers)),
-            "note": "All available layers remain evidence only; formal scoring and BTC season routing stay fail-closed until their verified executables are recovered.",
+            "note": "The V1.10 locked-constant candidate is executable and fail-closed. Formal scoring and BTC season remain unapproved.",
         },
         "authority": {
             "production": "NOT_APPROVED",
@@ -246,7 +264,8 @@ def build_evidence_pack(
         },
         "data_health": _data_health(source_gate),
         "layers": layers,
-        "model_status": _model_status(layers),
+        "model_status": _model_status(layers, formal_candidate),
+        "formal_candidate": formal_candidate,
         "changes": changes,
         "distillation": {
             "top_changes": top_changes,
