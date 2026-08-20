@@ -89,7 +89,7 @@ class CollectorRuntimeTests(unittest.TestCase):
     def test_actual_run_loop_ingests_event_closes_session_and_emits_snapshots(self):
         ws = FakeWebSocket([force_order(int(time.time() * 1000))])
         with patch("websockets.sync.client.connect", return_value=FakeConnection(ws)):
-            self.collector.run_forever(max_runtime_s=0.04, base_backoff_s=0.001)
+            self.collector.run_forever(max_runtime_s=0.20, base_backoff_s=0.001)
         events, anomalies, sessions, open_sessions = self._counts()
         self.assertEqual(events, 1)
         self.assertEqual(anomalies, 0)

@@ -186,12 +186,6 @@ def main(argv: list[str] | None = None) -> int:
         default=default_assumption_watch_context_path(),
         help="Local/private research assumptions and invalidation rules. Never formal model authority.",
     )
-    parser.add_argument(
-        "--assumption-context",
-        type=Path,
-        default=default_assumption_watch_context_path(),
-        help="Local/private research assumptions and invalidation rules. Never formal model authority.",
-    )
     parser.add_argument("--wake-output", type=Path, default=None)
     parser.add_argument("--notice-output", type=Path, default=None)
     parser.add_argument("--maturity-ledger", type=Path, default=None)
