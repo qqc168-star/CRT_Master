@@ -7,6 +7,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .assumption_boundary_watch import evaluate_assumption_watch
+from .asset_strategy_delta import build_asset_strategy_delta
 from .change_engine import compute_changes, distill_top_changes
 from .observation_store import Observation, ObservationStore, extract_observations
 from .reflexivity_overlay import build_reflexivity_overlay
@@ -228,6 +230,9 @@ def build_evidence_pack(
     generated_at_ms: int | None = None,
     reflexivity_input: dict[str, Any] | None = None,
     reanalysis_wake: dict[str, Any] | None = None,
+    transition_diagnostic: dict[str, Any] | None = None,
+    btc_entry_gate: dict[str, Any] | None = None,
+    assumption_watch_context: dict[str, Any] | None = None,
     private_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
@@ -285,8 +290,23 @@ def build_evidence_pack(
     }
     if reanalysis_wake is not None:
         pack["reanalysis_wake"] = deepcopy(reanalysis_wake)
+    if transition_diagnostic is not None:
+        pack["transition_diagnostic"] = deepcopy(transition_diagnostic)
+    if btc_entry_gate is not None:
+        pack["btc_entry_gate"] = deepcopy(btc_entry_gate)
     if private_context is not None:
         pack["private_context"] = deepcopy(private_context)
+    if assumption_watch_context is not None:
+        assumption_watch = evaluate_assumption_watch(
+            btc_entry_gate=btc_entry_gate,
+            research_context=assumption_watch_context,
+        )
+        pack["assumption_watch"] = assumption_watch
+        pack["asset_strategy_delta"] = build_asset_strategy_delta(
+            btc_entry_gate=btc_entry_gate,
+            assumption_watch=assumption_watch,
+            private_context=private_context,
+        )
     pack["pack_state"] = _pack_state(source_gate, evidence_by_family, changes)
     pack["evidence_pack_hash"] = _sha256(pack)
     return pack

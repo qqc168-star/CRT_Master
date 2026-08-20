@@ -7,6 +7,20 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
+from .assumption_boundary_watch import (
+    default_assumption_watch_context_path,
+    load_assumption_watch_context,
+)
+from .btc_decision_support import (
+    default_btc_entry_gate_context_path,
+    load_btc_entry_gate_context,
+    run_live_btc_entry_gate,
+)
+from .btc_transition_diagnostics import (
+    blocked_transition_diagnostic,
+    not_requested_transition_diagnostic,
+    run_live_btc_transition_diagnostics,
+)
 from .evidence_pack import build_evidence_pack
 from .intraday_reanalysis_runner import run_intraday_reanalysis
 from .liquidation_aggregator import SnapshotCorruption, load_verified_snapshot
@@ -64,6 +78,10 @@ def run_daily_evidence(
     now_ms: int | None = None,
     generated_at_ms: int | None = None,
     private_context: dict[str, Any] | None = None,
+    transition_diagnostic_runner: Callable[..., dict[str, Any]] | None = None,
+    btc_entry_gate_context: dict[str, Any] | None = None,
+    btc_entry_gate_runner: Callable[..., dict[str, Any]] | None = None,
+    assumption_watch_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_gate = run_source_gate(
         registry,
@@ -100,12 +118,42 @@ def run_daily_evidence(
             "external_action_authority": "NONE",
             "external_action_performed": False,
         }
+    if reanalysis_wake["state"] == "REANALYSIS_REQUESTED":
+        if transition_diagnostic_runner is None:
+            transition_diagnostic = blocked_transition_diagnostic(
+                "DIAGNOSTIC_RUNNER_NOT_CONFIGURED"
+            )
+        else:
+            transition_diagnostic = transition_diagnostic_runner(
+                wake=reanalysis_wake,
+                liquidation_snapshot=liquidation_aggregate_payload,
+                now_ms=generated_at_ms if generated_at_ms is not None else now_ms,
+            )
+    else:
+        transition_diagnostic = not_requested_transition_diagnostic(
+            "REANALYSIS_WAKE_NOT_REQUESTED"
+        )
+
+    btc_entry_gate = None
+    if btc_entry_gate_runner is not None:
+        btc_entry_gate = btc_entry_gate_runner(
+            transition_diagnostic=transition_diagnostic,
+            research_context=btc_entry_gate_context or {
+                "state": "BLOCKED",
+                "reason": "BTC_ENTRY_GATE_RESEARCH_CONTEXT_NOT_SUPPLIED",
+            },
+            now_ms=generated_at_ms if generated_at_ms is not None else now_ms,
+        )
+
     return build_evidence_pack(
         source_gate,
         observation_db=observation_db,
         generated_at_ms=generated_at_ms,
         reflexivity_input=reflexivity_input,
         reanalysis_wake=reanalysis_wake,
+        transition_diagnostic=transition_diagnostic,
+        btc_entry_gate=btc_entry_gate,
+        assumption_watch_context=assumption_watch_context,
         private_context=private_context,
     )
 
@@ -126,6 +174,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--observation-db", type=Path, default=default_observation_db_path())
     parser.add_argument("--output", type=Path, default=default_evidence_pack_path())
     parser.add_argument("--private-profile", type=Path, default=default_private_profile_path())
+    parser.add_argument(
+        "--btc-entry-context",
+        type=Path,
+        default=default_btc_entry_gate_context_path(),
+        help="Research-only event-scoped BTC transition corridor. Never a formal threshold.",
+    )
+    parser.add_argument(
+        "--assumption-context",
+        type=Path,
+        default=default_assumption_watch_context_path(),
+        help="Local/private research assumptions and invalidation rules. Never formal model authority.",
+    )
+    parser.add_argument(
+        "--assumption-context",
+        type=Path,
+        default=default_assumption_watch_context_path(),
+        help="Local/private research assumptions and invalidation rules. Never formal model authority.",
+    )
     parser.add_argument("--wake-output", type=Path, default=None)
     parser.add_argument("--notice-output", type=Path, default=None)
     parser.add_argument("--maturity-ledger", type=Path, default=None)
@@ -157,6 +223,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     private_context = load_private_profile(args.private_profile)
+    btc_entry_gate_context = load_btc_entry_gate_context(args.btc_entry_context)
+    assumption_watch_context = load_assumption_watch_context(args.assumption_context)
     pack = run_daily_evidence(
         registry,
         observation_db=args.observation_db,
@@ -164,6 +232,10 @@ def main(argv: list[str] | None = None) -> int:
         probe_fetcher=probe_liquidation_stream,
         runtime_checks=runtime_checks,
         private_context=private_context,
+        transition_diagnostic_runner=run_live_btc_transition_diagnostics,
+        btc_entry_gate_context=btc_entry_gate_context,
+        btc_entry_gate_runner=run_live_btc_entry_gate,
+        assumption_watch_context=assumption_watch_context,
     )
     write_json_atomic(args.output, pack)
     if args.wake_output is not None:
