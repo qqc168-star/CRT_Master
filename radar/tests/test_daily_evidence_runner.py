@@ -135,6 +135,14 @@ class DailyEvidenceRunnerTests(unittest.TestCase):
         self.assertIn("L5", pack["layers"])
         self.assertIsNone(pack["analyst_output"]["season"])
         self.assertIsNone(pack["analyst_output"]["capital_strategy"])
+        self.assertIn("btc_bull_validation", pack)
+        self.assertEqual(
+            pack["btc_bull_validation"]["authority"]["external_action_authority"],
+            "NONE",
+        )
+        self.assertFalse(
+            pack["btc_bull_validation"]["machine_may_confirm_bull_transition"]
+        )
         candidate = pack["formal_candidate"]
         self.assertEqual(candidate["candidate_status"], "FORMAL_CANDIDATE_NOT_APPROVED")
         self.assertEqual(candidate["model_state"], "BLOCKED")

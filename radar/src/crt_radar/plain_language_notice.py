@@ -23,6 +23,97 @@ def _canonical_hash(value: Any) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+
+def build_btc_transition_light(pack: dict[str, Any]) -> dict[str, Any]:
+    if pack.get("pack_state") == "BLOCKED":
+        source_state = "BLOCKED"
+        source_reason = "EVIDENCE_PACK_BLOCKED"
+    else:
+        overlay = pack.get("btc_bull_validation")
+        if isinstance(overlay, dict):
+            source_state = str(
+                overlay.get("state", "TRANSITION_UNRESOLVED")
+            )
+            source_reason = str(
+                overlay.get("reason", "OVERLAY_STATE")
+            )
+        else:
+            entry = pack.get("btc_entry_gate")
+            if isinstance(entry, dict):
+                if entry.get("state") == "BLOCKED":
+                    source_state = "BLOCKED"
+                else:
+                    source_state = str(
+                        entry.get(
+                            "transition_state",
+                            "TRANSITION_UNRESOLVED",
+                        )
+                    )
+                source_reason = str(
+                    entry.get("reason", "BTC_ENTRY_GATE_STATE")
+                )
+            else:
+                source_state = "TRANSITION_UNRESOLVED"
+                source_reason = "TRANSITION_EVIDENCE_NOT_AVAILABLE"
+
+    mapping = {
+        "BLOCKED": (
+            "GRAY",
+            "\u26aa",
+            "\u8cc7\u6599\u4e0d\u8db3\uff0c\u4e0d\u80fd\u53ef\u9760\u5224\u8b80",
+        ),
+        "BEAR_REJECTION_STRENGTHENED": (
+            "RED",
+            "\U0001f534",
+            "\u504f\u718a\u62d2\u7d55\u8b49\u64da\u660e\u986f\u589e\u5f37",
+        ),
+        "BEAR_REJECTION_PLAUSIBLE": (
+            "YELLOW",
+            "\U0001f7e1",
+            "\u51fa\u73fe\u504f\u718a\u8b66\u8a0a\uff0c\u4f46\u6a5f\u5236\u4ecd\u672a\u5b8c\u6574",
+        ),
+        "TRANSITION_UNRESOLVED": (
+            "YELLOW",
+            "\U0001f7e1",
+            "\u718a\u725b\u8f49\u63db\u4ecd\u672a\u89e3\u6c7a",
+        ),
+        "BULL_ACCEPTANCE_DEVELOPING": (
+            "YELLOW",
+            "\U0001f7e1",
+            "\u8f49\u725b\u63a5\u53d7\u5ea6\u8b49\u64da\u6b63\u5728\u767c\u5c55",
+        ),
+        "BULL_ACCEPTANCE_STRENGTHENED": (
+            "GREEN",
+            "\U0001f7e2",
+            "\u8f49\u725b\u63a5\u53d7\u5ea6\u8b49\u64da\u660e\u986f\u589e\u5f37",
+        ),
+    }
+
+    color, symbol, meaning = mapping.get(
+        source_state,
+        (
+            "GRAY",
+            "\u26aa",
+            "\u72c0\u614b\u7121\u6cd5\u53ef\u9760\u8f49\u8b6f",
+        ),
+    )
+
+    return {
+        "schema_version": "CRT_BTC_TRANSITION_PRESENTATION_LIGHT_V0.1",
+        "scope": "PRESENTATION_ONLY",
+        "color": color,
+        "symbol": symbol,
+        "state": source_state,
+        "meaning": meaning,
+        "source_reason": source_reason,
+        "formal_model_authority": "NONE",
+        "formal_threshold_authority": "NONE",
+        "external_action_authority": "NONE",
+        "external_action_performed": False,
+        "action_output": "NONE",
+    }
+
+
 def _top_change_lines(pack: dict[str, Any], limit: int = 3) -> list[str]:
     rows = pack.get("distillation", {}).get("top_changes", [])
     result: list[str] = []
@@ -94,6 +185,7 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
         "why_it_matters": why_it_matters,
         "position_context": _position_line(pack.get("private_context")),
         "data_limits": blockers,
+        "btc_transition_light": build_btc_transition_light(pack),
         "instruction_for_gpt": (
             "\u8acb\u7528\u7e41\u9ad4\u4e2d\u6587\u89e3\u91cb\u767c\u751f\u4ec0\u9ebc\u3001\u70ba\u4ec0\u9ebc\u91cd\u8981\u3001\u76ee\u524d\u6301\u5009\u662f\u5426\u9700\u8981\u91cd\u770b\uff1b\u4e0d\u5f97\u4ee3\u66ff\u4f7f\u7528\u8005\u4e0b\u55ae\u3002"
             if requested
