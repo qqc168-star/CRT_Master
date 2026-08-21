@@ -9,6 +9,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from crt_radar.btc_bull_validation import evaluate_btc_bull_validation
 from crt_radar.plain_language_notice import build_btc_transition_light
+from crt_radar.source_gate_runner import parse_price_structure
 
 
 def entry_gate(
@@ -192,6 +193,156 @@ class BtcBullValidationTests(unittest.TestCase):
         self.assertEqual(
             overlay["research_coordinates"]["formal_threshold_authority"],
             "NONE",
+        )
+
+    def test_price_structure_derives_breakout_volume_research_metrics(self):
+        start_ms = 1_700_000_000_000
+        day_ms = 86_400_000
+        payload = []
+
+        for index in range(201):
+            close = 10_000.0 + index
+            quote_volume = 200.0 if index == 200 else 100.0
+            taker_buy_quote = 120.0 if index == 200 else 50.0
+            open_ms = start_ms + index * day_ms
+            close_ms = open_ms + day_ms - 1
+
+            payload.append(
+                [
+                    open_ms,
+                    str(close - 1.0),
+                    str(close + 10.0),
+                    str(close - 10.0),
+                    str(close),
+                    "1.0",
+                    close_ms,
+                    str(quote_volume),
+                    100,
+                    "0.5",
+                    str(taker_buy_quote),
+                    "0",
+                ]
+            )
+
+        result = parse_price_structure(payload)
+
+        self.assertAlmostEqual(
+            result["quote_volume_rvol20"],
+            2.0,
+            places=12,
+        )
+        self.assertAlmostEqual(
+            result["taker_buy_quote_share_1d"],
+            0.6,
+            places=12,
+        )
+        self.assertGreater(result["cvd_20d_share"], 0.0)
+        self.assertEqual(
+            result["formal_composite_authority"],
+            "NONE",
+        )
+
+    def test_breakout_volume_quality_supportive(self):
+        overlay = evaluate_btc_bull_validation(
+            pack_state="READY_FOR_ANALYST",
+            btc_entry_gate=entry_gate(
+                "BULL_ACCEPTANCE_DEVELOPING",
+                constructive=True,
+            ),
+            transition_diagnostic=None,
+            layers={
+                "L6": {
+                    "metrics": {
+                        "quote_volume_rvol20": {"value": 1.25},
+                        "taker_buy_quote_share_1d": {"value": 0.58},
+                        "cvd_20d_share": {"value": 0.08},
+                    }
+                }
+            },
+            generated_at_ms=1,
+        )
+
+        row = next(
+            item
+            for item in overlay["checks"]
+            if item["check_id"] == "BREAKOUT_VOLUME_QUALITY"
+        )
+
+        self.assertEqual(row["status"], "SUPPORTIVE")
+        self.assertIn(
+            "BREAKOUT_VOLUME_QUALITY",
+            overlay["supportive_checks"],
+        )
+        self.assertNotIn(
+            "BREAKOUT_VOLUME_QUALITY",
+            overlay["pending_checks"],
+        )
+        self.assertEqual(
+            row["value"]["formal_threshold_authority"],
+            "NONE",
+        )
+
+    def test_breakout_volume_quality_adverse(self):
+        overlay = evaluate_btc_bull_validation(
+            pack_state="READY_FOR_ANALYST",
+            btc_entry_gate=entry_gate(
+                "TRANSITION_UNRESOLVED",
+            ),
+            transition_diagnostic=None,
+            layers={
+                "L6": {
+                    "metrics": {
+                        "quote_volume_rvol20": {"value": 1.30},
+                        "taker_buy_quote_share_1d": {"value": 0.42},
+                        "cvd_20d_share": {"value": -0.10},
+                    }
+                }
+            },
+            generated_at_ms=1,
+        )
+
+        row = next(
+            item
+            for item in overlay["checks"]
+            if item["check_id"] == "BREAKOUT_VOLUME_QUALITY"
+        )
+
+        self.assertEqual(row["status"], "ADVERSE")
+        self.assertIn(
+            "BREAKOUT_VOLUME_QUALITY",
+            overlay["adverse_checks"],
+        )
+
+    def test_breakout_volume_quality_mixed_when_volume_does_not_expand(self):
+        overlay = evaluate_btc_bull_validation(
+            pack_state="READY_FOR_ANALYST",
+            btc_entry_gate=entry_gate(
+                "BULL_ACCEPTANCE_DEVELOPING",
+                constructive=True,
+            ),
+            transition_diagnostic=None,
+            layers={
+                "L6": {
+                    "metrics": {
+                        "quote_volume_rvol20": {"value": 0.85},
+                        "taker_buy_quote_share_1d": {"value": 0.57},
+                        "cvd_20d_share": {"value": 0.06},
+                    }
+                }
+            },
+            generated_at_ms=1,
+        )
+
+        row = next(
+            item
+            for item in overlay["checks"]
+            if item["check_id"] == "BREAKOUT_VOLUME_QUALITY"
+        )
+
+        self.assertEqual(row["status"], "MIXED")
+        self.assertIn(
+            "BREAKOUT_VOLUME_QUALITY",
+            overlay["mixed_checks"],
         )
 
 

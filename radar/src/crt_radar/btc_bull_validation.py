@@ -69,6 +69,103 @@ def _l3_etp_flow(layers: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _l6_breakout_volume_quality(layers: dict[str, Any]) -> dict[str, Any]:
+    metrics = layers.get("L6", {}).get("metrics", {})
+    if not isinstance(metrics, dict):
+        metrics = {}
+
+    metric_names = (
+        "quote_volume_rvol20",
+        "taker_buy_quote_share_1d",
+        "cvd_20d_share",
+    )
+
+    values: dict[str, float] = {}
+    missing: list[str] = []
+
+    for metric_name in metric_names:
+        item = metrics.get(metric_name)
+        if not isinstance(item, dict):
+            missing.append(metric_name)
+            continue
+
+        value = item.get("value")
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        ):
+            missing.append(metric_name)
+            continue
+
+        values[metric_name] = float(value)
+
+    if missing:
+        return _check(
+            "BREAKOUT_VOLUME_QUALITY",
+            "PENDING",
+            "L6_SPOT_VOLUME_RESEARCH_METRICS_NOT_COMPLETE",
+            value={
+                "missing_metrics": sorted(missing),
+                "formal_threshold_authority": "NONE",
+                "formal_composite_authority": "NONE",
+                "source_scope": "BINANCE_BTCUSDT_DIRECTIONAL_PROXY",
+            },
+        )
+
+    rvol = values["quote_volume_rvol20"]
+    taker_buy_share = values["taker_buy_quote_share_1d"]
+    cvd_share = values["cvd_20d_share"]
+
+    volume_expanded = rvol > 1.0
+    latest_buy_dominant = taker_buy_share > 0.5
+    latest_sell_dominant = taker_buy_share < 0.5
+    persistent_buy_positive = cvd_share > 0.0
+    persistent_sell_negative = cvd_share < 0.0
+
+    if (
+        volume_expanded
+        and latest_buy_dominant
+        and persistent_buy_positive
+    ):
+        status = "SUPPORTIVE"
+        reason = "EXPANDED_SPOT_VOLUME_WITH_BUY_DOMINANCE_AND_POSITIVE_20D_CVD"
+    elif (
+        volume_expanded
+        and latest_sell_dominant
+        and persistent_sell_negative
+    ):
+        status = "ADVERSE"
+        reason = "EXPANDED_SPOT_VOLUME_WITH_SELL_DOMINANCE_AND_NEGATIVE_20D_CVD"
+    else:
+        status = "MIXED"
+        reason = "SPOT_VOLUME_DIRECTIONAL_EVIDENCE_MIXED"
+
+    return _check(
+        "BREAKOUT_VOLUME_QUALITY",
+        status,
+        reason,
+        value={
+            **values,
+            "volume_expanded": volume_expanded,
+            "latest_buy_dominant": latest_buy_dominant,
+            "persistent_buy_positive": persistent_buy_positive,
+            "natural_research_baselines": {
+                "quote_volume_rvol20": 1.0,
+                "taker_buy_quote_share_1d": 0.5,
+                "cvd_20d_share": 0.0,
+            },
+            "baseline_meaning": {
+                "quote_volume_rvol20": "LATEST_COMPLETE_DAY_VS_PRIOR_20_COMPLETE_DAY_MEAN",
+                "taker_buy_quote_share_1d": "LATEST_COMPLETE_DAY_BUY_SELL_MAJORITY",
+                "cvd_20d_share": "TWENTY_DAY_TAKER_IMBALANCE_SIGN",
+            },
+            "formal_threshold_authority": "NONE",
+            "formal_composite_authority": "NONE",
+            "source_scope": "BINANCE_BTCUSDT_DIRECTIONAL_PROXY",
+        },
+    )
+
+
 def evaluate_btc_bull_validation(
     *,
     pack_state: str,
@@ -180,11 +277,7 @@ def evaluate_btc_bull_validation(
 
     etp_check = _l3_etp_flow(layers)
 
-    volume_check = _check(
-        "BREAKOUT_VOLUME_QUALITY",
-        "PENDING",
-        "RVOL_AND_SPOT_VOLUME_DECOMPOSITION_NOT_YET_IN_OVERLAY_INPUT",
-    )
+    volume_check = _l6_breakout_volume_quality(layers)
 
     current_price = quantitative.get("current_price_usd")
     price_only_above_83k = (
@@ -246,6 +339,11 @@ def evaluate_btc_bull_validation(
             row["check_id"]
             for row in checks
             if row["status"] == "ADVERSE"
+        ],
+        "mixed_checks": [
+            row["check_id"]
+            for row in checks
+            if row["status"] == "MIXED"
         ],
         "pending_checks": [
             row["check_id"]

@@ -534,6 +534,22 @@ def parse_price_structure(payload: Any) -> dict[str, Any]:
     total_quote_volume = sum(bar["quote_volume"] for bar in parsed[-20:])
     if total_quote_volume <= 0:
         raise ContractViolation("20-day quote volume must be positive")
+
+    latest_quote_volume = parsed[-1]["quote_volume"]
+    latest_taker_buy_quote = parsed[-1]["taker_buy_quote"]
+    prior_20_quote_volumes = [
+        bar["quote_volume"]
+        for bar in parsed[-21:-1]
+    ]
+    prior_20_quote_volume_mean = statistics.fmean(prior_20_quote_volumes)
+    if latest_quote_volume <= 0:
+        raise ContractViolation("latest quote volume must be positive")
+    if prior_20_quote_volume_mean <= 0:
+        raise ContractViolation("prior 20-day mean quote volume must be positive")
+
+    quote_volume_rvol20 = latest_quote_volume / prior_20_quote_volume_mean
+    taker_buy_quote_share_1d = latest_taker_buy_quote / latest_quote_volume
+
     return {
         "as_of_ms": int(bars[-1][6]),
         "close_minus_sma200_over_atr20": (closes[-1] - statistics.fmean(closes[-200:])) / atr20,
@@ -542,6 +558,8 @@ def parse_price_structure(payload: Any) -> dict[str, Any]:
         ) / atr20,
         "return_20d_over_atr_vol": math.log(closes[-1] / closes[-21]) / ((atr20 / closes[-1]) * math.sqrt(20.0)),
         "cvd_20d_share": signed_quote_volume / total_quote_volume,
+        "quote_volume_rvol20": quote_volume_rvol20,
+        "taker_buy_quote_share_1d": taker_buy_quote_share_1d,
         "source_scope": "BINANCE_BTCUSDT_DIRECTIONAL_PROXY",
         "formal_composite_authority": "NONE",
     }

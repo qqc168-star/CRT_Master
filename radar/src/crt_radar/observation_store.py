@@ -157,12 +157,19 @@ def _metric_rows(family: str, parsed: dict[str, Any]) -> list[tuple[str, float]]
                 rows.append((metric, _finite(parsed.get(metric))))
         return rows
     if family == "PRICE_STRUCTURE_CONTEXT":
-        return [
+        rows = [
             ("close_minus_sma200_over_atr20", _finite(parsed.get("close_minus_sma200_over_atr20"))),
             ("sma50_minus_sma200_over_atr20", _finite(parsed.get("sma50_minus_sma200_over_atr20"))),
             ("return_20d_over_atr_vol", _finite(parsed.get("return_20d_over_atr_vol"))),
             ("cvd_20d_share", _finite(parsed.get("cvd_20d_share"))),
         ]
+        for metric in (
+            "quote_volume_rvol20",
+            "taker_buy_quote_share_1d",
+        ):
+            if parsed.get(metric) is not None:
+                rows.append((metric, _finite(parsed.get(metric))))
+        return rows
     return []
 
 
