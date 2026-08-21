@@ -1,0 +1,38 @@
+{
+  "schema_version": "CRT_STRC_Q3Q4_ROLLING_STRATEGY_V0.2",
+  "artifact_status": "USER_APPROVED",
+  "strategy_status": "ACTIVE_STRATEGY_HYPOTHESIS",
+  "formal_model_status": "NON_FORMAL",
+  "overlay_type": "ANALYST_STRATEGY_CONTEXT",
+  "supersedes": ["PRIOR_STRC_Q3Q4_STATIC_EXECUTION_HYPOTHESES"],
+  "approved_at": "2026-08-19",
+  "authority": {"production": "NOT_APPROVED", "external_action_authority": "NONE", "external_action_performed": false, "action_output": "NONE"},
+  "q3_sell_tranches": [
+    {"weight": 0.20, "target_price_usd": 97.50},
+    {"weight": 0.50, "target_price_usd": 98.90},
+    {"weight": 0.30, "target_price_usd": 99.80}
+  ],
+  "target_weighted_sell_price_usd": 98.89,
+  "q4_reentry_tranches": [
+    {"weight": 0.20, "max_price_usd": 86.00},
+    {"weight": 0.30, "max_price_usd": 83.00},
+    {"weight": 0.50, "max_price_usd": 80.00}
+  ],
+  "target_weighted_reentry_price_usd": 82.10,
+  "net_spread_contract": {"formula": "G_net = S - B - D - C", "minimum_usd_per_share": 10.0},
+  "issuer_weekly_review_required": true,
+  "issuer_review_fields": [
+    "repurchase_spend_usd", "repurchased_shares", "repurchase_avg_price_usd",
+    "cumulative_authorization_used_usd", "remaining_authorization_usd",
+    "execution_window", "disclosure_window", "reaction_window",
+    "comparable_market_volume", "open_market_participation_if_formula_ready",
+    "strc_ohlcv", "btc_net_flow", "mstr_issuance", "capital_source_mix"
+  ],
+  "analyst_guideposts": {
+    "market_handoff_supportive": {"repurchase_spend_usd_lte": 90000000, "strc_price_usd_gte": 97.0},
+    "issuer_dependence_warning": {"repurchase_spend_usd_gte": 100000000, "strc_price_usd_lt": 96.0},
+    "formal_threshold": false
+  },
+  "management_target_window": {"reference_date": "2026-09-08", "semantic": "REPORTED_POLICY_STATEMENT_REQUIRES_SOURCE_REVALIDATION", "guarantee": false},
+  "missing_evidence_behavior": {"affected_judgment": "BLOCKED", "action_output": "NONE"}
+}
