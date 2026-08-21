@@ -9,6 +9,7 @@ from typing import Any
 
 from .assumption_boundary_watch import evaluate_assumption_watch
 from .asset_strategy_delta import build_asset_strategy_delta
+from .btc_bull_validation import evaluate_btc_bull_validation
 from .change_engine import compute_changes, distill_top_changes
 from .observation_store import Observation, ObservationStore, extract_observations
 from .reflexivity_overlay import build_reflexivity_overlay
@@ -308,5 +309,12 @@ def build_evidence_pack(
             private_context=private_context,
         )
     pack["pack_state"] = _pack_state(source_gate, evidence_by_family, changes)
+    pack["btc_bull_validation"] = evaluate_btc_bull_validation(
+        pack_state=pack["pack_state"],
+        btc_entry_gate=btc_entry_gate,
+        transition_diagnostic=transition_diagnostic,
+        layers=layers,
+        generated_at_ms=generated_at,
+    )
     pack["evidence_pack_hash"] = _sha256(pack)
     return pack

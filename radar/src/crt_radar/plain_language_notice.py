@@ -23,6 +23,89 @@ def _canonical_hash(value: Any) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+
+def build_btc_transition_light(pack: dict[str, Any]) -> dict[str, Any]:
+    if pack.get("pack_state") == "BLOCKED":
+        source_state = "BLOCKED"
+        source_reason = "EVIDENCE_PACK_BLOCKED"
+    else:
+        overlay = pack.get("btc_bull_validation")
+        if isinstance(overlay, dict):
+            source_state = str(overlay.get("state", "TRANSITION_UNRESOLVED"))
+            source_reason = str(overlay.get("reason", "OVERLAY_STATE"))
+        else:
+            entry = pack.get("btc_entry_gate")
+            if isinstance(entry, dict):
+                if entry.get("state") == "BLOCKED":
+                    source_state = "BLOCKED"
+                else:
+                    source_state = str(
+                        entry.get("transition_state", "TRANSITION_UNRESOLVED")
+                    )
+                source_reason = str(entry.get("reason", "BTC_ENTRY_GATE_STATE"))
+            else:
+                source_state = "TRANSITION_UNRESOLVED"
+                source_reason = "TRANSITION_EVIDENCE_NOT_AVAILABLE"
+
+    mapping = {
+        "BLOCKED": (
+            "GRAY",
+            "?",
+            "???????????",
+        ),
+        "BEAR_REJECTION_STRENGTHENED": (
+            "RED",
+            "??",
+            "??????????",
+        ),
+        "BEAR_REJECTION_PLAUSIBLE": (
+            "YELLOW",
+            "??",
+            "??????????????",
+        ),
+        "TRANSITION_UNRESOLVED": (
+            "YELLOW",
+            "??",
+            "????????",
+        ),
+        "BULL_ACCEPTANCE_DEVELOPING": (
+            "YELLOW",
+            "??",
+            "???????????",
+        ),
+        "BULL_ACCEPTANCE_STRENGTHENED": (
+            "GREEN",
+            "??",
+            "???????????",
+        ),
+    }
+
+    color, symbol, meaning = mapping.get(
+        source_state,
+        (
+            "GRAY",
+            "?",
+            "????????",
+        ),
+    )
+
+    return {
+        "schema_version": "CRT_BTC_TRANSITION_PRESENTATION_LIGHT_V0.1",
+        "scope": "PRESENTATION_ONLY",
+        "color": color,
+        "symbol": symbol,
+        "state": source_state,
+        "meaning": meaning,
+        "source_reason": source_reason,
+        "formal_model_authority": "NONE",
+        "formal_threshold_authority": "NONE",
+        "external_action_authority": "NONE",
+        "external_action_performed": False,
+        "action_output": "NONE",
+    }
+
+
+
 def _top_change_lines(pack: dict[str, Any], limit: int = 3) -> list[str]:
     rows = pack.get("distillation", {}).get("top_changes", [])
     result: list[str] = []
@@ -94,6 +177,7 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
         "why_it_matters": why_it_matters,
         "position_context": _position_line(pack.get("private_context")),
         "data_limits": blockers,
+        "btc_transition_light": build_btc_transition_light(pack),
         "instruction_for_gpt": (
             "\u8acb\u7528\u7e41\u9ad4\u4e2d\u6587\u89e3\u91cb\u767c\u751f\u4ec0\u9ebc\u3001\u70ba\u4ec0\u9ebc\u91cd\u8981\u3001\u76ee\u524d\u6301\u5009\u662f\u5426\u9700\u8981\u91cd\u770b\uff1b\u4e0d\u5f97\u4ee3\u66ff\u4f7f\u7528\u8005\u4e0b\u55ae\u3002"
             if requested
