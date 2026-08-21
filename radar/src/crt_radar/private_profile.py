@@ -34,6 +34,60 @@ def _finite(value: Any, field: str, *, positive: bool = False, nonnegative: bool
     return number
 
 
+def _validate_weighted_tranches(rows: Any, field: str, *, price_field: str) -> tuple[list[dict[str, float]], float]:
+    if not isinstance(rows, list) or len(rows) != 3:
+        raise PrivateProfileError(f"{field} must contain exactly three tranches")
+    result: list[dict[str, float]] = []
+    weight_sum = 0.0
+    weighted_price = 0.0
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise PrivateProfileError(f"{field}[{index}] must be an object")
+        weight = _finite(row.get("weight"), f"{field}[{index}].weight", positive=True)
+        price = _finite(row.get(price_field), f"{field}[{index}].{price_field}", positive=True)
+        weight_sum += weight
+        weighted_price += weight * price
+        result.append({"weight": weight, price_field: price})
+    if not math.isclose(weight_sum, 1.0, rel_tol=0.0, abs_tol=1e-9):
+        raise PrivateProfileError(f"{field} weights must sum to 1")
+    return result, weighted_price
+
+
+def _validate_strc_tactical_strategy(payload: Any) -> dict[str, Any] | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise PrivateProfileError("strc.tactical_strategy must be an object")
+    if payload.get("strategy_status") != "ACTIVE_STRATEGY_HYPOTHESIS":
+        raise PrivateProfileError("strc.tactical_strategy.strategy_status must be ACTIVE_STRATEGY_HYPOTHESIS")
+    if payload.get("formal_model_status") != "NON_FORMAL":
+        raise PrivateProfileError("strc.tactical_strategy.formal_model_status must be NON_FORMAL")
+    q3_rows, weighted_sell = _validate_weighted_tranches(
+        payload.get("q3_sell_tranches"),
+        "strc.tactical_strategy.q3_sell_tranches",
+        price_field="target_price_usd",
+    )
+    q4_rows, weighted_reentry = _validate_weighted_tranches(
+        payload.get("q4_reentry_tranches"),
+        "strc.tactical_strategy.q4_reentry_tranches",
+        price_field="max_price_usd",
+    )
+    spread_floor = _finite(
+        payload.get("net_spread_floor_usd"),
+        "strc.tactical_strategy.net_spread_floor_usd",
+        positive=True,
+    )
+    result = json.loads(json.dumps(payload))
+    result["q3_sell_tranches"] = q3_rows
+    result["q4_reentry_tranches"] = q4_rows
+    result["derived"] = {
+        "weighted_q3_sell_price_usd": round(weighted_sell, 4),
+        "weighted_q4_reentry_price_usd": round(weighted_reentry, 4),
+        "net_spread_floor_usd": spread_floor,
+    }
+    return result
+
+
 def validate_private_profile(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise PrivateProfileError("private profile must be an object")
@@ -61,6 +115,7 @@ def validate_private_profile(payload: dict[str, Any]) -> dict[str, Any]:
         raise PrivateProfileError("strc.distribution_rate_mode must be DYNAMIC_LOCAL_VALUE")
     if strc.get("tax_treatment") != "RETURN_OF_CAPITAL":
         raise PrivateProfileError("strc.tax_treatment must be RETURN_OF_CAPITAL")
+    tactical_strategy = _validate_strc_tactical_strategy(strc.get("tactical_strategy"))
 
     goal = payload.get("cash_goal")
     if not isinstance(goal, dict):
@@ -75,6 +130,8 @@ def validate_private_profile(payload: dict[str, Any]) -> dict[str, Any]:
     minimum_shares_for_target = math.ceil(target / six_month_cash_per_share)
 
     result = json.loads(json.dumps(payload))
+    if tactical_strategy is not None:
+        result["strc"]["tactical_strategy"] = tactical_strategy
     result["derived"] = {
         "annual_cash_usd": round(shares * stated_amount * rate * received_fraction, 2),
         "six_month_cash_usd": round(shares * six_month_cash_per_share, 2),
