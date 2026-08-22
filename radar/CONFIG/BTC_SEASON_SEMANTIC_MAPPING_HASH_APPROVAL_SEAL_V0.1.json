@@ -1,0 +1,48 @@
+{
+  "schema_version": "CRT_BTC_SEASON_SEMANTIC_MAPPING_HASH_APPROVAL_SEAL_V0.1",
+  "seal_id": "CRT-BTC-SEASON-SEMANTIC-MAPPING-HASH-APPROVAL-SEAL-V0.1",
+  "status": "EXACT_MAPPING_HASH_APPROVED",
+  "approval_date": "2026-08-22",
+  "approval_actor": "CRT_OWNER_USER",
+  "approval_evidence": "EXPLICIT_USER_APPROVAL_2026-08-22",
+  "approved_artifact": {
+    "mapping_id": "CRT-BTC-SEASON-SEMANTIC-MAPPING-CANDIDATE-V0.1.1",
+    "mapping_schema_version": "CRT_BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.1",
+    "candidate_path": "CONFIG/BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.1.json",
+    "candidate_commit_sha": "744ac4341c02229b1a1d7a4954a4c4d253b86265",
+    "candidate_base_main_sha": "f4e35d889cc2721b4ce785a1bd6c1d695a626e23",
+    "candidate_pr_number": 32,
+    "mapping_canonical_sha256": "afe99dfaf4a2023d39c1589252b840b27daab106932b33783316fec71ab05e3a",
+    "validation_report_sha256": "b4501884e8c91a8c5de19e37f161346e5666a1ca30e4af27966290aaa4e63cc9",
+    "formal_chapter_7_sha256": "fb872d4ee4a9abb6697214b4d7f17e85459259f715199ffb0ce502420d754a26"
+  },
+  "approval_scope": {
+    "exact_mapping_hash": "APPROVED",
+    "formal_model": "NOT_APPROVED",
+    "runtime_binding": "NOT_APPROVED",
+    "season_output_authority": "NONE",
+    "production": "NOT_APPROVED",
+    "capital_decision_authority": "USER_ONLY",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "action_output": "NONE"
+  },
+  "gate_effect": {
+    "closed_gate": "AG_EXACT_MAPPING_HASH",
+    "remaining_approval_gates": [
+      "AG_RUNTIME_PROMOTION"
+    ],
+    "runtime_promotion_ready": false
+  },
+  "immutability_boundary": {
+    "approval_record_is_external_to_candidate": true,
+    "candidate_json_modified_by_approval": false,
+    "approved_mapping_canonical_sha256_must_remain_exact": true
+  },
+  "research_firewall": {
+    "research_delta_authority": "NONE",
+    "research_delta_may_approve_hash": false,
+    "research_delta_may_approve_runtime": false,
+    "research_delta_may_close_blocker": false
+  }
+}
