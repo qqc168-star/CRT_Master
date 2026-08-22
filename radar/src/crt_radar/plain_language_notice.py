@@ -25,14 +25,23 @@ def _canonical_hash(value: Any) -> str:
 
 
 def build_btc_transition_light(pack: dict[str, Any]) -> dict[str, Any]:
+    raw_source_state = "TRANSITION_UNRESOLVED"
+    control_transfer_loop_closed = False
     if pack.get("pack_state") == "BLOCKED":
         source_state = "BLOCKED"
+        raw_source_state = source_state
         source_reason = "EVIDENCE_PACK_BLOCKED"
     else:
         overlay = pack.get("btc_bull_validation")
         if isinstance(overlay, dict):
             source_state = str(
                 overlay.get("state", "TRANSITION_UNRESOLVED")
+            )
+            raw_source_state = str(
+                overlay.get("raw_entry_transition_state", source_state)
+            )
+            control_transfer_loop_closed = bool(
+                overlay.get("control_transfer_loop_closed")
             )
             source_reason = str(
                 overlay.get("reason", "OVERLAY_STATE")
@@ -49,12 +58,28 @@ def build_btc_transition_light(pack: dict[str, Any]) -> dict[str, Any]:
                             "TRANSITION_UNRESOLVED",
                         )
                     )
+                raw_source_state = source_state
+                control_validation = entry.get("control_transfer_validation")
+                if isinstance(control_validation, dict):
+                    control_transfer_loop_closed = bool(
+                        control_validation.get("control_transfer_loop_closed")
+                    )
                 source_reason = str(
                     entry.get("reason", "BTC_ENTRY_GATE_STATE")
                 )
             else:
                 source_state = "TRANSITION_UNRESOLVED"
+                raw_source_state = source_state
                 source_reason = "TRANSITION_EVIDENCE_NOT_AVAILABLE"
+
+    if (
+        source_state == "BULL_ACCEPTANCE_STRENGTHENED"
+        and not control_transfer_loop_closed
+    ):
+        source_state = "BULL_ACCEPTANCE_DEVELOPING"
+        source_reason = (
+            "PRESENTATION_DOWNGRADED_UNTIL_CONTROL_TRANSFER_LOOP_CLOSES"
+        )
 
     mapping = {
         "BLOCKED": (
@@ -80,12 +105,12 @@ def build_btc_transition_light(pack: dict[str, Any]) -> dict[str, Any]:
         "BULL_ACCEPTANCE_DEVELOPING": (
             "YELLOW",
             "\U0001f7e1",
-            "\u8f49\u725b\u63a5\u53d7\u5ea6\u8b49\u64da\u6b63\u5728\u767c\u5c55",
+            "\u4e0a\u653b\u8b49\u64da\u589e\u5f37\uff0c\u56de\u8e29\u3001\u66f4\u9ad8\u4f4e\u9ede\u8207\u518d\u653b\u5c1a\u672a\u5b8c\u6210\u9a57\u6536",
         ),
         "BULL_ACCEPTANCE_STRENGTHENED": (
             "GREEN",
             "\U0001f7e2",
-            "\u8f49\u725b\u63a5\u53d7\u5ea6\u8b49\u64da\u660e\u986f\u589e\u5f37",
+            "\u7814\u7a76\u50f9\u683c\u7d50\u69cb\u9589\u74b0\u5df2\u9a57\u6536\uff0c\u4ecd\u975e\u6b63\u5f0f\u5b63\u7bc0\u5224\u5b9a",
         ),
     }
 
@@ -99,11 +124,13 @@ def build_btc_transition_light(pack: dict[str, Any]) -> dict[str, Any]:
     )
 
     return {
-        "schema_version": "CRT_BTC_TRANSITION_PRESENTATION_LIGHT_V0.1",
+        "schema_version": "CRT_BTC_TRANSITION_PRESENTATION_LIGHT_V0.2",
         "scope": "PRESENTATION_ONLY",
         "color": color,
         "symbol": symbol,
         "state": source_state,
+        "raw_source_state": raw_source_state,
+        "control_transfer_loop_closed": control_transfer_loop_closed,
         "meaning": meaning,
         "source_reason": source_reason,
         "formal_model_authority": "NONE",

@@ -17,7 +17,10 @@ def entry_gate(
     *,
     constructive: bool = False,
     adverse: bool = False,
+    closed_loop: bool | None = None,
 ) -> dict:
+    if closed_loop is None:
+        closed_loop = transition_state == "BULL_ACCEPTANCE_STRENGTHENED"
     return {
         "state": "READY_FOR_ANALYST",
         "reason": "TEST",
@@ -43,6 +46,23 @@ def entry_gate(
                 "CONSTRUCTIVE" if constructive else "CAUTION" if adverse else None
             ),
             "long_fomo_rebuild": "NOT_SUPPORTED",
+        },
+        "control_transfer_validation": {
+            "state": "READY_FOR_ANALYST",
+            "reason": (
+                "BREAKOUT_PULLBACK_HIGHER_LOW_REATTACK_LOOP_CLOSED"
+                if closed_loop
+                else "BREAKOUT_OBSERVED_BUT_DEFENSIVE_PULLBACK_NOT_TESTED"
+            ),
+            "research_state": (
+                "CONTROL_TRANSFER_CANDIDATE"
+                if closed_loop
+                else "ATTACK_STRENGTHENED_DEFENSE_PENDING"
+            ),
+            "control_transfer_loop_closed": closed_loop,
+            "observations": {
+                "higher_low": "CONFIRMED" if closed_loop else "UNAVAILABLE",
+            },
         },
     }
 
@@ -77,7 +97,7 @@ class BtcBullValidationTests(unittest.TestCase):
         self.assertEqual(light["color"], "GRAY")
         self.assertEqual(light["state"], "BLOCKED")
 
-    def test_strengthened_maps_green_without_confirming_bull_market(self):
+    def test_closed_loop_strengthened_maps_green_without_confirming_bull_market(self):
         overlay = evaluate_btc_bull_validation(
             pack_state="READY_FOR_ANALYST",
             btc_entry_gate=entry_gate(
@@ -128,6 +148,33 @@ class BtcBullValidationTests(unittest.TestCase):
             light["formal_threshold_authority"],
             "NONE",
         )
+
+    def test_strengthened_without_closed_loop_is_downgraded_to_yellow(self):
+        gate = entry_gate(
+            "BULL_ACCEPTANCE_STRENGTHENED",
+            constructive=True,
+            closed_loop=False,
+        )
+        overlay = evaluate_btc_bull_validation(
+            pack_state="READY_FOR_ANALYST",
+            btc_entry_gate=gate,
+            transition_diagnostic=None,
+            layers={},
+            generated_at_ms=1,
+        )
+        self.assertEqual(overlay["raw_entry_transition_state"], "BULL_ACCEPTANCE_STRENGTHENED")
+        self.assertEqual(overlay["state"], "BULL_ACCEPTANCE_DEVELOPING")
+        self.assertFalse(overlay["control_transfer_loop_closed"])
+
+        light = build_btc_transition_light(
+            {
+                "pack_state": "READY_FOR_ANALYST",
+                "btc_bull_validation": overlay,
+            }
+        )
+        self.assertEqual(light["color"], "YELLOW")
+        self.assertEqual(light["state"], "BULL_ACCEPTANCE_DEVELOPING")
+        self.assertFalse(light["control_transfer_loop_closed"])
 
     def test_developing_maps_yellow(self):
         overlay = evaluate_btc_bull_validation(

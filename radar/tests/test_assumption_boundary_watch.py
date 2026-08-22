@@ -23,13 +23,24 @@ class AssumptionBoundaryWatchTests(unittest.TestCase):
             },
         }
 
-    def gate(self, transition: str, eligibility: str, constructive: bool = True):
+    def gate(
+        self,
+        transition: str,
+        eligibility: str,
+        constructive: bool = True,
+        closed_loop: bool | None = None,
+    ):
+        if closed_loop is None:
+            closed_loop = transition == "BULL_ACCEPTANCE_STRENGTHENED"
         return {
             "state": "READY_FOR_ANALYST",
             "transition_state": transition,
             "decision_eligibility": eligibility,
             "research_corridor": {"formal_threshold_authority": "NONE"},
             "mechanism_support": {"constructive": constructive},
+            "control_transfer_validation": {
+                "control_transfer_loop_closed": closed_loop,
+            },
         }
 
     def test_bull_acceptance_challenges_lower_entry_base_case(self):
@@ -58,6 +69,22 @@ class AssumptionBoundaryWatchTests(unittest.TestCase):
         )
         rows = {row["id"]: row for row in result["assumptions"]}
         self.assertEqual(rows["PRICE_ONLY_CANNOT_PROMOTE_ENTRY"]["status"], "CHALLENGED")
+
+    def test_probe_without_closed_control_transfer_loop_is_challenged(self):
+        result = evaluate_assumption_watch(
+            btc_entry_gate=self.gate(
+                "BULL_ACCEPTANCE_STRENGTHENED",
+                "PROBE_ELIGIBLE",
+                True,
+                closed_loop=False,
+            ),
+            research_context=self.context,
+        )
+        rows = {row["id"]: row for row in result["assumptions"]}
+        self.assertEqual(
+            rows["CONTROL_TRANSFER_LOOP_REQUIRED_FOR_PROBE"]["status"],
+            "CHALLENGED",
+        )
 
     def test_formal_corridor_authority_blocks_boundary(self):
         gate = self.gate("TRANSITION_UNRESOLVED", "WAIT", False)

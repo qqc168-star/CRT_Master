@@ -39,6 +39,27 @@ class BtcDecisionSupportTests(unittest.TestCase):
             },
         }
 
+    def closed_loop_evidence(self):
+        return {
+            "schema_version": "CRT_BTC_CONTROL_TRANSFER_EVIDENCE_V0.1",
+            "authority": {
+                "formal_model_authority": "NONE",
+                "formal_weight_authority": "NONE",
+                "formal_threshold_authority": "NONE",
+                "season_transition_authority": "NONE",
+                "external_action_authority": "NONE",
+                "external_action_performed": False,
+            },
+            "observations": {
+                "meaningful_breakout": "CONFIRMED",
+                "meaningful_pullback": "CONFIRMED",
+                "higher_low": "CONFIRMED",
+                "reattack": "CONFIRMED",
+                "prior_control_high_break": "CONFIRMED",
+                "invalidating_lower_low": "NOT_OBSERVED",
+            },
+        }
+
     def test_lower_corridor_acceptance_is_watch_not_probe(self):
         structure = {
             "current_price_usd": 69500.0,
@@ -60,7 +81,7 @@ class BtcDecisionSupportTests(unittest.TestCase):
         self.assertFalse(result["machine_may_output_trade_action"])
         self.assertEqual(result["external_action_authority"], "NONE")
 
-    def test_upper_corridor_acceptance_can_be_probe_eligible(self):
+    def test_upper_corridor_attack_without_defense_remains_watch(self):
         structure = {
             "current_price_usd": 71500.0,
             "last_closed_1h_usd": 71300.0,
@@ -76,8 +97,36 @@ class BtcDecisionSupportTests(unittest.TestCase):
             structure=structure,
             research_context=self.context,
         )
+        self.assertEqual(result["transition_state"], "BULL_ACCEPTANCE_DEVELOPING")
+        self.assertEqual(result["decision_eligibility"], "WATCH")
+        self.assertEqual(
+            result["control_transfer_validation"]["state"],
+            "NOT_AVAILABLE",
+        )
+        self.assertFalse(result["machine_may_confirm_bull_transition"])
+
+    def test_closed_control_transfer_loop_can_be_probe_eligible(self):
+        structure = {
+            "current_price_usd": 71500.0,
+            "last_closed_1h_usd": 71300.0,
+            "last_closed_4h_usd": 71150.0,
+            "last_closed_daily_usd": 70500.0,
+            "sma200_closed_usd": 69000.0,
+            "sma200_provisional_usd": 69050.0,
+            "current_vs_sma200_provisional_pct": 3.55,
+            "daily_close_vs_sma200_closed_pct": 2.17,
+        }
+        result = evaluate_btc_entry_gate(
+            transition_diagnostic=self.transition,
+            structure=structure,
+            research_context=self.context,
+            control_transfer_evidence=self.closed_loop_evidence(),
+        )
         self.assertEqual(result["transition_state"], "BULL_ACCEPTANCE_STRENGTHENED")
         self.assertEqual(result["decision_eligibility"], "PROBE_ELIGIBLE")
+        self.assertTrue(
+            result["control_transfer_validation"]["control_transfer_loop_closed"]
+        )
         self.assertFalse(result["machine_may_confirm_bull_transition"])
 
     def test_bear_rejection_strengthens_only_with_adverse_mechanism(self):

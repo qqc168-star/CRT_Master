@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-SCHEMA_VERSION = "CRT_ASSET_STRATEGY_DELTA_V0.1"
+SCHEMA_VERSION = "CRT_ASSET_STRATEGY_DELTA_V0.2"
 
 
 def _private_profile(private_context: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -20,7 +20,20 @@ def build_asset_strategy_delta(
 ) -> dict[str, Any]:
     gate = btc_entry_gate if isinstance(btc_entry_gate, dict) else {}
     transition = str(gate.get("transition_state", "TRANSITION_UNRESOLVED"))
-    eligibility = str(gate.get("decision_eligibility", "WAIT"))
+    raw_eligibility = str(gate.get("decision_eligibility", "WAIT"))
+    control_transfer = (
+        gate.get("control_transfer_validation")
+        if isinstance(gate.get("control_transfer_validation"), dict)
+        else {}
+    )
+    control_transfer_loop_closed = bool(
+        control_transfer.get("control_transfer_loop_closed")
+    )
+    eligibility = raw_eligibility
+    eligibility_guard_reason = "UNCHANGED"
+    if raw_eligibility == "PROBE_ELIGIBLE" and not control_transfer_loop_closed:
+        eligibility = "WATCH"
+        eligibility_guard_reason = "PROBE_DOWNGRADED_UNTIL_CONTROL_TRANSFER_LOOP_CLOSES"
     watch = assumption_watch if isinstance(assumption_watch, dict) else {}
     profile = _private_profile(private_context)
 
@@ -84,6 +97,9 @@ def build_asset_strategy_delta(
         "state": "READY_FOR_ANALYST" if gate else "BLOCKED",
         "btc_transition_state": transition,
         "btc_decision_eligibility": eligibility,
+        "raw_btc_decision_eligibility": raw_eligibility,
+        "eligibility_guard_reason": eligibility_guard_reason,
+        "control_transfer_loop_closed": control_transfer_loop_closed,
         "assumption_watch_state": watch.get("state"),
         "income_engine": income,
         "assets": {

@@ -9,7 +9,9 @@ from pathlib import Path
 from statistics import fmean
 from typing import Any, Callable
 
-SCHEMA_VERSION = "CRT_BTC_ENTRY_GATE_V0.1"
+from .btc_transition_research_eval import evaluate_control_transfer_evidence
+
+SCHEMA_VERSION = "CRT_BTC_ENTRY_GATE_V0.2"
 CONTEXT_SCHEMA_VERSION = "CRT_BTC_ENTRY_GATE_RESEARCH_CONTEXT_V0.1"
 USER_AGENT = "CRT-Radar/BTC-entry-gate research-only read-only"
 SPOT_KLINES = "https://data-api.binance.vision/api/v3/klines"
@@ -291,6 +293,7 @@ def evaluate_btc_entry_gate(
     transition_diagnostic: dict[str, Any] | None,
     structure: dict[str, Any],
     research_context: dict[str, Any],
+    control_transfer_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     context = research_context.get("context") if research_context.get("state") == "AVAILABLE" else None
     if not isinstance(context, dict):
@@ -327,15 +330,29 @@ def evaluate_btc_entry_gate(
         and long_fomo != "SUPPORTED"
     )
     adverse_mechanism = absorption == "NOT_SUPPORTED" or leverage == "CAUTION"
+    control_transfer = evaluate_control_transfer_evidence(
+        control_transfer_evidence
+    )
+    control_transfer_loop_closed = bool(
+        control_transfer.get("control_transfer_loop_closed")
+    )
 
     transition_state = "TRANSITION_UNRESOLVED"
     decision_eligibility = "WAIT"
     reason = "CORRIDOR_OR_MECHANISM_NOT_YET_DECISIVE"
 
     if accepted_upper and provisional_reclaim and constructive_mechanism:
-        transition_state = "BULL_ACCEPTANCE_STRENGTHENED"
-        decision_eligibility = "PROBE_ELIGIBLE"
-        reason = "UPPER_CORRIDOR_ACCEPTED_WITH_CONSTRUCTIVE_MECHANISM"
+        if control_transfer_loop_closed:
+            transition_state = "BULL_ACCEPTANCE_STRENGTHENED"
+            decision_eligibility = "PROBE_ELIGIBLE"
+            reason = "UPPER_CORRIDOR_ACCEPTED_WITH_CLOSED_CONTROL_TRANSFER_LOOP"
+        else:
+            transition_state = "BULL_ACCEPTANCE_DEVELOPING"
+            decision_eligibility = "WATCH"
+            reason = (
+                "UPPER_CORRIDOR_ATTACK_SUPPORTED_BUT_"
+                "CONTROL_TRANSFER_LOOP_NOT_CLOSED"
+            )
     elif accepted_lower and provisional_reclaim and constructive_mechanism:
         transition_state = "BULL_ACCEPTANCE_DEVELOPING"
         decision_eligibility = "WATCH"
@@ -384,6 +401,7 @@ def evaluate_btc_entry_gate(
             "constructive": constructive_mechanism,
             "adverse": adverse_mechanism,
         },
+        "control_transfer_validation": control_transfer,
         "signal_roles": build_signal_role_classification(transition_diagnostic, structure),
         "action_output": "NONE",
         "external_action_authority": "NONE",
@@ -398,6 +416,7 @@ def run_live_btc_entry_gate(
     *,
     transition_diagnostic: dict[str, Any] | None,
     research_context: dict[str, Any],
+    control_transfer_evidence: dict[str, Any] | None = None,
     now_ms: int | None = None,
     http_json: Callable[[str], Any] | None = None,
 ) -> dict[str, Any]:
@@ -410,6 +429,7 @@ def run_live_btc_entry_gate(
             transition_diagnostic=transition_diagnostic,
             structure=structure,
             research_context=research_context,
+            control_transfer_evidence=control_transfer_evidence,
         )
     except Exception as exc:
         return _blocked(f"BTC_ENTRY_GATE_INPUT_OR_RECONSTRUCTION_FAILED:{type(exc).__name__}:{exc}")

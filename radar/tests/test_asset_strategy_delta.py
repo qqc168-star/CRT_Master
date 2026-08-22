@@ -31,7 +31,13 @@ class AssetStrategyDeltaTests(unittest.TestCase):
 
     def test_bull_probe_strengthens_growth_direction_but_mstr_and_asst_remain_blocked(self):
         result = build_asset_strategy_delta(
-            btc_entry_gate={"transition_state": "BULL_ACCEPTANCE_STRENGTHENED", "decision_eligibility": "PROBE_ELIGIBLE"},
+            btc_entry_gate={
+                "transition_state": "BULL_ACCEPTANCE_STRENGTHENED",
+                "decision_eligibility": "PROBE_ELIGIBLE",
+                "control_transfer_validation": {
+                    "control_transfer_loop_closed": True,
+                },
+            },
             assumption_watch={"state": "CHALLENGED"},
             private_context=self.private_context,
         )
@@ -40,6 +46,20 @@ class AssetStrategyDeltaTests(unittest.TestCase):
         self.assertEqual(result["assets"]["ASST"]["decision_support"], "BLOCKED")
         self.assertIn("MNAV", " ".join(result["assets"]["MSTR"]["blocked_reasons"]))
         self.assertIn("DILUTION", " ".join(result["assets"]["ASST"]["blocked_reasons"]))
+
+    def test_probe_without_closed_control_transfer_loop_is_downgraded(self):
+        result = build_asset_strategy_delta(
+            btc_entry_gate={
+                "transition_state": "BULL_ACCEPTANCE_STRENGTHENED",
+                "decision_eligibility": "PROBE_ELIGIBLE",
+            },
+            assumption_watch={"state": "CHALLENGED"},
+            private_context=self.private_context,
+        )
+        self.assertEqual(result["raw_btc_decision_eligibility"], "PROBE_ELIGIBLE")
+        self.assertEqual(result["btc_decision_eligibility"], "WATCH")
+        self.assertEqual(result["assets"]["BTC"]["decision_support"], "WATCH")
+        self.assertEqual(result["assets"]["BTC"]["strategy_delta"], "STRENGTHEN_WATCH")
 
     def test_bear_rejection_weakens_growth_direction(self):
         result = build_asset_strategy_delta(
