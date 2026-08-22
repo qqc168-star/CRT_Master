@@ -14,7 +14,13 @@ from .candidate_engine import (
     load_registry,
     validate_registry,
 )
-from .observation_store import ObservationStore
+from .observation_store import ObservationRevisionConflict, ObservationStore
+from .oi_revision_policy import (
+    EXPECTED_POLICY_CANONICAL_SHA256,
+    OiRevisionPolicyError,
+    POLICY_ID,
+    is_scoped_metric,
+)
 
 
 RADAR_ROOT = Path(__file__).resolve().parents[2]
@@ -171,6 +177,7 @@ def _metric_observation(
     store: ObservationStore,
     *,
     needs_history: bool,
+    evaluation_at_ms: int,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     feature_id = str(binding["feature_id"])
     layer = layers.get(binding["layer_id"])
@@ -208,7 +215,23 @@ def _metric_observation(
     if needs_history:
         history: list[dict[str, Any]] = []
         history_blocked = False
-        for row in store.series(binding["input_family"], binding["metric"]):
+        try:
+            rows = (
+                store.point_in_time_series(
+                    binding["input_family"],
+                    binding["metric"],
+                    visible_at_ms=evaluation_at_ms,
+                )
+                if is_scoped_metric(binding["input_family"], binding["metric"])
+                else store.series(binding["input_family"], binding["metric"])
+            )
+        except ObservationRevisionConflict as exc:
+            blockers.append(f"{feature_id}_{str(exc).split(':', 1)[0]}")
+            rows = []
+        except OiRevisionPolicyError:
+            blockers.append(f"{feature_id}_REVISION_POLICY_INVALID_BLOCKED")
+            rows = []
+        for row in rows:
             if row.as_of_ms >= as_of_ms:
                 continue
             if row.source_id not in binding["allowed_source_ids"] or not row.quality_state.startswith("VALID"):
@@ -247,6 +270,7 @@ def evaluate_v110_candidate(
     *,
     contract: dict[str, Any] | None = None,
     registry: dict[str, Any] | None = None,
+    evaluation_at_ms: int | None = None,
 ) -> dict[str, Any]:
     candidate_contract = deepcopy(contract if contract is not None else load_contract())
     locked_registry = deepcopy(registry if registry is not None else load_locked_registry())
@@ -255,6 +279,32 @@ def evaluate_v110_candidate(
         raise V110CandidateError("CONTRACT_INVALID: " + "; ".join(errors))
     if not isinstance(layers, dict):
         raise V110CandidateError("LAYERS_NOT_OBJECT")
+
+    if evaluation_at_ms is None:
+        layer_times: list[int] = []
+        for layer in layers.values():
+            if not isinstance(layer, dict):
+                continue
+            metrics = layer.get("metrics")
+            if not isinstance(metrics, dict):
+                continue
+            for item in metrics.values():
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    layer_times.append(int(item.get("as_of_ms")))
+                except (TypeError, ValueError):
+                    continue
+        if not layer_times:
+            raise V110CandidateError("EVALUATION_AT_INVALID")
+        evaluation_at = max(layer_times)
+    else:
+        try:
+            evaluation_at = int(evaluation_at_ms)
+        except (TypeError, ValueError) as exc:
+            raise V110CandidateError("EVALUATION_AT_INVALID") from exc
+    if evaluation_at <= 0:
+        raise V110CandidateError("EVALUATION_AT_INVALID")
 
     index = _feature_index(locked_registry)
     observations: dict[str, Any] = {}
@@ -267,6 +317,7 @@ def evaluate_v110_candidate(
             binding,
             store,
             needs_history=needs_history,
+            evaluation_at_ms=evaluation_at,
         )
         input_blockers.extend(blockers)
         if observation is not None:
@@ -285,6 +336,7 @@ def evaluate_v110_candidate(
             validation_binding,
             store,
             needs_history=False,
+            evaluation_at_ms=evaluation_at,
         )
         input_blockers.extend(blockers)
         if observation is not None:
@@ -309,6 +361,12 @@ def evaluate_v110_candidate(
         "candidate_contract_hash": canonical_hash(candidate_contract),
         "candidate_registry_hash": canonical_hash(locked_registry),
         "candidate_input_hash": canonical_hash(observations),
+        "history_resolution": {
+            "evaluation_at_ms": evaluation_at,
+            "l4_oi_policy_id": POLICY_ID,
+            "l4_oi_policy_canonical_sha256": EXPECTED_POLICY_CANONICAL_SHA256,
+            "scope": "CANDIDATE_EVIDENCE_AND_HISTORY_REPLAY_ONLY",
+        },
         "input_state": "COMPLETE" if not input_blockers else "BLOCKED",
         "input_blocked_reasons": sorted(set(input_blockers)),
         "model_state": model_state,

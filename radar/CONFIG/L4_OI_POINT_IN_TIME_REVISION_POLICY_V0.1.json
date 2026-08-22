@@ -1,0 +1,91 @@
+{
+  "schema_version": "CRT_L4_OI_POINT_IN_TIME_REVISION_POLICY_V0.1",
+  "policy_id": "CRT-L4-OI-POINT-IN-TIME-REVISION-POLICY-V0.1",
+  "status": "ENGINEERING_CANDIDATE_NOT_APPROVED",
+  "base_main_sha": "3d40a230f1cea08c253f0dafaa5f3a15ad876cb8",
+  "purpose": "Resolve duplicate L4 open-interest observation timestamps without deleting revisions or exposing information that was unavailable at the evaluation instant.",
+  "engineering_registry_dependency": {
+    "path": "CONFIG/SOURCE_REGISTRY_V1.2.json",
+    "registry_id": "CRT-RADAR-SOURCE-REGISTRY-V1.4-WIP",
+    "canonical_sha256": "30ee09f0c6403c9d782a49411c61c24b91d6522d8c4960c4dfd6ef572e7375bc",
+    "authority": "PINNED_ENGINEERING_SOURCE_IDENTITY_ONLY",
+    "may_be_treated_as_formal_season_source_authority": false
+  },
+  "scope": {
+    "layer_id": "AS-L4",
+    "series": [
+      {
+        "input_family": "OPEN_INTEREST",
+        "metric": "open_interest_contracts",
+        "source_id": "CRT-CONN-BTC-DERIV-BINANCE-OI-001"
+      },
+      {
+        "input_family": "OPEN_INTEREST_NOTIONAL",
+        "metric": "open_interest_notional_usd",
+        "source_id": "CRT-CONN-BTC-DERIV-BINANCE-OI-NOTIONAL-001"
+      },
+      {
+        "input_family": "OPEN_INTEREST_NOTIONAL",
+        "metric": "oi_to_market_cap_pct",
+        "source_id": "CRT-CONN-BTC-DERIV-BINANCE-OI-NOTIONAL-001"
+      }
+    ]
+  },
+  "point_in_time_contract": {
+    "observation_identity_fields": [
+      "input_family",
+      "metric",
+      "as_of_ms"
+    ],
+    "observation_clock_field": "as_of_ms",
+    "availability_proxy_field": "recorded_at_ms",
+    "availability_proxy_semantics": "CRT_FIRST_RECORDED_AT_OR_AFTER_SOURCE_AVAILABILITY",
+    "visibility_rule": "recorded_at_ms <= evaluation_at_ms",
+    "selection_rule": "For each observation identity, select the visible row with the greatest recorded_at_ms.",
+    "future_revision_rule": "A row with recorded_at_ms greater than evaluation_at_ms is invisible.",
+    "same_release_tie_rule": "Two non-deduplicated rows at the selected recorded_at_ms for one observation identity are ambiguous and block the affected series.",
+    "source_identity_rule": "Every visible row in scope must retain the pinned AS-L4 source_id; source substitution is not a revision.",
+    "ordering_rule": "Selected observations are ordered by as_of_ms only after revision resolution.",
+    "raw_retention_rule": "All distinct evidence revisions remain append-only in ObservationStore.",
+    "forbidden_resolution_rules": [
+      "DELETE_OLDER_REVISION",
+      "OVERWRITE_IN_PLACE",
+      "LATEST_DATABASE_ROW_WINS",
+      "HIGHEST_OR_LOWEST_VALUE_WINS",
+      "EVIDENCE_HASH_LEXICAL_TIE_BREAK",
+      "BACKDATE_RECORDED_AT",
+      "SOURCE_OR_VENUE_SUBSTITUTION",
+      "ZERO_OR_FORWARD_FILL"
+    ]
+  },
+  "fail_closed_states": {
+    "ambiguous_selected_revision": "AMBIGUOUS_REVISION_BLOCKED",
+    "invalid_clock_order": "REVISION_CLOCK_INVALID_BLOCKED",
+    "source_identity_mismatch": "SOURCE_IDENTITY_MISMATCH_BLOCKED",
+    "policy_identity_or_hash_drift": "REVISION_POLICY_INVALID_BLOCKED"
+  },
+  "integration_boundary": {
+    "allowed_consumers": [
+      "CHANGE_ENGINE_OI_HISTORY",
+      "V110_CANDIDATE_L4_OI_HISTORY"
+    ],
+    "raw_store_api_remains_append_only": true,
+    "may_change_weights_or_thresholds": false,
+    "may_change_mnav_semantics": false,
+    "may_approve_formal_model": false,
+    "may_bind_production_runtime": false,
+    "may_determine_btc_season": false,
+    "season_output": null
+  },
+  "authority": {
+    "candidate_build": "USER_APPROVED_2026-08-22",
+    "exact_policy_hash": "NOT_YET_APPROVED",
+    "formal_model": "NOT_APPROVED",
+    "runtime_binding": "NOT_APPROVED",
+    "production": "NOT_APPROVED",
+    "capital_decision_authority": "USER_ONLY",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "action_output": "NONE"
+  }
+}

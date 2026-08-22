@@ -206,6 +206,13 @@ def _pack_state(source_gate: dict[str, Any], evidence_by_family: dict[str, dict[
         for metric in changes.values()
         for horizon in metric.get("horizons", {}).values()
     )
+    history_blocked = any(
+        str(horizon.get("history_state", "")).endswith("_BLOCKED")
+        for metric in changes.values()
+        for horizon in metric.get("horizons", {}).values()
+    )
+    if history_blocked:
+        return "BLOCKED"
     if optional_missing or not history_available:
         return "PARTIAL_FOR_ANALYST"
     return "READY_FOR_ANALYST"
@@ -248,7 +255,11 @@ def build_evidence_pack(
         store.record(observations)
         changes = compute_changes(store, observations)
         top_changes = distill_top_changes(changes, limit=8)
-        formal_candidate = evaluate_v110_candidate(layers, store)
+        formal_candidate = evaluate_v110_candidate(
+            layers,
+            store,
+            evaluation_at_ms=generated_at,
+        )
 
     pack: dict[str, Any] = {
         "schema_version": PACK_SCHEMA_VERSION,

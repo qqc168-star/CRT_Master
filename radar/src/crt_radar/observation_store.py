@@ -7,6 +7,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
+from .oi_revision_policy import (
+    OiRevisionPolicyError,
+    assert_policy_valid,
+    expected_source_id,
+    is_scoped_metric,
+)
+
 
 @dataclass(frozen=True)
 class Observation:
@@ -21,6 +28,10 @@ class Observation:
     registry_hash: str
     recorded_run_id: str
     recorded_at_ms: int
+
+
+class ObservationRevisionConflict(ValueError):
+    pass
 
 
 COMPARABLE_METRICS = {
@@ -305,27 +316,8 @@ class ObservationStore:
     def count(self) -> int:
         return int(self.conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0])
 
-    def latest_at_or_before(
-        self,
-        input_family: str,
-        metric: str,
-        target_ms: int,
-        *,
-        max_gap_ms: int,
-    ) -> Observation | None:
-        row = self.conn.execute(
-            """
-            SELECT * FROM observations
-            WHERE input_family = ? AND metric = ? AND as_of_ms <= ?
-            ORDER BY as_of_ms DESC
-            LIMIT 1
-            """,
-            (input_family, metric, int(target_ms)),
-        ).fetchone()
-        if row is None:
-            return None
-        if int(target_ms) - int(row["as_of_ms"]) > int(max_gap_ms):
-            return None
+    @staticmethod
+    def _from_row(row: sqlite3.Row) -> Observation:
         return Observation(
             layer_id=row["layer_id"],
             input_family=row["input_family"],
@@ -340,28 +332,112 @@ class ObservationStore:
             recorded_at_ms=int(row["recorded_at_ms"]),
         )
 
+    def point_in_time_series(
+        self,
+        input_family: str,
+        metric: str,
+        *,
+        visible_at_ms: int,
+    ) -> list[Observation]:
+        if not is_scoped_metric(input_family, metric):
+            raise OiRevisionPolicyError("METRIC_NOT_IN_L4_OI_REVISION_POLICY")
+        assert_policy_valid()
+        try:
+            visible_at = int(visible_at_ms)
+        except (TypeError, ValueError) as exc:
+            raise OiRevisionPolicyError("EVALUATION_AT_INVALID") from exc
+        if visible_at < 0:
+            raise OiRevisionPolicyError("EVALUATION_AT_INVALID")
+
+        expected_source = expected_source_id(input_family, metric)
+        rows = self.conn.execute(
+            """
+            SELECT * FROM observations
+            WHERE input_family = ? AND metric = ? AND recorded_at_ms <= ?
+            ORDER BY as_of_ms ASC, recorded_at_ms ASC, id ASC
+            """,
+            (input_family, metric, visible_at),
+        ).fetchall()
+        revisions_by_as_of: dict[int, list[Observation]] = {}
+        for row in rows:
+            observation = self._from_row(row)
+            if observation.recorded_at_ms < observation.as_of_ms:
+                raise ObservationRevisionConflict(
+                    f"REVISION_CLOCK_INVALID_BLOCKED:{input_family}:{metric}:{observation.as_of_ms}"
+                )
+            if observation.layer_id != "AS-L4" or observation.source_id != expected_source:
+                raise ObservationRevisionConflict(
+                    f"SOURCE_IDENTITY_MISMATCH_BLOCKED:{input_family}:{metric}:{observation.as_of_ms}"
+                )
+            revisions_by_as_of.setdefault(observation.as_of_ms, []).append(observation)
+
+        selected: list[Observation] = []
+        for as_of_ms in sorted(revisions_by_as_of):
+            revisions = revisions_by_as_of[as_of_ms]
+            selected_recorded_at = max(row.recorded_at_ms for row in revisions)
+            candidates = [
+                row
+                for row in revisions
+                if row.recorded_at_ms == selected_recorded_at
+            ]
+            if len(candidates) != 1:
+                raise ObservationRevisionConflict(
+                    f"AMBIGUOUS_REVISION_BLOCKED:{input_family}:{metric}:{as_of_ms}:{selected_recorded_at}"
+                )
+            selected.append(candidates[0])
+        return selected
+
+    def latest_at_or_before(
+        self,
+        input_family: str,
+        metric: str,
+        target_ms: int,
+        *,
+        max_gap_ms: int,
+        visible_at_ms: int | None = None,
+    ) -> Observation | None:
+        if is_scoped_metric(input_family, metric):
+            if visible_at_ms is None:
+                raise OiRevisionPolicyError(
+                    "L4_OI_POINT_IN_TIME_VISIBILITY_REQUIRED"
+                )
+            series = self.point_in_time_series(
+                input_family,
+                metric,
+                visible_at_ms=visible_at_ms,
+            )
+            eligible = [row for row in series if row.as_of_ms <= int(target_ms)]
+            if not eligible:
+                return None
+            observation = eligible[-1]
+            if int(target_ms) - observation.as_of_ms > int(max_gap_ms):
+                return None
+            return observation
+        row = self.conn.execute(
+            """
+            SELECT * FROM observations
+            WHERE input_family = ? AND metric = ? AND as_of_ms <= ?
+            ORDER BY as_of_ms DESC
+            LIMIT 1
+            """,
+            (input_family, metric, int(target_ms)),
+        ).fetchone()
+        if row is None:
+            return None
+        if int(target_ms) - int(row["as_of_ms"]) > int(max_gap_ms):
+            return None
+        return self._from_row(row)
+
     def series(self, input_family: str, metric: str) -> list[Observation]:
         rows = self.conn.execute(
             """
             SELECT * FROM observations
             WHERE input_family = ? AND metric = ?
-            ORDER BY as_of_ms ASC
+            ORDER BY as_of_ms ASC, recorded_at_ms ASC, id ASC
             """,
             (input_family, metric),
         ).fetchall()
         return [
-            Observation(
-                layer_id=row["layer_id"],
-                input_family=row["input_family"],
-                metric=row["metric"],
-                as_of_ms=int(row["as_of_ms"]),
-                value_num=float(row["value_num"]),
-                source_id=row["source_id"],
-                quality_state=row["quality_state"],
-                evidence_hash=row["evidence_hash"],
-                registry_hash=row["registry_hash"],
-                recorded_run_id=row["recorded_run_id"],
-                recorded_at_ms=int(row["recorded_at_ms"]),
-            )
+            self._from_row(row)
             for row in rows
         ]
