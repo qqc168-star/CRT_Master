@@ -1,0 +1,422 @@
+{
+  "schema_version": "CRT_BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1",
+  "mapping_id": "CRT-BTC-SEASON-SEMANTIC-MAPPING-CANDIDATE-V0.1",
+  "status": "SEMANTIC_MAPPING_CANDIDATE_NOT_APPROVED",
+  "base_main_sha": "bd658a8813d8f0ce17a9a41efc62db13cae1c777",
+  "source_contract": {
+    "artifact_path": "FORMAL_SOURCES/CRT-BTC-001_V1.0/CRT_BTC_001_V1.0_FORMAL_ARCHIVE.zip",
+    "artifact_size_bytes": 300152,
+    "artifact_sha256": "4556141b069596b24d78b8c4b5e19071f6b435f9748cd04891e91817e0a34c42",
+    "working_body_member": "CRT_BTC_001_V1.0_FORMAL_ARCHIVE/WORKING/CRT-BTC-001_WORKING_BODY.md",
+    "working_body_size_bytes": 174760,
+    "working_body_sha256": "5ba963b51bcf49839299c3ce4e7649728d3d8caa05d8ca442691689e667f0064",
+    "chapter_id": "CH07",
+    "chapter_start_marker": "## 第七章",
+    "chapter_end_marker": "## 第八章",
+    "chapter_size_bytes": 15262,
+    "chapter_sha256": "fb872d4ee4a9abb6697214b4d7f17e85459259f715199ffb0ce502420d754a26",
+    "formal_status": "FORMAL_ARCHIVE",
+    "acceptance": "AG-0_TO_AG-9_PASS"
+  },
+  "authority": {
+    "candidate_build": "USER_APPROVED_2026-08-22",
+    "exact_mapping_hash": "NOT_YET_APPROVED",
+    "formal_model": "NOT_APPROVED",
+    "runtime_binding": "NOT_APPROVED",
+    "season_output_authority": "NONE",
+    "production": "NOT_APPROVED",
+    "capital_decision_authority": "USER_ONLY",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "action_output": "NONE"
+  },
+  "inherited_formal_constants": {
+    "layer_weights_percent": {
+      "L1": 20,
+      "L2": 20,
+      "L3": 17,
+      "L4": 25,
+      "L5": 13,
+      "L6": 5
+    },
+    "light_thresholds": [-60, -35, 35, 60],
+    "mnav_semantics": "Diluted Equity mNAV",
+    "modification_authority": "NONE"
+  },
+  "runtime_boundary": {
+    "validator_scope": "STATIC_CONTRACT_COMPATIBILITY_ONLY",
+    "may_import_into_v110_candidate": false,
+    "may_read_candidate_score": false,
+    "may_determine_btc_season": false,
+    "may_emit_season": false,
+    "season_output": null,
+    "current_runtime_blocked_reason_must_remain": "V110_SEASON_STATE_TRANSITION_CONTRACT_NOT_RECOVERED",
+    "mapping_candidate_blocked_reason": "BTC_SEASON_SEMANTIC_MAPPING_NOT_APPROVED"
+  },
+  "state_catalog": [
+    {
+      "state_id": "SE-WI",
+      "kind": "CONFIRMED_SEASON",
+      "anchor_season": "WINTER",
+      "proposed_season": null,
+      "source_ref": "CH07-7.3"
+    },
+    {
+      "state_id": "SE-WI-SPC",
+      "kind": "CANDIDATE_STATE",
+      "anchor_season": "WINTER",
+      "proposed_season": "SPRING",
+      "source_ref": "CH07-7.3"
+    },
+    {
+      "state_id": "SE-SP",
+      "kind": "CONFIRMED_SEASON",
+      "anchor_season": "SPRING",
+      "proposed_season": null,
+      "source_ref": "CH07-7.3"
+    },
+    {
+      "state_id": "SE-SP-SUC",
+      "kind": "CANDIDATE_STATE",
+      "anchor_season": "SPRING",
+      "proposed_season": "SUMMER",
+      "source_ref": "CH07-7.3"
+    },
+    {
+      "state_id": "SE-SU",
+      "kind": "CONFIRMED_SEASON",
+      "anchor_season": "SUMMER",
+      "proposed_season": null,
+      "source_ref": "CH07-7.3"
+    },
+    {
+      "state_id": "SE-SU-AUC",
+      "kind": "CANDIDATE_STATE",
+      "anchor_season": "SUMMER",
+      "proposed_season": "AUTUMN",
+      "source_ref": "CH07-7.3"
+    },
+    {
+      "state_id": "SE-AU",
+      "kind": "CONFIRMED_SEASON",
+      "anchor_season": "AUTUMN",
+      "proposed_season": null,
+      "source_ref": "CH07-7.3"
+    },
+    {
+      "state_id": "SE-AU-WTC",
+      "kind": "CANDIDATE_STATE",
+      "anchor_season": "AUTUMN",
+      "proposed_season": "WINTER",
+      "source_ref": "CH07-7.3"
+    },
+    {
+      "state_id": "SE-X",
+      "kind": "EXCEPTION_STATE",
+      "anchor_season": null,
+      "proposed_season": null,
+      "source_ref": "CH07-7.3"
+    }
+  ],
+  "output_qualifiers": [
+    {
+      "qualifier_id": "SEASON_UNDER_REVIEW",
+      "kind": "CONFIRMED_STATE_REVIEW_FLAG",
+      "source_refs": ["CH07-7.10"]
+    },
+    {
+      "qualifier_id": "CANDIDATE_FAILED",
+      "kind": "CANDIDATE_FAILURE_RESULT",
+      "source_refs": ["CH07-7.9", "CH07-7.18"]
+    },
+    {
+      "qualifier_id": "DATA_INCOMPLETE",
+      "kind": "SE_X_REASON",
+      "source_refs": ["CH07-7.18"]
+    },
+    {
+      "qualifier_id": "DATA_CONFLICT",
+      "kind": "SE_X_REASON",
+      "source_refs": ["CH07-7.18"]
+    }
+  ],
+  "declared_edges": [
+    {
+      "edge_id": "WI_TO_WI_SPC",
+      "from_state": "SE-WI",
+      "to_state": "SE-WI-SPC",
+      "phase": "CANDIDATE_FORMATION",
+      "source_refs": ["CH07-7.4", "CH07-7.5.1"]
+    },
+    {
+      "edge_id": "WI_SPC_TO_SP",
+      "from_state": "SE-WI-SPC",
+      "to_state": "SE-SP",
+      "phase": "CANDIDATE_CONFIRMATION",
+      "source_refs": ["CH07-7.4", "CH07-7.6"]
+    },
+    {
+      "edge_id": "WI_SPC_TO_WI",
+      "from_state": "SE-WI-SPC",
+      "to_state": "SE-WI",
+      "phase": "CANDIDATE_FAILURE",
+      "source_refs": ["CH07-7.4", "CH07-7.9"]
+    },
+    {
+      "edge_id": "SP_TO_SP_SUC",
+      "from_state": "SE-SP",
+      "to_state": "SE-SP-SUC",
+      "phase": "CANDIDATE_FORMATION",
+      "source_refs": ["CH07-7.4", "CH07-7.11"]
+    },
+    {
+      "edge_id": "SP_SUC_TO_SU",
+      "from_state": "SE-SP-SUC",
+      "to_state": "SE-SU",
+      "phase": "CANDIDATE_CONFIRMATION",
+      "source_refs": ["CH07-7.4", "CH07-7.11"]
+    },
+    {
+      "edge_id": "SP_SUC_TO_SP",
+      "from_state": "SE-SP-SUC",
+      "to_state": "SE-SP",
+      "phase": "CANDIDATE_FAILURE",
+      "source_refs": ["CH07-7.4"]
+    },
+    {
+      "edge_id": "SU_TO_SU_AUC",
+      "from_state": "SE-SU",
+      "to_state": "SE-SU-AUC",
+      "phase": "CANDIDATE_FORMATION",
+      "source_refs": ["CH07-7.4", "CH07-7.12"]
+    },
+    {
+      "edge_id": "SU_AUC_TO_AU",
+      "from_state": "SE-SU-AUC",
+      "to_state": "SE-AU",
+      "phase": "CANDIDATE_CONFIRMATION",
+      "source_refs": ["CH07-7.4", "CH07-7.12"]
+    },
+    {
+      "edge_id": "SU_AUC_TO_SU",
+      "from_state": "SE-SU-AUC",
+      "to_state": "SE-SU",
+      "phase": "CANDIDATE_FAILURE",
+      "source_refs": ["CH07-7.4"]
+    },
+    {
+      "edge_id": "AU_TO_AU_WTC",
+      "from_state": "SE-AU",
+      "to_state": "SE-AU-WTC",
+      "phase": "CANDIDATE_FORMATION",
+      "source_refs": ["CH07-7.4", "CH07-7.13"]
+    },
+    {
+      "edge_id": "AU_WTC_TO_WI",
+      "from_state": "SE-AU-WTC",
+      "to_state": "SE-WI",
+      "phase": "CANDIDATE_CONFIRMATION",
+      "source_refs": ["CH07-7.4", "CH07-7.13"]
+    },
+    {
+      "edge_id": "AU_WTC_TO_AU",
+      "from_state": "SE-AU-WTC",
+      "to_state": "SE-AU",
+      "phase": "CANDIDATE_FAILURE",
+      "source_refs": ["CH07-7.4"]
+    },
+    {
+      "edge_id": "SP_TO_WI_REVIEWED_ROLLBACK",
+      "from_state": "SE-SP",
+      "to_state": "SE-WI",
+      "phase": "CONFIRMED_STATE_ROLLBACK_AFTER_REVIEW",
+      "source_refs": ["CH07-7.10", "CH07-7.14"]
+    }
+  ],
+  "global_invariants": [
+    {
+      "invariant_id": "INV_KEEP_LAST_VALID_SEASON_BEFORE_CANDIDATE",
+      "source_refs": ["CH07-7.2", "CH07-7.4", "CH07-7.19"]
+    },
+    {
+      "invariant_id": "INV_CANDIDATE_DOES_NOT_REPLACE_ANCHOR_SEASON",
+      "source_refs": ["CH07-7.2", "CH07-7.19"]
+    },
+    {
+      "invariant_id": "INV_CANDIDATE_AND_CONFIRMATION_REQUIRE_DIFFERENT_EVENTS",
+      "source_refs": ["CH07-7.4", "CH07-7.19"]
+    },
+    {
+      "invariant_id": "INV_CONFIRMATION_REQUIRES_INDEPENDENT_LATER_VALIDATION",
+      "source_refs": ["CH07-7.2", "CH07-7.4", "CH07-7.6", "CH07-7.19"]
+    },
+    {
+      "invariant_id": "INV_CANDIDATE_FAILURE_RETURNS_TO_ANCHOR_SEASON",
+      "source_refs": ["CH07-7.4", "CH07-7.9", "CH07-7.19"]
+    },
+    {
+      "invariant_id": "INV_CONFIRMED_SEASON_THREAT_REQUIRES_REVIEW_BEFORE_ROLLBACK",
+      "source_refs": ["CH07-7.4", "CH07-7.10", "CH07-7.19"]
+    },
+    {
+      "invariant_id": "INV_NORMAL_TRANSITIONS_ARE_ADJACENT_ONLY",
+      "source_refs": ["CH07-7.14", "CH07-7.19"]
+    },
+    {
+      "invariant_id": "INV_SCORE_IS_NOT_A_SEASON",
+      "source_refs": ["CRT_CORE_CONTRACT", "CRT_EVIDENCE_PACK_CONTRACT"]
+    },
+    {
+      "invariant_id": "INV_LATEST_REAL_DATA_REQUIRED",
+      "source_refs": ["CH07-7.18", "CH07-7.19"]
+    },
+    {
+      "invariant_id": "INV_DATA_INCOMPLETE_OR_CONFLICT_OUTPUTS_SE_X",
+      "source_refs": ["CH07-7.18"]
+    }
+  ],
+  "symbolic_predicate_contracts": [
+    {
+      "predicate_id": "PRED_WI_TO_WI_SPC_STANDARD",
+      "edge_id": "WI_TO_WI_SPC",
+      "status": "SYMBOLIC_ONLY_NOT_RUNTIME_BOUND",
+      "required_symbols": [
+        "STAGE_3_OR_EQUIVALENT_MATURE_CLEANING_BACKGROUND",
+        "C3",
+        "S2_OR_S3",
+        "E2_OR_E3",
+        "NO_D3_OR_D4",
+        "NO_CX_SX_VX",
+        "NO_UNRESOLVED_HIGH_QUALITY_VETO",
+        "CLASSIFIABLE_VALUE_SUPPORTED_OR_HIGH_LEVEL_BASE_ROUTE"
+      ],
+      "source_refs": ["CH07-7.5.1", "CH07-7.5.2", "CH07-7.5.3"]
+    },
+    {
+      "predicate_id": "PRED_WI_SPC_TO_SP_CONFIRMATION",
+      "edge_id": "WI_SPC_TO_SP",
+      "status": "SYMBOLIC_ONLY_NOT_RUNTIME_BOUND",
+      "required_symbols": [
+        "E3",
+        "C3_CONTINUES",
+        "S3",
+        "P1_WEEKLY_CONTINUES",
+        "P2_SPOT_CONTINUES",
+        "INDEPENDENT_LATER_VALIDATION_COMPLETE",
+        "NO_D3_JOINT_COUNTEREVIDENCE",
+        "NO_TRANSMITTED_MAJOR_MACRO_HEADWIND",
+        "NO_RENEWED_KEY_WEEKLY_STRUCTURE_BREAK"
+      ],
+      "source_refs": ["CH07-7.6"]
+    },
+    {
+      "predicate_id": "PRED_WI_SPC_TO_WI_FAILURE",
+      "edge_id": "WI_SPC_TO_WI",
+      "status": "SYMBOLIC_ONLY_NOT_RUNTIME_BOUND",
+      "trigger_symbols_any": [
+        "S2_OR_S3_INVALIDATED",
+        "SPOT_CVD_VOLUME_AND_ETF_JOINT_WEAKNESS",
+        "LEVERAGE_DOMINATED_REBOUND",
+        "C3_INVALIDATED",
+        "E1_E0_OR_EX",
+        "D3_D4_OR_HIGH_QUALITY_VETO",
+        "HIGH_LEVEL_BASE_STRUCTURAL_DEMAND_INVALIDATED"
+      ],
+      "source_refs": ["CH07-7.9"]
+    },
+    {
+      "predicate_id": "PRED_SP_TO_WI_REVIEWED_ROLLBACK",
+      "edge_id": "SP_TO_WI_REVIEWED_ROLLBACK",
+      "status": "SYMBOLIC_ONLY_NOT_RUNTIME_BOUND",
+      "required_symbols": [
+        "SEASON_UNDER_REVIEW_ENTERED",
+        "LATER_WEEKLY_DAMAGE_CONFIRMED",
+        "SPOT_WEAKNESS_CONFIRMED",
+        "E_LEVEL_DECLINE_CONFIRMED"
+      ],
+      "source_refs": ["CH07-7.10"]
+    }
+  ],
+  "unmapped_requirements": [
+    {
+      "requirement_id": "UM_STAGE3_EQUIVALENCE_CLASSIFIER",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH07-7.5.1"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_V_C_S_E_UPSTREAM_RUNTIME_CLASSIFIERS",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH03", "CH04", "CH05", "CH06"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_INDEPENDENT_LATER_OBSERVATION_WINDOW",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH07-7.2", "CH07-7.4", "CH07-7.6"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_KEY_WEEKLY_STRUCTURE_IDENTIFICATION",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH07-7.6", "CH07-7.8"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_SPOT_AND_INSTITUTIONAL_DEMAND_PERSISTENCE",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH07-7.5.3", "CH07-7.6", "CH07-7.8"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_D0_D4_AND_VETO_RUNTIME_CLASSIFIER",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH06", "CH07-7.5.1", "CH07-7.18"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_MACRO_TRANSMISSION_RUNTIME_CLASSIFIER",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH07-7.6", "CH07-7.7"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_LAST_VALID_SEASON_BOOTSTRAP_AND_PERSISTENCE",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH07-7.4", "CH10"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_SE_X_RECOVERY_AND_STATE_LEASE",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH07-7.3", "CH07-7.18", "CH10"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_NON_WINTER_TRANSITION_PREDICATES",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH07-7.11", "CH07-7.12", "CH07-7.13"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_FORMAL_SOURCE_BINDINGS_FRESHNESS_AND_CLOCK_ALIGNMENT",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CH07-7.17", "CH07-7.18"],
+      "research_delta_may_fill": false
+    },
+    {
+      "requirement_id": "UM_EXACT_MAPPING_HASH_AND_RUNTIME_PROMOTION_APPROVAL",
+      "status": "UNMAPPED_BLOCKED",
+      "source_refs": ["CRT_CORE_CONTRACT", "SOURCE_INTAKE_NEXT_CONTROLLED_GATE"],
+      "research_delta_may_fill": false
+    }
+  ],
+  "research_firewall": {
+    "research_delta_authority": "NONE",
+    "research_delta_may_supply_state": false,
+    "research_delta_may_supply_rule": false,
+    "research_delta_may_supply_weight": false,
+    "research_delta_may_supply_threshold": false,
+    "research_delta_may_close_unmapped_requirement": false
+  }
+}
