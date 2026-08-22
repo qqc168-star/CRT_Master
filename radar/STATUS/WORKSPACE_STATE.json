@@ -4,17 +4,25 @@
   "formal_version": "CRT V1.10",
   "formal_predecessor": "CRT Master V1.9",
   "status": "FORMAL_SEALED_READ_ONLY_DECISION_SUPPORT",
+  "state_snapshot_as_of_main_sha": "1426b56a7877d3c6357f76b9ecdda632ff1e50a3",
+  "snapshot_must_be_reconciled_if_head_differs": true,
   "production": "NOT_APPROVED",
   "external_action_authority": "NONE",
   "live_shadow": "LIVE_SHADOW_PASS",
   "p1_01_post_live": "PASS",
   "post_seal_maturity": {
-    "completed": 0,
-    "required": 20
+    "qualified_runs": 0,
+    "required": 20,
+    "qualification_state": "BLOCKED",
+    "blocked_by": [
+      "BTC_SEASON_ROUTER_NOT_VERIFIED"
+    ],
+    "note": "Attempts may be recorded, but qualified count cannot advance until the existing qualification contract is satisfied."
   },
-  "current_tests": {
-    "pass": 88,
-    "fail": 0
+  "last_verified_full_regression": {
+    "pass": 366,
+    "fail": 0,
+    "as_of_main_sha": "1426b56a7877d3c6357f76b9ecdda632ff1e50a3"
   },
   "legacy_v0_2_tests": {
     "pass": 17,
@@ -22,16 +30,21 @@
   },
   "program_registry": "PASS",
   "read_only_surface": "PASS",
-  "implemented_input_layers": [
-    "AS-L2",
-    "AS-L4",
-    "AS-L5"
-  ],
-  "missing_input_layers": [
+  "engineering_source_namespaces_present": [
     "AS-L1",
+    "AS-L2",
     "AS-L3",
+    "AS-L4",
+    "AS-L5",
     "AS-L6"
   ],
+  "formal_season_input_bindings": {
+    "bound": 0,
+    "required": 12,
+    "status": "UNBOUND_BLOCKED",
+    "reason": "FORMAL_SEASON_SOURCE_RESPONSIBILITY_MATRIX_INCOMPLETE"
+  },
   "parallel_automation_stash": "PRESERVED_NOT_APPLIED",
-  "next_gate": "POST_SEAL_20_RUN_MATURITY_OBSERVATION"
+  "next_gate": "POST_SEAL_20_RUN_MATURITY_OBSERVATION",
+  "current_qualified_run_blocker": "BTC_SEASON_ROUTER_NOT_VERIFIED"
 }
