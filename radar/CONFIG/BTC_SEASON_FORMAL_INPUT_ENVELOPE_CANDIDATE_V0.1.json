@@ -1,0 +1,118 @@
+{
+  "schema_version": "CRT_BTC_SEASON_FORMAL_INPUT_ENVELOPE_CANDIDATE_V0.1",
+  "envelope_id": "CRT-BTC-SEASON-FORMAL-INPUT-ENVELOPE-CANDIDATE-V0.1",
+  "status": "FORMAL_INPUT_ENVELOPE_CANDIDATE_NOT_APPROVED",
+  "base_main_sha": "cfc6da8ca80fc85059eac253ee99110855b78382",
+  "formal_authority": {
+    "semantic_mapping_path": "CONFIG/BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.1.json",
+    "semantic_mapping_sha256": "afe99dfaf4a2023d39c1589252b840b27daab106932b33783316fec71ab05e3a",
+    "hash_approval_seal_path": "CONFIG/BTC_SEASON_SEMANTIC_MAPPING_HASH_APPROVAL_SEAL_V0.1.json",
+    "hash_approval_seal_sha256": "6af3c17c263df8b4434e85078e95b9d506f6efb19acb484ac39745355322f75a",
+    "formal_chapter_7_sha256": "fb872d4ee4a9abb6697214b4d7f17e85459259f715199ffb0ce502420d754a26",
+    "source_refs": ["CH06-6.4", "CH06-6.7", "CH07-7.17", "CH07-7.18"]
+  },
+  "engineering_registry_dependency": {
+    "path": "CONFIG/SOURCE_REGISTRY_V1.2.json",
+    "registry_id": "CRT-RADAR-SOURCE-REGISTRY-V1.4-WIP",
+    "canonical_sha256": "30ee09f0c6403c9d782a49411c61c24b91d6522d8c4960c4dfd6ef572e7375bc",
+    "file_sha256": "b48d6a5876781d287cfd6eb95751c20cfb4e5920f0ff57632b0a39f0e46ff722",
+    "authority": "PARTIAL_ENGINEERING_REGISTRY_ONLY",
+    "may_be_treated_as_complete_season_source_authority": false,
+    "modified_by_candidate": false
+  },
+  "authority": {
+    "candidate_build": "USER_APPROVED_2026-08-22",
+    "candidate_hash": "NOT_YET_APPROVED",
+    "formal_model": "NOT_APPROVED",
+    "runtime_binding": "NOT_APPROVED",
+    "season_output_authority": "NONE",
+    "production": "NOT_APPROVED",
+    "capital_decision_authority": "USER_ONLY",
+    "external_action_authority": "NONE",
+    "action_output": "NONE"
+  },
+  "runtime_boundary": {
+    "validator_scope": "FORMAL_INPUT_ENVELOPE_CONTRACT_ONLY",
+    "may_import_into_v110_candidate": false,
+    "may_collect_or_fetch_data": false,
+    "may_classify_stage_v_c_s_e_d_macro_or_structure": false,
+    "may_determine_btc_season": false,
+    "may_emit_season": false,
+    "season_output": null,
+    "unmapped_requirement_must_remain": "UM_FORMAL_SOURCE_BINDINGS_FRESHNESS_AND_CLOCK_ALIGNMENT"
+  },
+  "required_envelope_fields": [
+    "schema_version",
+    "envelope_id",
+    "as_of_ms",
+    "decision_event_id",
+    "source_registry_id",
+    "source_registry_hash",
+    "inputs"
+  ],
+  "required_input_fields": [
+    "family_id",
+    "binding_status",
+    "source_id",
+    "source_registry_hash",
+    "observed_at_ms",
+    "available_at_ms",
+    "window_start_ms",
+    "window_end_ms",
+    "quality_state",
+    "freshness_state",
+    "crossed_material_event_ids"
+  ],
+  "quality_states": ["Q3", "Q2", "Q1", "Q0"],
+  "freshness_states": ["FRESH", "STALE", "FUTURE_CLOCK", "UNKNOWN"],
+  "binding_states": ["FORMALLY_BOUND", "UNBOUND_BLOCKED"],
+  "clock_contract": {
+    "timestamp_unit": "UNIX_EPOCH_MILLISECONDS",
+    "future_clock_skew_seconds": 300,
+    "available_at_must_not_exceed_envelope_as_of": true,
+    "observed_at_must_not_exceed_available_at": true,
+    "window_start_must_not_exceed_window_end": true,
+    "window_end_must_not_exceed_envelope_as_of": true,
+    "cross_material_event_alignment_required": true
+  },
+  "required_family_bindings": [
+    {"family_id": "SEASON_STAGE_BACKGROUND", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH02", "CH07-7.5.1"]},
+    {"family_id": "VALUE_STATE_V", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH03", "CH07-7.5"]},
+    {"family_id": "CAPITULATION_STATE_C", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH04", "CH07-7.5"]},
+    {"family_id": "STOPPING_STATE_S", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH05", "CH07-7.5"]},
+    {"family_id": "EVIDENCE_CONSISTENCY_E", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH06", "CH07-7.5"]},
+    {"family_id": "CONFLICT_SEVERITY_D", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH06-6.8", "CH07-7.18"]},
+    {"family_id": "MACRO_OVERLAY_M", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH07-7.7"]},
+    {"family_id": "KEY_WEEKLY_STRUCTURE", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH07-7.6", "CH07-7.8"]},
+    {"family_id": "SPOT_DEMAND_QUALITY", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH07-7.5.3", "CH07-7.8"]},
+    {"family_id": "INSTITUTIONAL_SPOT_DEMAND", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH07-7.5.3", "CH07-7.8"]},
+    {"family_id": "LEVERAGE_COMPATIBILITY", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH07-7.5.3", "CH07-7.8"]},
+    {"family_id": "INDEPENDENT_VALIDATION_EVENT", "binding_status": "UNBOUND_BLOCKED", "formal_source_refs": ["CH07-7.2", "CH07-7.4"]}
+  ],
+  "fail_closed_rules": [
+    "REQUIRED_FIELD_MISSING",
+    "REQUIRED_FAMILY_UNBOUND",
+    "SOURCE_NOT_IN_PINNED_REGISTRY",
+    "SOURCE_REGISTRY_HASH_MISMATCH",
+    "QUALITY_Q0_BLOCK",
+    "REQUIRED_GATE_QUALITY_Q1_OR_Q0_BLOCK",
+    "STALE_OR_UNKNOWN_FRESHNESS_BLOCK",
+    "FUTURE_CLOCK_BLOCK",
+    "AVAILABLE_AFTER_ENVELOPE_AS_OF_BLOCK",
+    "OBSERVED_AFTER_AVAILABLE_BLOCK",
+    "INVALID_OR_FUTURE_WINDOW_BLOCK",
+    "MATERIAL_EVENT_CLOCK_MISALIGNMENT_BLOCK"
+  ],
+  "candidate_effect": {
+    "closes_unmapped_requirement": false,
+    "remaining_status": "UNBOUND_BLOCKED",
+    "reason": "FORMAL_SEASON_SOURCE_RESPONSIBILITY_MATRIX_INCOMPLETE",
+    "runtime_binding_ready": false
+  },
+  "research_firewall": {
+    "research_delta_authority": "NONE",
+    "research_may_supply_formal_binding": false,
+    "research_may_override_freshness_or_clock_failure": false,
+    "research_may_determine_season": false
+  }
+}
