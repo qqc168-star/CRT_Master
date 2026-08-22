@@ -1,0 +1,238 @@
+{
+  "schema_version": "CRT_BTC_SEASON_RESEARCH_EVAL_CASESET_V0.1",
+  "status": "RESEARCH_ONLY_NOT_APPROVED",
+  "purpose": "REPRESENTATIVE_POINT_IN_TIME_CHECKPOINTS_NOT_FULL_DAILY_REPLAY",
+  "source_delta": {
+    "path": "research/CRT_SEASON_ROUTER_RESEARCH_DELTA_20260822.md",
+    "sha256": "d41675b072352e78e0facb0fff8893d401a60ac7e91c4aeb8858eb6133403db7"
+  },
+  "market_data_provenance": {
+    "provider": "Binance Spot Public Market Data",
+    "symbol": "BTCUSDT",
+    "interval": "1d",
+    "time_basis": "UTC",
+    "scope": "RESEARCH_ONLY_REFERENCE_OBSERVATIONS",
+    "values_are_formal_thresholds": false
+  },
+  "authority": {
+    "formal_model_authority": "NONE",
+    "formal_weight_authority": "NONE",
+    "formal_threshold_authority": "NONE",
+    "season_transition_authority": "NONE",
+    "external_action_authority": "NONE",
+    "external_action_performed": false
+  },
+  "cases": [
+    {
+      "case_id": "2018_LOWER_HIGH_LADDER",
+      "role": "BEAR_CONTROL_CASE",
+      "checkpoints": [
+        {
+          "checkpoint_id": "2018-11-25_LOWER_LOW",
+          "as_of_date": "2018-11-25",
+          "expected_research_state": "BEAR_CONTROL_RETAINED",
+          "reference_prices_usd": {
+            "2018-02-20_high": 11786.01,
+            "2018-05-05_high": 10020.00,
+            "2018-07-25_high": 8491.77,
+            "2018-09-04_high": 7410.00,
+            "2018-11-25_low": 3652.66
+          },
+          "evidence": {
+            "schema_version": "CRT_BTC_CONTROL_TRANSFER_EVIDENCE_V0.1",
+            "authority": {
+              "formal_model_authority": "NONE",
+              "formal_weight_authority": "NONE",
+              "formal_threshold_authority": "NONE",
+              "season_transition_authority": "NONE",
+              "external_action_authority": "NONE",
+              "external_action_performed": false
+            },
+            "observations": {
+              "meaningful_breakout": "NOT_CONFIRMED",
+              "meaningful_pullback": "UNAVAILABLE",
+              "higher_low": "REJECTED",
+              "reattack": "NOT_CONFIRMED",
+              "prior_control_high_break": "NOT_CONFIRMED",
+              "invalidating_lower_low": "OBSERVED"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "2019_FALSE_BULL",
+      "role": "FALSE_POSITIVE_CASE",
+      "checkpoints": [
+        {
+          "checkpoint_id": "2019-10-26_ATTACK",
+          "as_of_date": "2019-10-26",
+          "expected_research_state": "ATTACK_STRENGTHENED_DEFENSE_PENDING",
+          "evidence": {
+            "schema_version": "CRT_BTC_CONTROL_TRANSFER_EVIDENCE_V0.1",
+            "authority": {
+              "formal_model_authority": "NONE",
+              "formal_weight_authority": "NONE",
+              "formal_threshold_authority": "NONE",
+              "season_transition_authority": "NONE",
+              "external_action_authority": "NONE",
+              "external_action_performed": false
+            },
+            "observations": {
+              "meaningful_breakout": "CONFIRMED",
+              "meaningful_pullback": "NOT_OBSERVED",
+              "higher_low": "UNAVAILABLE",
+              "reattack": "UNAVAILABLE",
+              "prior_control_high_break": "UNAVAILABLE",
+              "invalidating_lower_low": "NOT_OBSERVED"
+            }
+          }
+        },
+        {
+          "checkpoint_id": "2019-12-18_INVALIDATION",
+          "as_of_date": "2019-12-18",
+          "expected_research_state": "FALSE_POSITIVE_REJECTED",
+          "evidence": {
+            "schema_version": "CRT_BTC_CONTROL_TRANSFER_EVIDENCE_V0.1",
+            "authority": {
+              "formal_model_authority": "NONE",
+              "formal_weight_authority": "NONE",
+              "formal_threshold_authority": "NONE",
+              "season_transition_authority": "NONE",
+              "external_action_authority": "NONE",
+              "external_action_performed": false
+            },
+            "observations": {
+              "meaningful_breakout": "CONFIRMED",
+              "meaningful_pullback": "CONFIRMED",
+              "higher_low": "REJECTED",
+              "reattack": "NOT_CONFIRMED",
+              "prior_control_high_break": "NOT_CONFIRMED",
+              "invalidating_lower_low": "OBSERVED"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "2022_MOMENTUM_TRAP",
+      "role": "FALSE_POSITIVE_CASE",
+      "checkpoints": [
+        {
+          "checkpoint_id": "2022-09-13_ATTACK",
+          "as_of_date": "2022-09-13",
+          "expected_research_state": "ATTACK_STRENGTHENED_DEFENSE_PENDING",
+          "evidence": {
+            "schema_version": "CRT_BTC_CONTROL_TRANSFER_EVIDENCE_V0.1",
+            "authority": {
+              "formal_model_authority": "NONE",
+              "formal_weight_authority": "NONE",
+              "formal_threshold_authority": "NONE",
+              "season_transition_authority": "NONE",
+              "external_action_authority": "NONE",
+              "external_action_performed": false
+            },
+            "observations": {
+              "meaningful_breakout": "CONFIRMED",
+              "meaningful_pullback": "NOT_OBSERVED",
+              "higher_low": "UNAVAILABLE",
+              "reattack": "UNAVAILABLE",
+              "prior_control_high_break": "UNAVAILABLE",
+              "invalidating_lower_low": "NOT_OBSERVED"
+            }
+          }
+        },
+        {
+          "checkpoint_id": "2022-09-21_INVALIDATION",
+          "as_of_date": "2022-09-21",
+          "expected_research_state": "FALSE_POSITIVE_REJECTED",
+          "evidence": {
+            "schema_version": "CRT_BTC_CONTROL_TRANSFER_EVIDENCE_V0.1",
+            "authority": {
+              "formal_model_authority": "NONE",
+              "formal_weight_authority": "NONE",
+              "formal_threshold_authority": "NONE",
+              "season_transition_authority": "NONE",
+              "external_action_authority": "NONE",
+              "external_action_performed": false
+            },
+            "observations": {
+              "meaningful_breakout": "CONFIRMED",
+              "meaningful_pullback": "CONFIRMED",
+              "higher_low": "REJECTED",
+              "reattack": "NOT_CONFIRMED",
+              "prior_control_high_break": "NOT_CONFIRMED",
+              "invalidating_lower_low": "OBSERVED"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "2023_SUCCESSFUL_RECLAIM",
+      "role": "POSITIVE_CONTROL_CASE",
+      "checkpoints": [
+        {
+          "checkpoint_id": "2023-03-17_CONTROL_BREAK",
+          "as_of_date": "2023-03-17",
+          "expected_research_state": "CONTROL_TRANSFER_CANDIDATE",
+          "reference_prices_usd": {
+            "2022-11-21_major_low": 15476.00,
+            "2023-02_control_high": 25250.00,
+            "2023-03-10_higher_low": 19549.09,
+            "2023-03-17_close": 27395.13
+          },
+          "evidence": {
+            "schema_version": "CRT_BTC_CONTROL_TRANSFER_EVIDENCE_V0.1",
+            "authority": {
+              "formal_model_authority": "NONE",
+              "formal_weight_authority": "NONE",
+              "formal_threshold_authority": "NONE",
+              "season_transition_authority": "NONE",
+              "external_action_authority": "NONE",
+              "external_action_performed": false
+            },
+            "observations": {
+              "meaningful_breakout": "CONFIRMED",
+              "meaningful_pullback": "CONFIRMED",
+              "higher_low": "CONFIRMED",
+              "reattack": "CONFIRMED",
+              "prior_control_high_break": "CONFIRMED",
+              "invalidating_lower_low": "NOT_OBSERVED"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "case_id": "2026_POINT_IN_TIME_LIVE",
+      "role": "LIVE_UNRESOLVED_CASE",
+      "checkpoints": [
+        {
+          "checkpoint_id": "2026-08-21_ATTACK",
+          "as_of_date": "2026-08-21",
+          "expected_research_state": "ATTACK_STRENGTHENED_DEFENSE_PENDING",
+          "evidence": {
+            "schema_version": "CRT_BTC_CONTROL_TRANSFER_EVIDENCE_V0.1",
+            "authority": {
+              "formal_model_authority": "NONE",
+              "formal_weight_authority": "NONE",
+              "formal_threshold_authority": "NONE",
+              "season_transition_authority": "NONE",
+              "external_action_authority": "NONE",
+              "external_action_performed": false
+            },
+            "observations": {
+              "meaningful_breakout": "CONFIRMED",
+              "meaningful_pullback": "NOT_OBSERVED",
+              "higher_low": "UNAVAILABLE",
+              "reattack": "UNAVAILABLE",
+              "prior_control_high_break": "UNAVAILABLE",
+              "invalidating_lower_low": "NOT_OBSERVED"
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

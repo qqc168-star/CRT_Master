@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = "CRT_ASSUMPTION_BOUNDARY_WATCH_V0.1"
+SCHEMA_VERSION = "CRT_ASSUMPTION_BOUNDARY_WATCH_V0.2"
 CONTEXT_SCHEMA_VERSION = "CRT_ASSUMPTION_RESEARCH_CONTEXT_V0.1"
 
 
@@ -81,6 +81,14 @@ def evaluate_assumption_watch(
     decision_eligibility = str(gate.get("decision_eligibility", "WAIT"))
     mechanism = gate.get("mechanism_support") if isinstance(gate.get("mechanism_support"), dict) else {}
     corridor = gate.get("research_corridor") if isinstance(gate.get("research_corridor"), dict) else {}
+    control_transfer = (
+        gate.get("control_transfer_validation")
+        if isinstance(gate.get("control_transfer_validation"), dict)
+        else {}
+    )
+    control_transfer_loop_closed = bool(
+        control_transfer.get("control_transfer_loop_closed")
+    )
 
     assumptions: list[dict[str, Any]] = []
 
@@ -97,6 +105,28 @@ def evaluate_assumption_watch(
             "status": corridor_status,
             "evidence": corridor_reason,
             "response": "BLOCK_FORMAL_PROMOTION" if corridor_status != "VALID" else "NO_CHANGE",
+        }
+    )
+
+    control_loop_status = "VALID"
+    control_loop_reason = "PROBE_ELIGIBILITY_NOT_CLAIMED"
+    if decision_eligibility == "PROBE_ELIGIBLE":
+        if control_transfer_loop_closed:
+            control_loop_reason = "PROBE_ELIGIBILITY_HAS_CLOSED_CONTROL_TRANSFER_LOOP"
+        else:
+            control_loop_status = "CHALLENGED"
+            control_loop_reason = "PROBE_ELIGIBLE_WITHOUT_CLOSED_CONTROL_TRANSFER_LOOP"
+    assumptions.append(
+        {
+            "id": "CONTROL_TRANSFER_LOOP_REQUIRED_FOR_PROBE",
+            "kind": "DECISION_BOUNDARY",
+            "status": control_loop_status,
+            "evidence": control_loop_reason,
+            "response": (
+                "FORCE_WATCH_AND_ANALYST_REVIEW"
+                if control_loop_status == "CHALLENGED"
+                else "NO_CHANGE"
+            ),
         }
     )
 

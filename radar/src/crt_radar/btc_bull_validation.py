@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 
-SCHEMA_VERSION = "CRT_BTC_BULL_VALIDATION_OVERLAY_V0.1"
+SCHEMA_VERSION = "CRT_BTC_BULL_VALIDATION_OVERLAY_V0.2"
 
 ALLOWED_TRANSITION_STATES = {
     "TRANSITION_UNRESOLVED",
@@ -175,7 +175,21 @@ def evaluate_btc_bull_validation(
     generated_at_ms: int,
 ) -> dict[str, Any]:
     entry = btc_entry_gate if isinstance(btc_entry_gate, dict) else {}
-    transition = entry.get("transition_state")
+    raw_transition = entry.get("transition_state")
+    control_transfer = entry.get("control_transfer_validation")
+    if not isinstance(control_transfer, dict):
+        control_transfer = {}
+    control_transfer_loop_closed = bool(
+        control_transfer.get("control_transfer_loop_closed")
+    )
+    transition = raw_transition
+    transition_downgraded = False
+    if (
+        transition == "BULL_ACCEPTANCE_STRENGTHENED"
+        and not control_transfer_loop_closed
+    ):
+        transition = "BULL_ACCEPTANCE_DEVELOPING"
+        transition_downgraded = True
 
     if pack_state == "BLOCKED":
         state = "BLOCKED"
@@ -185,7 +199,11 @@ def evaluate_btc_bull_validation(
         reason = str(entry.get("reason", "BTC_ENTRY_GATE_BLOCKED"))
     elif transition in ALLOWED_TRANSITION_STATES:
         state = str(transition)
-        reason = str(entry.get("reason", "ENTRY_GATE_TRANSITION_STATE"))
+        reason = (
+            "STRENGTHENED_STATE_WITHOUT_CLOSED_CONTROL_TRANSFER_LOOP_DOWNGRADED"
+            if transition_downgraded
+            else str(entry.get("reason", "ENTRY_GATE_TRANSITION_STATE"))
+        )
     else:
         state = "TRANSITION_UNRESOLVED"
         reason = "BTC_ENTRY_GATE_TRANSITION_NOT_AVAILABLE"
@@ -301,11 +319,63 @@ def evaluate_btc_bull_validation(
         },
     )
 
-    higher_low_check = _check(
-        "MACRO_HIGHER_LOW",
-        "PENDING",
-        "POST_BREAKOUT_PULLBACK_STRUCTURE_NOT_YET_AVAILABLE",
-    )
+    control_observations = control_transfer.get("observations")
+    if not isinstance(control_observations, dict):
+        control_observations = {}
+    higher_low = control_observations.get("higher_low")
+    if higher_low == "CONFIRMED":
+        higher_low_check = _check(
+            "MACRO_HIGHER_LOW",
+            "SUPPORTIVE",
+            "RESEARCH_EVIDENCE_VECTOR_HIGHER_LOW_CONFIRMED",
+        )
+    elif higher_low == "REJECTED":
+        higher_low_check = _check(
+            "MACRO_HIGHER_LOW",
+            "ADVERSE",
+            "RESEARCH_EVIDENCE_VECTOR_HIGHER_LOW_REJECTED",
+        )
+    else:
+        higher_low_check = _check(
+            "MACRO_HIGHER_LOW",
+            "PENDING",
+            "POST_BREAKOUT_PULLBACK_STRUCTURE_NOT_YET_CONFIRMED",
+        )
+
+    research_control_state = control_transfer.get("research_state")
+    if control_transfer_loop_closed:
+        control_transfer_check = _check(
+            "CONTROL_TRANSFER_LOOP",
+            "SUPPORTIVE",
+            "BREAKOUT_PULLBACK_HIGHER_LOW_REATTACK_LOOP_CLOSED",
+        )
+    elif research_control_state in {
+        "FALSE_POSITIVE_REJECTED",
+        "BEAR_CONTROL_RETAINED",
+    }:
+        control_transfer_check = _check(
+            "CONTROL_TRANSFER_LOOP",
+            "ADVERSE",
+            str(control_transfer.get("reason", "CONTROL_TRANSFER_REJECTED")),
+        )
+    elif control_transfer.get("state") == "BLOCKED":
+        control_transfer_check = _check(
+            "CONTROL_TRANSFER_LOOP",
+            "BLOCKED",
+            str(control_transfer.get("reason", "CONTROL_TRANSFER_EVIDENCE_BLOCKED")),
+        )
+    elif control_transfer.get("state") == "READY_FOR_ANALYST":
+        control_transfer_check = _check(
+            "CONTROL_TRANSFER_LOOP",
+            "DEVELOPING",
+            str(control_transfer.get("reason", "CONTROL_TRANSFER_LOOP_INCOMPLETE")),
+        )
+    else:
+        control_transfer_check = _check(
+            "CONTROL_TRANSFER_LOOP",
+            "PENDING",
+            "CONTROL_TRANSFER_EVIDENCE_NOT_AVAILABLE",
+        )
 
     relative_strength_check = _check(
         "BTC_RELATIVE_STRENGTH",
@@ -320,6 +390,7 @@ def evaluate_btc_bull_validation(
         volume_check,
         time_price_check,
         higher_low_check,
+        control_transfer_check,
         relative_strength_check,
     ]
 
@@ -350,6 +421,13 @@ def evaluate_btc_bull_validation(
             for row in checks
             if row["status"] in {"PENDING", "DEVELOPING"}
         ],
+        "blocked_checks": [
+            row["check_id"]
+            for row in checks
+            if row["status"] == "BLOCKED"
+        ],
+        "raw_entry_transition_state": raw_transition,
+        "control_transfer_loop_closed": control_transfer_loop_closed,
         "research_coordinates": {
             "price_zone_usd": [82000.0, 83000.0],
             "time_window": ["2026-09-29", "2026-10-05"],
