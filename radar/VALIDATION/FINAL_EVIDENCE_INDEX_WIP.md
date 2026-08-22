@@ -50,3 +50,21 @@
 - Email, webhook or notification
 - Any external transaction authority
 - Applying or discarding the parallel automation stash without separate review
+## Phase R evidence provenance clarification
+
+- Phase R final report:
+  `VALIDATION/PHASE_R_FINAL_REPORT_20260806.md`
+- Provenance addendum:
+  `VALIDATION/LIVE_SHADOW_PASS_20260805/EVIDENCE_PROVENANCE_ADDENDUM_20260806.md`
+- Phase R status: `COMPLETE`
+- Historical result: `LIVE_SHADOW_PASS / ACCEPTED`
+- Summary integrity: `VERIFIED`
+- Archive-script summary mutation: `NOT_FOUND`
+- Root cause: `EVIDENCE_PROVENANCE_ORDERING_DEFECT`
+- Secondary classification:
+  `GIT_VERSION_CHANGED_BETWEEN_SUMMARY_AND_ARCHIVE`
+- Reproducibility: `REPRODUCIBILITY_PROVENANCE_GAP`
+- Manifest validator role: `ARCHIVE_TIME_VALIDATOR_VERSION`
+- Exact summary-generation validator version: `NOT_FULLY_PRESERVED`
+- Production: `NOT_APPROVED`
+- External action authority: `NONE`
