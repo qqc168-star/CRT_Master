@@ -227,6 +227,132 @@ class V110FormalCandidateTests(unittest.TestCase):
         )
         self.assertIsNone(result["candidate_score"])
 
+    def test_l4_oi_history_uses_latest_revision_visible_at_evaluation(self):
+        with tempfile.TemporaryDirectory() as td:
+            with ObservationStore(Path(td) / "observations.sqlite3") as store:
+                layers = _complete_surface(
+                    store,
+                    self.contract,
+                    self.registry,
+                    populate_history=True,
+                )
+                base = store.series(
+                    "OPEN_INTEREST_NOTIONAL",
+                    "oi_to_market_cap_pct",
+                )[0]
+                store.record(
+                    [
+                        Observation(
+                            **{
+                                **base.__dict__,
+                                "value_num": base.value_num + 0.25,
+                                "evidence_hash": hashlib.sha256(b"L4 OI visible revision").hexdigest(),
+                                "recorded_run_id": "l4-oi-visible-revision",
+                                "recorded_at_ms": CURRENT_MS,
+                            }
+                        )
+                    ]
+                )
+                result = evaluate_v110_candidate(
+                    layers,
+                    store,
+                    evaluation_at_ms=CURRENT_MS,
+                )
+
+        self.assertEqual(result["input_state"], "COMPLETE")
+        self.assertEqual(result["model_state"], "VALID_CANDIDATE_OUTPUT")
+        self.assertNotIn(
+            "L4_OI_TO_MARKET_CAP_HISTORY_TIMESTAMP_DUPLICATE",
+            result["scoring_blocked_reasons"],
+        )
+        self.assertEqual(
+            result["history_resolution"]["l4_oi_policy_canonical_sha256"],
+            "41894ff01877da4fd7a0baf9aefcb783110129ab194350bd6c6696278f7c357e",
+        )
+        self.assertIsNone(result["season"])
+        self.assertEqual(result["external_action_authority"], "NONE")
+
+    def test_l4_oi_future_revision_does_not_change_past_replay(self):
+        with tempfile.TemporaryDirectory() as td:
+            with ObservationStore(Path(td) / "observations.sqlite3") as store:
+                layers = _complete_surface(
+                    store,
+                    self.contract,
+                    self.registry,
+                    populate_history=True,
+                )
+                before = evaluate_v110_candidate(
+                    layers,
+                    store,
+                    evaluation_at_ms=CURRENT_MS,
+                )
+                base = store.series(
+                    "OPEN_INTEREST_NOTIONAL",
+                    "oi_to_market_cap_pct",
+                )[0]
+                store.record(
+                    [
+                        Observation(
+                            **{
+                                **base.__dict__,
+                                "value_num": base.value_num + 0.5,
+                                "evidence_hash": hashlib.sha256(b"L4 OI future revision").hexdigest(),
+                                "recorded_run_id": "l4-oi-future-revision",
+                                "recorded_at_ms": CURRENT_MS + 1,
+                            }
+                        )
+                    ]
+                )
+                replay = evaluate_v110_candidate(
+                    deepcopy(layers),
+                    store,
+                    evaluation_at_ms=CURRENT_MS,
+                )
+
+        self.assertEqual(replay, before)
+
+    def test_l4_oi_same_release_conflict_blocks_candidate_and_season(self):
+        with tempfile.TemporaryDirectory() as td:
+            with ObservationStore(Path(td) / "observations.sqlite3") as store:
+                layers = _complete_surface(
+                    store,
+                    self.contract,
+                    self.registry,
+                    populate_history=True,
+                )
+                base = store.series(
+                    "OPEN_INTEREST_NOTIONAL",
+                    "oi_to_market_cap_pct",
+                )[0]
+                store.record(
+                    [
+                        Observation(
+                            **{
+                                **base.__dict__,
+                                "value_num": base.value_num + 0.5,
+                                "evidence_hash": hashlib.sha256(b"L4 OI ambiguous revision").hexdigest(),
+                                "recorded_run_id": "l4-oi-ambiguous-revision",
+                            }
+                        )
+                    ]
+                )
+                result = evaluate_v110_candidate(
+                    layers,
+                    store,
+                    evaluation_at_ms=CURRENT_MS,
+                )
+
+        self.assertEqual(result["input_state"], "BLOCKED")
+        self.assertEqual(result["model_state"], "BLOCKED")
+        self.assertIn(
+            "L4_OI_TO_MARKET_CAP_AMBIGUOUS_REVISION_BLOCKED",
+            result["input_blocked_reasons"],
+        )
+        self.assertIsNone(result["candidate_score"])
+        self.assertIsNone(result["season"])
+        self.assertEqual(result["season_router"]["state"], "BLOCKED")
+        self.assertEqual(result["external_action_authority"], "NONE")
+
     def test_constant_drift_and_season_promotion_are_rejected(self):
         changed = deepcopy(self.contract)
         changed["candidate_id"] = "OTHER"

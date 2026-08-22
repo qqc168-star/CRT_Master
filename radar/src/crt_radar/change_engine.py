@@ -3,7 +3,13 @@ from __future__ import annotations
 from bisect import bisect_right
 from typing import Any
 
-from .observation_store import COMPARABLE_METRICS, Observation, ObservationStore
+from .observation_store import (
+    COMPARABLE_METRICS,
+    Observation,
+    ObservationRevisionConflict,
+    ObservationStore,
+)
+from .oi_revision_policy import OiRevisionPolicyError, is_scoped_metric
 
 
 HORIZONS_MS = {
@@ -62,11 +68,37 @@ def _historical_magnitudes(series: list[Observation], horizon_ms: int) -> list[f
     return magnitudes
 
 
+def _latest_in_series_at_or_before(
+    series: list[Observation],
+    target_ms: int,
+    *,
+    max_gap_ms: int,
+) -> Observation | None:
+    times = [row.as_of_ms for row in series]
+    index = bisect_right(times, int(target_ms)) - 1
+    if index < 0:
+        return None
+    observation = series[index]
+    if int(target_ms) - observation.as_of_ms > int(max_gap_ms):
+        return None
+    return observation
+
+
 def _percentile(value: float, values: list[float]) -> float | None:
     if len(values) < 8:
         return None
     count = sum(1 for item in values if item <= value)
     return (count / len(values)) * 100.0
+
+
+def _revision_blocked_horizons(state: str, reason: str) -> dict[str, Any]:
+    return {
+        label: {
+            "history_state": state,
+            "blocked_reason": reason,
+        }
+        for label in HORIZONS_MS
+    }
 
 
 def compute_changes(store: ObservationStore, current: list[Observation]) -> dict[str, Any]:
@@ -83,13 +115,37 @@ def compute_changes(store: ObservationStore, current: list[Observation]) -> dict
             "current_value": observation.value_num,
             "horizons": {},
         }
-        series = store.series(observation.input_family, observation.metric)
+        scoped = is_scoped_metric(observation.input_family, observation.metric)
+        try:
+            series = (
+                store.point_in_time_series(
+                    observation.input_family,
+                    observation.metric,
+                    visible_at_ms=observation.recorded_at_ms,
+                )
+                if scoped
+                else store.series(observation.input_family, observation.metric)
+            )
+        except ObservationRevisionConflict as exc:
+            blocked_state = str(exc).split(":", 1)[0]
+            metric_result["horizons"] = _revision_blocked_horizons(
+                blocked_state,
+                str(exc),
+            )
+            result[observation.metric] = metric_result
+            continue
+        except OiRevisionPolicyError as exc:
+            metric_result["horizons"] = _revision_blocked_horizons(
+                "REVISION_POLICY_INVALID_BLOCKED",
+                str(exc),
+            )
+            result[observation.metric] = metric_result
+            continue
         for label, horizon_ms in HORIZONS_MS.items():
             target = observation.as_of_ms - horizon_ms
             tolerance = history_tolerance_ms(horizon_ms)
-            previous = store.latest_at_or_before(
-                observation.input_family,
-                observation.metric,
+            previous = _latest_in_series_at_or_before(
+                series,
                 target,
                 max_gap_ms=tolerance,
             )

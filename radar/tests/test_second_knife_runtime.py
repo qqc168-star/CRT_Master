@@ -59,9 +59,14 @@ def valid_gate() -> dict:
     }
     evidence = []
     for family, (namespace, quality) in qualities.items():
+        source_id = (
+            "CRT-CONN-BTC-DERIV-BINANCE-OI-001"
+            if family == "OPEN_INTEREST"
+            else f"SRC-{family}"
+        )
         evidence.append(
             {
-                "source_id": f"SRC-{family}",
+                "source_id": source_id,
                 "namespace": namespace,
                 "input_family": family,
                 "quality_state": quality,

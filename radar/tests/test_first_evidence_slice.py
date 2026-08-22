@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from crt_radar.evidence_pack import build_evidence_pack
-from crt_radar.observation_store import ObservationStore, extract_observations
+from crt_radar.observation_store import Observation, ObservationStore, extract_observations
 
 
 DAY_MS = 86_400_000
@@ -29,9 +29,14 @@ def gate(day: int, *, blocked: bool = False, onchain_ok: bool = True) -> dict:
     parsed = {}
 
     def add(family: str, namespace: str, quality: str, values: dict | None):
+        source_id = (
+            "CRT-CONN-BTC-DERIV-BINANCE-OI-001"
+            if family == "OPEN_INTEREST"
+            else f"SRC-{family}"
+        )
         rows.append(
             {
-                "source_id": f"SRC-{family}",
+                "source_id": source_id,
                 "namespace": namespace,
                 "input_family": family,
                 "quality_state": quality,
@@ -155,6 +160,47 @@ class FirstEvidenceSliceTests(unittest.TestCase):
             self.assertEqual(horizons["30d"]["history_state"], "AVAILABLE")
             self.assertEqual(pack["pack_state"], "READY_FOR_ANALYST")
             self.assertLessEqual(len(pack["distillation"]["top_changes"]), 8)
+
+    def test_ambiguous_oi_revision_blocks_pack_and_season_output(self):
+        with tempfile.TemporaryDirectory() as td:
+            db = Path(td) / "obs.sqlite3"
+            build_evidence_pack(
+                gate(0),
+                observation_db=db,
+                generated_at_ms=BASE_MS,
+            )
+            with ObservationStore(db) as store:
+                store.record(
+                    [
+                        Observation(
+                            layer_id="AS-L4",
+                            input_family="OPEN_INTEREST",
+                            metric="open_interest_contracts",
+                            as_of_ms=BASE_MS,
+                            value_num=99_999.0,
+                            source_id="CRT-CONN-BTC-DERIV-BINANCE-OI-001",
+                            quality_state="VALID_FRESH",
+                            evidence_hash=h("ambiguous-oi-revision"),
+                            registry_hash=REGISTRY_HASH,
+                            recorded_run_id="ambiguous-oi-revision",
+                            recorded_at_ms=BASE_MS,
+                        )
+                    ]
+                )
+            pack = build_evidence_pack(
+                gate(1),
+                observation_db=db,
+                generated_at_ms=BASE_MS + DAY_MS,
+            )
+
+        horizons = pack["changes"]["open_interest_contracts"]["horizons"]
+        self.assertTrue(
+            all(row["history_state"] == "AMBIGUOUS_REVISION_BLOCKED" for row in horizons.values())
+        )
+        self.assertEqual(pack["pack_state"], "BLOCKED")
+        self.assertIsNone(pack["analyst_output"]["season"])
+        self.assertEqual(pack["action_output"], "NONE")
+        self.assertEqual(pack["authority"]["external_action_authority"], "NONE")
 
     def test_blocked_source_gate_propagates(self):
         source_gate = gate(0, blocked=True)
