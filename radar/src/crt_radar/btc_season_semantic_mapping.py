@@ -9,15 +9,15 @@ from typing import Any
 
 RADAR_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MAPPING = (
-    RADAR_ROOT / "CONFIG" / "BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.json"
+    RADAR_ROOT / "CONFIG" / "BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.1.json"
 )
 
-SCHEMA_VERSION = "CRT_BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1"
-MAPPING_ID = "CRT-BTC-SEASON-SEMANTIC-MAPPING-CANDIDATE-V0.1"
-EXPECTED_STATUS = "SEMANTIC_MAPPING_CANDIDATE_NOT_APPROVED"
-EXPECTED_BASE_MAIN_SHA = "bd658a8813d8f0ce17a9a41efc62db13cae1c777"
+SCHEMA_VERSION = "CRT_BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.1"
+MAPPING_ID = "CRT-BTC-SEASON-SEMANTIC-MAPPING-CANDIDATE-V0.1.1"
+EXPECTED_STATUS = "SEMANTIC_MAPPING_CORRECTED_CANDIDATE_NOT_APPROVED"
+EXPECTED_BASE_MAIN_SHA = "f4e35d889cc2721b4ce785a1bd6c1d695a626e23"
 EXPECTED_MAPPING_CANONICAL_SHA256 = (
-    "9ddfa4137fff446403bca922274b6c95be27bd55b91db735745ba79e4948b965"
+    "afe99dfaf4a2023d39c1589252b840b27daab106932b33783316fec71ab05e3a"
 )
 
 EXPECTED_SOURCE_CONTRACT = {
@@ -49,7 +49,7 @@ EXPECTED_SOURCE_CONTRACT = {
 }
 
 EXPECTED_AUTHORITY = {
-    "candidate_build": "USER_APPROVED_2026-08-22",
+    "candidate_build": "USER_APPROVED_CORRECTIVE_DELTA_2026-08-22",
     "exact_mapping_hash": "NOT_YET_APPROVED",
     "formal_model": "NOT_APPROVED",
     "runtime_binding": "NOT_APPROVED",
@@ -85,7 +85,7 @@ EXPECTED_RUNTIME_BOUNDARY = {
     "current_runtime_blocked_reason_must_remain": (
         "V110_SEASON_STATE_TRANSITION_CONTRACT_NOT_RECOVERED"
     ),
-    "mapping_candidate_blocked_reason": "BTC_SEASON_SEMANTIC_MAPPING_NOT_APPROVED",
+    "mapping_candidate_blocked_reason": "BTC_SEASON_SEMANTIC_MAPPING_V011_NOT_APPROVED",
 }
 
 EXPECTED_STATES = [
@@ -105,6 +105,23 @@ EXPECTED_OUTPUT_QUALIFIERS = [
     ("CANDIDATE_FAILED", "CANDIDATE_FAILURE_RESULT"),
     ("DATA_INCOMPLETE", "SE_X_REASON"),
     ("DATA_CONFLICT", "SE_X_REASON"),
+]
+
+EXPECTED_MACRO_OVERLAYS = [
+    (
+        "M+",
+        "NON_WEIGHTED_SEASON_OVERLAY",
+        "INCREASE_CANDIDATE_PERSISTENCE_AND_CONFIRMATION_CONFIDENCE_ONLY",
+        False,
+    ),
+    ("M0", "NON_WEIGHTED_SEASON_OVERLAY", "NEITHER_PROMOTE_NOR_VETO_ALONE", False),
+    (
+        "M-",
+        "NON_WEIGHTED_SEASON_OVERLAY",
+        "LOWER_CANDIDATE_CONFIDENCE_AND_DELAY_CONFIRMATION",
+        False,
+    ),
+    ("MX", "NON_WEIGHTED_SEASON_OVERLAY", "PAUSE_FORMAL_TRANSITION", False),
 ]
 
 EXPECTED_EDGES = [
@@ -131,6 +148,7 @@ EXPECTED_EDGES = [
 EXPECTED_INVARIANT_IDS = {
     "INV_KEEP_LAST_VALID_SEASON_BEFORE_CANDIDATE",
     "INV_CANDIDATE_DOES_NOT_REPLACE_ANCHOR_SEASON",
+    "INV_CANDIDATE_DOES_NOT_AUTHORIZE_FULL_EXPOSURE_SWITCH",
     "INV_CANDIDATE_AND_CONFIRMATION_REQUIRE_DIFFERENT_EVENTS",
     "INV_CONFIRMATION_REQUIRES_INDEPENDENT_LATER_VALIDATION",
     "INV_CANDIDATE_FAILURE_RETURNS_TO_ANCHOR_SEASON",
@@ -139,29 +157,185 @@ EXPECTED_INVARIANT_IDS = {
     "INV_SCORE_IS_NOT_A_SEASON",
     "INV_LATEST_REAL_DATA_REQUIRED",
     "INV_DATA_INCOMPLETE_OR_CONFLICT_OUTPUTS_SE_X",
+    "INV_HIGH_LEVEL_BASE_REQUIRES_STRICTER_ROUTE_GATES",
+    "INV_E2_ONLY_ALLOWS_WINTER_TO_SPRING_CANDIDATE",
+    "INV_UNTOUCHED_REALIZED_PRICE_OR_CVDD_IS_NOT_AUTOMATIC_VETO",
+    "INV_MACRO_OVERLAY_CANNOT_DECLARE_SEASON",
+    "INV_SINGLE_MACRO_NEGATIVE_CANNOT_CANCEL_CONFIRMED_STRUCTURE",
+    "INV_MX_PAUSES_FORMAL_TRANSITION",
+    "INV_CALENDAR_CANNOT_TRIGGER_SEASON",
+    "INV_FIXED_PRICE_CANNOT_BE_PERMANENT_TRANSITION_THRESHOLD",
+    "INV_SPRING_CONFIRMATION_IS_NOT_SUMMER_OR_FULL_EXPOSURE",
+    "INV_EMERGENCY_RISK_ACTION_DOES_NOT_UPDATE_SEASON_LABEL",
 }
 
 EXPECTED_PREDICATES = {
-    "PRED_WI_TO_WI_SPC_STANDARD": "WI_TO_WI_SPC",
-    "PRED_WI_SPC_TO_SP_CONFIRMATION": "WI_SPC_TO_SP",
-    "PRED_WI_SPC_TO_WI_FAILURE": "WI_SPC_TO_WI",
-    "PRED_SP_TO_WI_REVIEWED_ROLLBACK": "SP_TO_WI_REVIEWED_ROLLBACK",
+    "PRED_WI_TO_WI_SPC_VALUE_SUPPORTED": {
+        "edge_id": "WI_TO_WI_SPC",
+        "symbol_field": "required_symbols",
+        "symbols": [
+            "STAGE_3_OR_EQUIVALENT_MATURE_CLEANING_BACKGROUND",
+            "VALUE_STATE_V1_TO_V5",
+            "C3",
+            "S2_OR_S3",
+            "E2_OR_E3",
+            "NO_D3_OR_D4",
+            "NO_CX_SX_VX",
+            "NO_UNRESOLVED_HIGH_QUALITY_VETO",
+        ],
+        "source_refs": ["CH07-7.5.1", "CH07-7.5.2"],
+    },
+    "PRED_WI_TO_WI_SPC_HIGH_LEVEL_BASE": {
+        "edge_id": "WI_TO_WI_SPC",
+        "symbol_field": "required_symbols",
+        "symbols": [
+            "STAGE_3_OR_EQUIVALENT_MATURE_CLEANING_BACKGROUND",
+            "VALUE_STATE_V0",
+            "C3",
+            "S3",
+            "E3",
+            "SPOT_VOLUME_CVD_AND_INSTITUTIONAL_SPOT_FLOW_PERSISTENT_ACROSS_WINDOWS",
+            "LEVERAGE_EXPANSION_NOT_AHEAD_OF_SPOT_DEMAND",
+            "UNTOUCHED_VALUE_ANCHOR_STRUCTURAL_FACTORS_RECORDED",
+            "FOLLOW_UP_WEEKLY_VALIDATION_OR_SUCCESSFUL_RETEST_COMPLETE",
+            "NO_D3_OR_D4",
+            "NO_CX_SX_VX",
+            "NO_UNRESOLVED_HIGH_QUALITY_VETO",
+        ],
+        "source_refs": ["CH07-7.5.1", "CH07-7.5.3"],
+    },
+    "PRED_WI_SPC_TO_SP_CONFIRMATION": {
+        "edge_id": "WI_SPC_TO_SP",
+        "symbol_field": "required_symbols",
+        "symbols": [
+            "E3",
+            "C3_CONTINUES",
+            "S3",
+            "P1_WEEKLY_CONTINUES",
+            "P2_SPOT_CONTINUES",
+            "INDEPENDENT_LATER_VALIDATION_COMPLETE",
+            "NO_D3_JOINT_COUNTEREVIDENCE",
+            "NO_TRANSMITTED_MAJOR_MACRO_HEADWIND",
+            "NO_RENEWED_KEY_WEEKLY_STRUCTURE_BREAK",
+        ],
+        "source_refs": ["CH07-7.6"],
+    },
+    "PRED_WI_SPC_TO_WI_FAILURE": {
+        "edge_id": "WI_SPC_TO_WI",
+        "symbol_field": "trigger_symbols_any",
+        "symbols": [
+            "S2_OR_S3_INVALIDATED",
+            "SPOT_CVD_VOLUME_AND_ETF_JOINT_WEAKNESS",
+            "LEVERAGE_DOMINATED_REBOUND",
+            "C3_INVALIDATED",
+            "E1_E0_OR_EX",
+            "D3_D4_OR_HIGH_QUALITY_VETO",
+            "HIGH_LEVEL_BASE_STRUCTURAL_DEMAND_INVALIDATED",
+        ],
+        "source_refs": ["CH07-7.9"],
+    },
+    "PRED_SP_TO_WI_REVIEWED_ROLLBACK": {
+        "edge_id": "SP_TO_WI_REVIEWED_ROLLBACK",
+        "symbol_field": "required_symbols",
+        "symbols": [
+            "SEASON_UNDER_REVIEW_ENTERED",
+            "LATER_WEEKLY_DAMAGE_CONFIRMED",
+            "SPOT_WEAKNESS_CONFIRMED",
+            "E_LEVEL_DECLINE_CONFIRMED",
+        ],
+        "source_refs": ["CH07-7.10"],
+    },
+}
+
+EXPECTED_STRUCTURE_RULES = [
+    (
+        "RULE_BREAKOUT",
+        ["WEEKLY_CLOSE_ABOVE_CURRENT_KEY_STRUCTURE"],
+    ),
+    (
+        "RULE_HOLD",
+        ["NO_IMMEDIATE_RETURN_BELOW_PRIOR_STRUCTURE"],
+    ),
+    (
+        "RULE_RETEST",
+        [
+            "SPOT_SELL_PRESSURE_LOWER_THAN_PRIOR_RETEST",
+            "NO_EXPANDED_WEEKLY_STRUCTURE_FAILURE",
+        ],
+    ),
+    (
+        "RULE_DEMAND_CONFIRMATION",
+        [
+            "AT_LEAST_ONE_PERSISTENT_SPOT_VOLUME_CVD_OR_INSTITUTIONAL_BUYING_SIGNAL",
+            "DERIVATIVES_NOT_SOLE_ENGINE",
+        ],
+    ),
+]
+
+EXPECTED_FORMAL_OUTPUT_CONTRACT = {
+    "status": "SCHEMA_ONLY_NOT_RUNTIME_BOUND",
+    "required_fields": [
+        "current_formal_season",
+        "next_season_candidate",
+        "stage_v_c_s_e_states",
+        "value_route",
+        "macro_overlay",
+        "candidate_trigger_event",
+        "independent_later_validation_complete",
+        "strongest_supporting_evidence",
+        "strongest_counterevidence_and_veto",
+        "conflict_severity_d0_d4",
+        "candidate_failure_conditions",
+        "next_promotion_conditions",
+        "chapter_8_action_interface",
+    ],
+    "allowed_conclusions": [
+        "MAINTAIN_CURRENT_SEASON",
+        "NEXT_SEASON_CANDIDATE",
+        "FORMAL_SEASON_CHANGE",
+        "CANDIDATE_FAILED",
+        "SEASON_UNDER_REVIEW",
+        "FORMAL_ROLLBACK",
+        "DATA_INCOMPLETE",
+        "DATA_CONFLICT",
+    ],
+    "action_interface_authority": "NONE",
+    "source_refs": ["CH07-7.17", "CH07-7.18"],
+}
+
+EXPECTED_DATA_QUALITY_RULE_IDS = {
+    "DQ_CROSS_CLOCK_MAJOR_EVENT_BLOCK",
+    "DQ_LOW_QUALITY_REQUIRED_E2_E3_INPUT_BLOCK",
+    "DQ_SAME_EVENT_CANNOT_FORM_CANDIDATE_AND_CONFIRM",
+    "DQ_SINGLE_DAY_SINGLE_VENUE_OR_INTRADAY_SIGNAL_BLOCK",
+    "DQ_HIGH_LEVEL_BASE_PERSISTENT_DEMAND_REQUIRED",
+    "DQ_MACRO_CLOCK_UNSYNCHRONIZED_AROUND_EVENT_BLOCK",
+    "DQ_CALENDAR_OR_FIXED_PRICE_PERMANENT_THRESHOLD_BLOCK",
+    "DQ_D3_D4_CX_SX_VX_OR_UNRESOLVED_VETO_BLOCK",
+    "DQ_STALE_SNAPSHOT_CANNOT_ASSERT_CURRENT_SEASON",
 }
 
 EXPECTED_UNMAPPED_IDS = {
     "UM_STAGE3_EQUIVALENCE_CLASSIFIER",
     "UM_V_C_S_E_UPSTREAM_RUNTIME_CLASSIFIERS",
-    "UM_INDEPENDENT_LATER_OBSERVATION_WINDOW",
-    "UM_KEY_WEEKLY_STRUCTURE_IDENTIFICATION",
+    "UM_VALUE_ROUTE_CLASSIFIER_AND_ROUTE_SPECIFIC_GATES",
+    "UM_INDEPENDENT_LATER_OBSERVATION_AND_EVENT_IDENTITY",
+    "UM_KEY_WEEKLY_STRUCTURE_AND_BREAKOUT_RETEST_CLASSIFIER",
     "UM_SPOT_AND_INSTITUTIONAL_DEMAND_PERSISTENCE",
     "UM_D0_D4_AND_VETO_RUNTIME_CLASSIFIER",
-    "UM_MACRO_TRANSMISSION_RUNTIME_CLASSIFIER",
+    "UM_MACRO_OVERLAY_AND_TRANSMISSION_RUNTIME_CLASSIFIER",
     "UM_LAST_VALID_SEASON_BOOTSTRAP_AND_PERSISTENCE",
     "UM_SE_X_RECOVERY_AND_STATE_LEASE",
     "UM_NON_WINTER_TRANSITION_PREDICATES",
     "UM_FORMAL_SOURCE_BINDINGS_FRESHNESS_AND_CLOCK_ALIGNMENT",
-    "UM_EXACT_MAPPING_HASH_AND_RUNTIME_PROMOTION_APPROVAL",
+    "UM_DATA_QUALITY_GATE_RUNTIME_EVALUATION",
+    "UM_FORMAL_OUTPUT_ASSEMBLY_AND_CHAPTER8_INTERFACE",
 }
+
+EXPECTED_APPROVAL_GATES = [
+    ("AG_EXACT_MAPPING_HASH", "NOT_YET_APPROVED"),
+    ("AG_RUNTIME_PROMOTION", "NOT_APPROVED"),
+]
 
 EXPECTED_RESEARCH_FIREWALL = {
     "research_delta_authority": "NONE",
@@ -268,6 +442,29 @@ def validate_mapping(mapping: dict[str, Any]) -> list[str]:
     if actual_qualifiers != EXPECTED_OUTPUT_QUALIFIERS:
         errors.append("formal output qualifier catalog changed")
 
+    macro_overlays = mapping.get("macro_overlay_catalog")
+    if not isinstance(macro_overlays, list):
+        errors.append("macro_overlay_catalog must be a list")
+        macro_overlays = []
+    actual_macro_overlays = []
+    for overlay in macro_overlays:
+        if not isinstance(overlay, dict):
+            errors.append("macro overlay must be an object")
+            continue
+        overlay_id = overlay.get("overlay_state_id")
+        actual_macro_overlays.append(
+            (
+                overlay_id,
+                overlay.get("kind"),
+                overlay.get("formal_effect"),
+                overlay.get("may_declare_season"),
+            )
+        )
+        if overlay.get("source_refs") != ["CH07-7.7"]:
+            errors.append(f"{overlay_id} source_refs changed")
+    if actual_macro_overlays != EXPECTED_MACRO_OVERLAYS:
+        errors.append("formal macro overlay catalog changed")
+
     edges = mapping.get("declared_edges")
     if not isinstance(edges, list):
         errors.append("declared_edges must be a list")
@@ -317,17 +514,66 @@ def validate_mapping(mapping: dict[str, Any]) -> list[str]:
         EXPECTED_PREDICATES
     ):
         errors.append("symbolic predicate set changed")
-    for predicate_id, edge_id in EXPECTED_PREDICATES.items():
+    for predicate_id, expected in EXPECTED_PREDICATES.items():
         row = predicate_index.get(predicate_id, {})
-        if row.get("edge_id") != edge_id:
+        if row.get("edge_id") != expected["edge_id"]:
             errors.append(f"{predicate_id} edge binding changed")
         if row.get("status") != "SYMBOLIC_ONLY_NOT_RUNTIME_BOUND":
             errors.append(f"{predicate_id} gained runtime authority")
-        symbols = row.get("required_symbols", row.get("trigger_symbols_any"))
-        if not isinstance(symbols, list) or not symbols:
-            errors.append(f"{predicate_id} symbolic requirements missing")
-        if not _source_refs_valid(row.get("source_refs")):
-            errors.append(f"{predicate_id} source_refs missing")
+        symbol_field = expected["symbol_field"]
+        if row.get(symbol_field) != expected["symbols"]:
+            errors.append(f"{predicate_id} symbolic requirements changed")
+        other_field = (
+            "trigger_symbols_any"
+            if symbol_field == "required_symbols"
+            else "required_symbols"
+        )
+        if other_field in row:
+            errors.append(f"{predicate_id} symbolic operator changed")
+        if row.get("source_refs") != expected["source_refs"]:
+            errors.append(f"{predicate_id} source_refs changed")
+
+    structure_rules = mapping.get("symbolic_structure_rules")
+    if not isinstance(structure_rules, list):
+        errors.append("symbolic_structure_rules must be a list")
+        structure_rules = []
+    actual_structure_rules = []
+    for row in structure_rules:
+        if not isinstance(row, dict):
+            errors.append("symbolic structure rule must be an object")
+            continue
+        rule_id = row.get("rule_id")
+        actual_structure_rules.append((rule_id, row.get("required_symbols")))
+        if row.get("status") != "SYMBOLIC_ONLY_NOT_RUNTIME_BOUND":
+            errors.append(f"{rule_id} gained runtime authority")
+        if row.get("source_refs") != ["CH07-7.8"]:
+            errors.append(f"{rule_id} source_refs changed")
+    if actual_structure_rules != EXPECTED_STRUCTURE_RULES:
+        errors.append("symbolic breakout/hold/retest rule set changed")
+
+    if mapping.get("formal_output_contract") != EXPECTED_FORMAL_OUTPUT_CONTRACT:
+        errors.append("formal Season output contract changed")
+
+    data_quality_rules = mapping.get("data_quality_rules")
+    if not isinstance(data_quality_rules, list):
+        errors.append("data_quality_rules must be a list")
+        data_quality_rules = []
+    data_quality_rule_ids = {
+        row.get("rule_id") for row in data_quality_rules if isinstance(row, dict)
+    }
+    if data_quality_rule_ids != EXPECTED_DATA_QUALITY_RULE_IDS or len(
+        data_quality_rules
+    ) != len(EXPECTED_DATA_QUALITY_RULE_IDS):
+        errors.append("formal data quality rule set changed")
+    for row in data_quality_rules:
+        if not isinstance(row, dict):
+            errors.append("data quality rule must be an object")
+            continue
+        rule_id = row.get("rule_id")
+        if row.get("effect") != "BLOCK_FORMAL_TRANSITION":
+            errors.append(f"{rule_id} fail-closed effect changed")
+        if row.get("source_refs") != ["CH07-7.18"]:
+            errors.append(f"{rule_id} source_refs changed")
 
     unmapped = mapping.get("unmapped_requirements")
     if not isinstance(unmapped, list):
@@ -351,6 +597,22 @@ def validate_mapping(mapping: dict[str, Any]) -> list[str]:
             errors.append(f"{requirement_id} research firewall changed")
         if not _source_refs_valid(row.get("source_refs")):
             errors.append(f"{requirement_id} source_refs missing")
+
+    approval_gates = mapping.get("approval_gates")
+    if not isinstance(approval_gates, list):
+        errors.append("approval_gates must be a list")
+        approval_gates = []
+    actual_approval_gates = []
+    for gate in approval_gates:
+        if not isinstance(gate, dict):
+            errors.append("approval gate must be an object")
+            continue
+        gate_id = gate.get("gate_id")
+        actual_approval_gates.append((gate_id, gate.get("status")))
+        if gate.get("research_delta_may_approve") is not False:
+            errors.append(f"{gate_id} research firewall changed")
+    if actual_approval_gates != EXPECTED_APPROVAL_GATES:
+        errors.append("approval gate set changed")
 
     if mapping.get("research_firewall") != EXPECTED_RESEARCH_FIREWALL:
         errors.append("research firewall changed")
@@ -452,27 +714,28 @@ def build_validation_report(
         for row in candidate.get("unmapped_requirements", [])
         if isinstance(row, dict) and isinstance(row.get("requirement_id"), str)
     )
-    blocked_reasons = [f"UNMAPPED:{item}" for item in unmapped_ids]
-    blocked_reasons.extend(
-        [
-            "EXACT_MAPPING_HASH_NOT_APPROVED",
-            "FORMAL_RUNTIME_BINDING_NOT_APPROVED",
-        ]
+    approval_gate_ids = sorted(
+        row["gate_id"]
+        for row in candidate.get("approval_gates", [])
+        if isinstance(row, dict) and isinstance(row.get("gate_id"), str)
     )
+    blocked_reasons = [f"UNMAPPED:{item}" for item in unmapped_ids]
+    blocked_reasons.extend(f"APPROVAL_GATE:{item}" for item in approval_gate_ids)
     if errors:
         blocked_reasons.extend(f"INVALID:{item}" for item in errors)
 
     report: dict[str, Any] = {
-        "schema_version": "CRT_BTC_SEASON_SEMANTIC_MAPPING_VALIDATION_V0.1",
+        "schema_version": "CRT_BTC_SEASON_SEMANTIC_MAPPING_VALIDATION_V0.1.1",
         "mapping_id": candidate.get("mapping_id"),
         "mapping_hash": canonical_hash(candidate),
         "state": (
-            "VALID_CANDIDATE_FAIL_CLOSED"
+            "VALID_CORRECTED_CANDIDATE_FAIL_CLOSED"
             if not errors
-            else "INVALID_CANDIDATE_FAIL_CLOSED"
+            else "INVALID_CORRECTED_CANDIDATE_FAIL_CLOSED"
         ),
         "mapping_errors": errors,
         "unmapped_requirements": unmapped_ids,
+        "approval_gates": approval_gate_ids,
         "blocked_reasons": sorted(set(blocked_reasons)),
         "runtime_binding_ready": False,
         "machine_may_determine_btc_season": False,

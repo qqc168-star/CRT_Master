@@ -16,10 +16,10 @@ from crt_radar import btc_season_semantic_mapping as semantic
 
 
 MAPPING_PATH = (
-    RADAR_ROOT / "CONFIG" / "BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.json"
+    RADAR_ROOT / "CONFIG" / "BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.1.json"
 )
 V110_CONTRACT_PATH = RADAR_ROOT / "CONFIG" / "V110_FORMAL_CANDIDATE_RUNTIME_V0.1.json"
-EXPECTED_MAPPING_HASH = "9ddfa4137fff446403bca922274b6c95be27bd55b91db735745ba79e4948b965"
+EXPECTED_MAPPING_HASH = "afe99dfaf4a2023d39c1589252b840b27daab106932b33783316fec71ab05e3a"
 
 
 class BtcSeasonSemanticMappingTests(unittest.TestCase):
@@ -41,7 +41,7 @@ class BtcSeasonSemanticMappingTests(unittest.TestCase):
         )
         self.assertEqual(
             self.mapping["authority"]["candidate_build"],
-            "USER_APPROVED_2026-08-22",
+            "USER_APPROVED_CORRECTIVE_DELTA_2026-08-22",
         )
 
     def test_validation_report_is_deterministic_and_fail_closed(self):
@@ -49,7 +49,10 @@ class BtcSeasonSemanticMappingTests(unittest.TestCase):
         second = semantic.build_validation_report(deepcopy(self.mapping))
 
         self.assertEqual(first, second)
-        self.assertEqual(first["state"], "VALID_CANDIDATE_FAIL_CLOSED")
+        self.assertEqual(
+            first["state"],
+            "VALID_CORRECTED_CANDIDATE_FAIL_CLOSED",
+        )
         self.assertEqual(first["mapping_errors"], [])
         self.assertFalse(first["runtime_binding_ready"])
         self.assertFalse(first["machine_may_determine_btc_season"])
@@ -129,6 +132,10 @@ class BtcSeasonSemanticMappingTests(unittest.TestCase):
             invariants,
         )
         self.assertIn(
+            "INV_CANDIDATE_DOES_NOT_AUTHORIZE_FULL_EXPOSURE_SWITCH",
+            invariants,
+        )
+        self.assertIn(
             "INV_CONFIRMATION_REQUIRES_INDEPENDENT_LATER_VALIDATION",
             invariants,
         )
@@ -145,7 +152,7 @@ class BtcSeasonSemanticMappingTests(unittest.TestCase):
             row["predicate_id"]: row
             for row in self.mapping["symbolic_predicate_contracts"]
         }
-        candidate = predicates["PRED_WI_TO_WI_SPC_STANDARD"]
+        candidate = predicates["PRED_WI_TO_WI_SPC_VALUE_SUPPORTED"]
         confirmation = predicates["PRED_WI_SPC_TO_SP_CONFIRMATION"]
         rollback = predicates["PRED_SP_TO_WI_REVIEWED_ROLLBACK"]
         self.assertIn("C3", candidate["required_symbols"])
@@ -165,6 +172,120 @@ class BtcSeasonSemanticMappingTests(unittest.TestCase):
             )
         )
 
+    def test_value_supported_and_high_level_base_routes_are_not_collapsed(self):
+        predicates = {
+            row["predicate_id"]: row
+            for row in self.mapping["symbolic_predicate_contracts"]
+        }
+        value_supported = predicates["PRED_WI_TO_WI_SPC_VALUE_SUPPORTED"]
+        high_level_base = predicates["PRED_WI_TO_WI_SPC_HIGH_LEVEL_BASE"]
+
+        self.assertEqual(value_supported["edge_id"], "WI_TO_WI_SPC")
+        self.assertEqual(high_level_base["edge_id"], "WI_TO_WI_SPC")
+        self.assertIn("VALUE_STATE_V1_TO_V5", value_supported["required_symbols"])
+        self.assertIn("S2_OR_S3", value_supported["required_symbols"])
+        self.assertIn("E2_OR_E3", value_supported["required_symbols"])
+
+        strict_symbols = set(high_level_base["required_symbols"])
+        self.assertIn("VALUE_STATE_V0", strict_symbols)
+        self.assertIn("S3", strict_symbols)
+        self.assertIn("E3", strict_symbols)
+        self.assertNotIn("S2_OR_S3", strict_symbols)
+        self.assertNotIn("E2_OR_E3", strict_symbols)
+        self.assertIn(
+            "SPOT_VOLUME_CVD_AND_INSTITUTIONAL_SPOT_FLOW_PERSISTENT_ACROSS_WINDOWS",
+            strict_symbols,
+        )
+        self.assertIn(
+            "LEVERAGE_EXPANSION_NOT_AHEAD_OF_SPOT_DEMAND",
+            strict_symbols,
+        )
+        self.assertIn(
+            "FOLLOW_UP_WEEKLY_VALIDATION_OR_SUCCESSFUL_RETEST_COMPLETE",
+            strict_symbols,
+        )
+
+    def test_macro_structure_and_output_contracts_are_explicit_and_non_runtime(self):
+        macro = {
+            row["overlay_state_id"]: row
+            for row in self.mapping["macro_overlay_catalog"]
+        }
+        self.assertEqual(set(macro), {"M+", "M0", "M-", "MX"})
+        self.assertTrue(all(row["may_declare_season"] is False for row in macro.values()))
+        self.assertEqual(macro["MX"]["formal_effect"], "PAUSE_FORMAL_TRANSITION")
+
+        structure_rules = {
+            row["rule_id"]: row for row in self.mapping["symbolic_structure_rules"]
+        }
+        self.assertEqual(
+            set(structure_rules),
+            {"RULE_BREAKOUT", "RULE_HOLD", "RULE_RETEST", "RULE_DEMAND_CONFIRMATION"},
+        )
+        self.assertIn(
+            "DERIVATIVES_NOT_SOLE_ENGINE",
+            structure_rules["RULE_DEMAND_CONFIRMATION"]["required_symbols"],
+        )
+
+        output = self.mapping["formal_output_contract"]
+        self.assertEqual(output["status"], "SCHEMA_ONLY_NOT_RUNTIME_BOUND")
+        self.assertEqual(len(output["required_fields"]), 13)
+        self.assertIn("chapter_8_action_interface", output["required_fields"])
+        self.assertEqual(output["action_interface_authority"], "NONE")
+
+    def test_calendar_and_data_quality_fail_closed_rules_are_explicit(self):
+        invariants = {
+            row["invariant_id"] for row in self.mapping["global_invariants"]
+        }
+        self.assertIn("INV_CALENDAR_CANNOT_TRIGGER_SEASON", invariants)
+        self.assertIn(
+            "INV_FIXED_PRICE_CANNOT_BE_PERMANENT_TRANSITION_THRESHOLD",
+            invariants,
+        )
+        self.assertIn(
+            "INV_HIGH_LEVEL_BASE_REQUIRES_STRICTER_ROUTE_GATES",
+            invariants,
+        )
+        self.assertIn(
+            "INV_E2_ONLY_ALLOWS_WINTER_TO_SPRING_CANDIDATE",
+            invariants,
+        )
+        self.assertIn(
+            "INV_UNTOUCHED_REALIZED_PRICE_OR_CVDD_IS_NOT_AUTOMATIC_VETO",
+            invariants,
+        )
+
+        rules = {row["rule_id"]: row for row in self.mapping["data_quality_rules"]}
+        self.assertEqual(set(rules), semantic.EXPECTED_DATA_QUALITY_RULE_IDS)
+        self.assertTrue(
+            all(row["effect"] == "BLOCK_FORMAL_TRANSITION" for row in rules.values())
+        )
+        self.assertIn(
+            "DQ_SINGLE_DAY_SINGLE_VENUE_OR_INTRADAY_SIGNAL_BLOCK",
+            rules,
+        )
+
+    def test_route_or_coverage_regression_invalidates_corrected_candidate(self):
+        changed = deepcopy(self.mapping)
+        predicates = {
+            row["predicate_id"]: row
+            for row in changed["symbolic_predicate_contracts"]
+        }
+        predicates["PRED_WI_TO_WI_SPC_HIGH_LEVEL_BASE"][
+            "required_symbols"
+        ].remove("E3")
+        changed["macro_overlay_catalog"] = changed["macro_overlay_catalog"][:-1]
+        changed["formal_output_contract"]["required_fields"] = changed[
+            "formal_output_contract"
+        ]["required_fields"][:-1]
+
+        errors = semantic.validate_mapping(changed)
+        self.assertIn(
+            "PRED_WI_TO_WI_SPC_HIGH_LEVEL_BASE symbolic requirements changed",
+            errors,
+        )
+        self.assertIn("formal macro overlay catalog changed", errors)
+        self.assertIn("formal Season output contract changed", errors)
+
     def test_all_real_semantic_gaps_remain_explicit_blockers(self):
         expected = semantic.EXPECTED_UNMAPPED_IDS
         rows = self.mapping["unmapped_requirements"]
@@ -176,8 +297,18 @@ class BtcSeasonSemanticMappingTests(unittest.TestCase):
         self.assertEqual(set(report["unmapped_requirements"]), expected)
         for requirement_id in expected:
             self.assertIn(f"UNMAPPED:{requirement_id}", report["blocked_reasons"])
-        self.assertIn("EXACT_MAPPING_HASH_NOT_APPROVED", report["blocked_reasons"])
-        self.assertIn("FORMAL_RUNTIME_BINDING_NOT_APPROVED", report["blocked_reasons"])
+        self.assertEqual(
+            set(report["approval_gates"]),
+            {"AG_EXACT_MAPPING_HASH", "AG_RUNTIME_PROMOTION"},
+        )
+        self.assertIn(
+            "APPROVAL_GATE:AG_EXACT_MAPPING_HASH",
+            report["blocked_reasons"],
+        )
+        self.assertIn(
+            "APPROVAL_GATE:AG_RUNTIME_PROMOTION",
+            report["blocked_reasons"],
+        )
 
     def test_research_delta_has_no_semantic_authority(self):
         firewall = self.mapping["research_firewall"]
@@ -186,6 +317,12 @@ class BtcSeasonSemanticMappingTests(unittest.TestCase):
             if key == "research_delta_authority":
                 continue
             self.assertIs(value, False, key)
+        self.assertTrue(
+            all(
+                gate["research_delta_may_approve"] is False
+                for gate in self.mapping["approval_gates"]
+            )
+        )
         serialized = json.dumps(self.mapping, ensure_ascii=False)
         self.assertNotIn("CRT_SEASON_ROUTER_RESEARCH_DELTA_20260822.md", serialized)
 
@@ -202,7 +339,10 @@ class BtcSeasonSemanticMappingTests(unittest.TestCase):
         self.assertIn("inherited formal constants changed", errors)
 
         report = semantic.build_validation_report(changed)
-        self.assertEqual(report["state"], "INVALID_CANDIDATE_FAIL_CLOSED")
+        self.assertEqual(
+            report["state"],
+            "INVALID_CORRECTED_CANDIDATE_FAIL_CLOSED",
+        )
         self.assertFalse(report["runtime_binding_ready"])
         self.assertIsNone(report["season"])
 
