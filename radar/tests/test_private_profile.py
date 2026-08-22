@@ -229,6 +229,55 @@ class CapitalStateProfileContractTest(unittest.TestCase):
             validate_private_profile(payload)
 
 
+    def test_wait_plan_side_is_accepted_without_execution_authority(self) -> None:
+        payload = capital_state_payload()
+
+        plan = payload["plans"][0]
+        plan["plan_id"] = "ATTACK_CAPITAL_WAIT"
+        plan["asset"] = "USD"
+        plan["side"] = "WAIT"
+        plan["status"] = "ACTIVE"
+
+        payload["asset_roles"]["USD"] = "ATTACK_CAPITAL_RESERVE"
+
+        for tranche in plan["tranches"]:
+            tranche["status"] = "PENDING"
+            tranche["validity_conditions"] = [
+                {
+                    "field": "attack_asset_selection_status",
+                    "operator": "EQ",
+                    "value": "NOT_YET_SELECTED",
+                }
+            ]
+
+        result = validate_private_profile(payload)
+
+        self.assertEqual(
+            result["plans"][0]["side"],
+            "WAIT",
+        )
+        self.assertEqual(
+            result["capital_state_status"]["state"],
+            "AVAILABLE",
+        )
+        self.assertEqual(
+            result["capital_state_status"]["pending_tranche_count"],
+            3,
+        )
+        self.assertEqual(
+            result["capital_state_status"]["pending_budget_usd"],
+            4500.0,
+        )
+        self.assertEqual(
+            result["external_action_authority"],
+            "NONE",
+        )
+        self.assertEqual(
+            result["action_output"],
+            "NONE",
+        )
+
+
 
 if __name__ == "__main__":
     unittest.main()
