@@ -19,11 +19,11 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 ## 固定進度
 
 - 總驗收項目：`8`
-- 已完成：`1`
+- 已完成：`2`
 - 進行中：`1`
-- 完成率：`12.5%`
-- 目前唯一進行中項目：`#2`
-- 目前任務：`ACTUAL_RUNTIME_AUDIT`
+- 完成率：`25%`
+- 目前唯一進行中項目：`#3`
+- 目前任務：`RUNTIME_ALIGNMENT_AND_FRESH_CYCLE`
 
 完成率只使用：
 
@@ -44,7 +44,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
   - `LastTaskResult = 0`。
   - 此項只證明 Windows 排程有執行，不代表完整市場資料鏈已驗收。
 
-- [ ] **#2 真正值班 Runtime（執行環境）驗證 — ACTIVE**
+- [x] **#2 真正值班 Runtime（執行環境）驗證 — COMPLETE WITH FINDINGS**
   - 從 Windows Scheduled Task（Windows 排程工作）的實際 Action（動作）取得真正 `RepoRoot` 與 `RuntimeRoot`。
   - 驗證真正值班程式的 Git HEAD。
   - 驗證 `evidence/latest.json` 新鮮度與狀態。
@@ -53,7 +53,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
   - 驗證 `observations.sqlite3` 持續增加。
   - 驗證最新 BTC 觀測價格與時間戳確實反映實際市場。
 
-- [ ] **#3 Runtime（執行環境）對齊與新鮮循環驗收**
+- [ ] **#3 Runtime（執行環境）對齊與新鮮循環驗收 — ACTIVE**
   - 只有 #2 證明版本漂移、資料過期或執行失敗時才施工。
   - 修復後至少完成一個新的真實 observation cycle（觀測循環）。
   - 不得為了追求 PASS（通過）而放寬資料品質或 freshness（新鮮度）政策。
@@ -97,48 +97,53 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
   - 沒有重複通知風暴。
   - 沒有外部交易或資金操作。
 
+## #2 驗收結果
+
+`AUDIT_COMPLETE_REPAIR_REQUIRED`
+
+已驗證：
+
+- Windows Scheduled Task（Windows 排程工作）持續正常執行。
+- Observation DB（觀測資料庫）持續增加。
+- 最新 BTC 觀測可正常寫入。
+- `2026-08-22 21:13 +08:00` 最新 BTC 觀測約為 `77235.01`。
+- 真正值班 Runtime（執行環境）的 Git HEAD 與 current GitHub main（目前主分支）不同。
+
+因此：
+
+- #2：`COMPLETE WITH FINDINGS`
+- 問題移交 #3。
+- 不把版本漂移誤判成資料蒐集完全失效。
+
 ## 目前已知阻塞
 
-`ITEM_2_ACTUAL_RUNTIME_NOT_YET_VERIFIED`
+`ITEM_3_RUNTIME_HEAD_DRIFT`
 
-已知 Windows Scheduled Task（Windows 排程工作）實際使用：
+真正值班：
 
 `C:\Users\maxwe\CRT_EvidenceRunner_018c263d_git`
 
-其 RuntimeRoot（執行環境根目錄）為：
+其 Git HEAD 與 current GitHub main（目前主分支）不一致。
+
+RuntimeRoot（執行環境根目錄）仍為：
 
 `C:\Users\maxwe\CRT_Runtime`
 
-第一次唯讀稽核錯誤檢查：
-
-`C:\Users\maxwe\CRT_EvidenceRunner`
-
-因此在取得 branch（分支）資訊時產生 `Null`（空值）錯誤。
-
-此錯誤屬於 audit script（稽核程式）路徑假設錯誤。
-
-目前尚未證明真正值班 Runtime（執行環境）故障，也尚未證明其版本與 current main（目前主分支）一致。
-
-所以 #2 維持未完成。
-
 ## 下一個唯一有效動作
 
-針對 Windows Scheduled Task（Windows 排程工作）實際配置的：
+處理 #3 Runtime Alignment（執行環境對齊）。
 
-`C:\Users\maxwe\CRT_EvidenceRunner_018c263d_git`
+施工前再次確認：
 
-進行一次 read-only audit（唯讀稽核）。
+- 真正值班 Runtime 的實際 Git HEAD
+- working tree（工作樹）是否乾淨
+- current GitHub main（目前主分支）
+- Scheduled Task（Windows 排程工作）仍指向同一 RepoRoot
+- 現有 Observation DB（觀測資料庫）不得刪除或重建
 
-只驗證：
+安全條件成立後，才以最小方式讓值班 Runtime 對齊 current main，並完成至少一個新的真實 observation cycle（觀測循環）。
 
-- Git HEAD
-- Evidence Pack（證據包）
-- Wake（喚醒訊號）
-- Notice（通知檔）
-- Observation DB（觀測資料庫）
-- 最新 BTC 觀測
-
-不得在該稽核中修改 Git、Runtime（執行環境）、Scheduled Task（排程工作）或任何正式 CRT 規則。
+不得碰既有 stash（暫存修改），不得 reset（重設）或覆寫未知本機修改。
 
 ## 暫緩工作
 

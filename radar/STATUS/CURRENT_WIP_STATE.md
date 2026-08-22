@@ -22,8 +22,8 @@
 
 - Active Baton（主動接力棒）: `radar/STATUS/CRT_ACTIVE_BATON.md`
 - Mission（任務）: `CRT Live Action Loop V0.1`
-- Progress（進度）: `1 / 8 = 12.5%`
-- Active item（目前唯一進行中項目）: `#2 ACTUAL_RUNTIME_AUDIT`
+- Progress（進度）: see `radar/STATUS/CRT_ACTIVE_BATON.md`
+- Active item（目前唯一進行中項目）: see `radar/STATUS/CRT_ACTIVE_BATON.md`
 - Priority（優先順序）: `Live Radar -> Capital State -> GPT Wake`
 - Formal Season recovery（正式季節恢復）保留，但在本實戰閉環完成前暫緩，除非被證明直接形成阻塞。
 ## Current engineering distinction
