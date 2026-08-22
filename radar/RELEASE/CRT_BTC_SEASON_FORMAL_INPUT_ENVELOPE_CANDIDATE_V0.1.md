@@ -5,7 +5,7 @@
 - Status: `FORMAL_INPUT_ENVELOPE_CANDIDATE_NOT_APPROVED`
 - Base current main: `cfc6da8ca80fc85059eac253ee99110855b78382`
 - Candidate canonical SHA-256:
-  `49510114f14a96707e2028875137fa5520f3360704bea5cbda7563c73a716073`
+  `42a54300d3672ca0e05ff65b4e613a79f6d3a79819c489848a82e45b19934da2`
 - Scope: formal input identity, freshness, quality and clock alignment only
 - Formal model: `NOT_APPROVED`
 - Runtime binding: `NOT_APPROVED`
@@ -29,6 +29,10 @@ without inventing a missing formal source responsibility matrix:
 4. Q0-Q3 quality and freshness states;
 5. explicit material-event clock-crossing detection;
 6. deterministic fail-closed blockers.
+
+JSON identities use canonical JSON hashes so LF and CRLF checkouts produce the
+same semantic identity. Byte-exact hashing remains reserved for formal archives
+and other artifacts whose raw bytes are themselves part of the contract.
 
 ## Deliberate incompleteness
 
@@ -76,8 +80,8 @@ governance, weight, threshold, mNAV or Production file is modified.
 
 ## Verification
 
-- Formal Input Envelope targeted tests: `11 / 11 PASS`
-- Full radar regression: `347 / 347 PASS`
+- Formal Input Envelope targeted tests: `12 / 12 PASS`
+- Full radar regression: `348 / 348 PASS`
 - Complete-shape candidate result: `UNBOUND_BLOCKED`
 - Unbound required families: `12 / 12`
 - Runtime import of this candidate: absent

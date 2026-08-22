@@ -15,7 +15,6 @@
     "path": "CONFIG/SOURCE_REGISTRY_V1.2.json",
     "registry_id": "CRT-RADAR-SOURCE-REGISTRY-V1.4-WIP",
     "canonical_sha256": "30ee09f0c6403c9d782a49411c61c24b91d6522d8c4960c4dfd6ef572e7375bc",
-    "file_sha256": "b48d6a5876781d287cfd6eb95751c20cfb4e5920f0ff57632b0a39f0e46ff722",
     "authority": "PARTIAL_ENGINEERING_REGISTRY_ONLY",
     "may_be_treated_as_complete_season_source_authority": false,
     "modified_by_candidate": false

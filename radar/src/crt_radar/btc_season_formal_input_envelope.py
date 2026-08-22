@@ -26,13 +26,10 @@ ENVELOPE_ID = "CRT-BTC-SEASON-FORMAL-INPUT-ENVELOPE-CANDIDATE-V0.1"
 EXPECTED_STATUS = "FORMAL_INPUT_ENVELOPE_CANDIDATE_NOT_APPROVED"
 EXPECTED_BASE_MAIN_SHA = "cfc6da8ca80fc85059eac253ee99110855b78382"
 EXPECTED_CONTRACT_CANONICAL_SHA256 = (
-    "49510114f14a96707e2028875137fa5520f3360704bea5cbda7563c73a716073"
+    "42a54300d3672ca0e05ff65b4e613a79f6d3a79819c489848a82e45b19934da2"
 )
 EXPECTED_REGISTRY_CANONICAL_SHA256 = (
     "30ee09f0c6403c9d782a49411c61c24b91d6522d8c4960c4dfd6ef572e7375bc"
-)
-EXPECTED_REGISTRY_FILE_SHA256 = (
-    "b48d6a5876781d287cfd6eb95751c20cfb4e5920f0ff57632b0a39f0e46ff722"
 )
 EXPECTED_SEMANTIC_MAPPING_SHA256 = (
     "afe99dfaf4a2023d39c1589252b840b27daab106932b33783316fec71ab05e3a"
@@ -115,10 +112,6 @@ def canonical_hash(value: Any) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
-def _file_hash(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
-
-
 def load_contract(path: str | Path = DEFAULT_CONTRACT) -> dict[str, Any]:
     value = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(value, dict):
@@ -188,17 +181,8 @@ def validate_contract(
         else:
             if registry.hash != EXPECTED_REGISTRY_CANONICAL_SHA256:
                 errors.append("pinned engineering registry canonical hash changed")
-            try:
-                file_hash = _file_hash(registry_path)
-            except OSError:
-                errors.append("pinned engineering registry file cannot be read")
-            else:
-                if file_hash != EXPECTED_REGISTRY_FILE_SHA256:
-                    errors.append("pinned engineering registry file hash changed")
             if dependency.get("canonical_sha256") != EXPECTED_REGISTRY_CANONICAL_SHA256:
                 errors.append("declared registry canonical hash changed")
-            if dependency.get("file_sha256") != EXPECTED_REGISTRY_FILE_SHA256:
-                errors.append("declared registry file hash changed")
             if dependency.get("registry_id") != registry.payload.get("registry_id"):
                 errors.append("declared registry identity changed")
 

@@ -201,17 +201,20 @@ class BtcSeasonFormalInputEnvelopeTests(unittest.TestCase):
         self.assertIn("candidate may not close the unmapped requirement", errors)
         self.assertIn("research firewall changed", errors)
 
-    def test_registry_byte_tampering_invalidates_contract(self):
+    def _temporary_authority_root(self, temp_root: Path):
+        for relative in (
+            "CONFIG/SOURCE_REGISTRY_V1.2.json",
+            "CONFIG/BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.1.json",
+            "CONFIG/BTC_SEASON_SEMANTIC_MAPPING_HASH_APPROVAL_SEAL_V0.1.json",
+        ):
+            target = temp_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(RADAR_ROOT / relative, target)
+
+    def test_registry_semantic_tampering_invalidates_contract(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
-            for relative in (
-                "CONFIG/SOURCE_REGISTRY_V1.2.json",
-                "CONFIG/BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.1.json",
-                "CONFIG/BTC_SEASON_SEMANTIC_MAPPING_HASH_APPROVAL_SEAL_V0.1.json",
-            ):
-                target = temp_root / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(RADAR_ROOT / relative, target)
+            self._temporary_authority_root(temp_root)
             registry_path = temp_root / "CONFIG" / "SOURCE_REGISTRY_V1.2.json"
             registry = json.loads(registry_path.read_text(encoding="utf-8"))
             registry["version"] = "tampered"
@@ -221,7 +224,19 @@ class BtcSeasonFormalInputEnvelopeTests(unittest.TestCase):
                 radar_root=temp_root,
             )
         self.assertIn("pinned engineering registry canonical hash changed", errors)
-        self.assertIn("pinned engineering registry file hash changed", errors)
+
+    def test_registry_crlf_checkout_preserves_canonical_identity(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            self._temporary_authority_root(temp_root)
+            registry_path = temp_root / "CONFIG" / "SOURCE_REGISTRY_V1.2.json"
+            text = registry_path.read_text(encoding="utf-8")
+            registry_path.write_bytes(text.replace("\n", "\r\n").encode("utf-8"))
+            errors = formal_input.validate_contract(
+                self.contract,
+                radar_root=temp_root,
+            )
+        self.assertEqual(errors, [])
 
     def test_current_runtime_does_not_import_candidate(self):
         importing_files = []
