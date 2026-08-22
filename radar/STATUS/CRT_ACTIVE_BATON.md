@@ -19,11 +19,11 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 ## 固定進度
 
 - 總驗收項目：`8`
-- 已完成：`2`
+- 已完成：`3`
 - 進行中：`1`
-- 完成率：`25%`
-- 目前唯一進行中項目：`#3`
-- 目前任務：`RUNTIME_ALIGNMENT_AND_FRESH_CYCLE`
+- 完成率：`37.5%`
+- 目前唯一進行中項目：`#4`
+- 目前任務：`CAPITAL_STATE_SSOT`
 
 完成率只使用：
 
@@ -53,14 +53,14 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
   - 驗證 `observations.sqlite3` 持續增加。
   - 驗證最新 BTC 觀測價格與時間戳確實反映實際市場。
 
-- [ ] **#3 Runtime（執行環境）對齊與新鮮循環驗收 — ACTIVE**
+- [x] **#3 Runtime（執行環境）對齊與新鮮循環驗收 — COMPLETE**
   - 只有 #2 證明版本漂移、資料過期或執行失敗時才施工。
   - 修復後至少完成一個新的真實 observation cycle（觀測循環）。
   - 不得為了追求 PASS（通過）而放寬資料品質或 freshness（新鮮度）政策。
 
 ### 第二關：Capital State（資本狀態）
 
-- [ ] **#4 建立 Capital State SSOT（資本狀態唯一真實來源）**
+- [ ] **#4 建立 Capital State SSOT（資本狀態唯一真實來源） — ACTIVE**
   - 完整追蹤持倉。
   - 可用現金。
   - 資產角色。
@@ -115,35 +115,58 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - 問題移交 #3。
 - 不把版本漂移誤判成資料蒐集完全失效。
 
+## #3 驗收結果
+
+`RUNTIME_ALIGNMENT_AND_FRESH_CYCLE_PASS`
+
+已驗證：
+
+- 真正值班 Runtime（執行環境）舊 Git HEAD：
+  `018c263d60d660804504f3c4683ac679daf4f466`
+- 對齊後 Git HEAD：
+  `8ae27142bf63dd491aa9a729860912c211fa69a2`
+- Runtime working tree（執行環境工作樹）乾淨。
+- Observation DB（觀測資料庫）原地保留並在新循環後繼續前進。
+- Evidence Pack（證據包）在新循環後刷新。
+- Wake（喚醒訊號）存在。
+- Notice（通知檔）存在。
+- Windows Scheduled Task（Windows 排程工作）設定未修改。
+- stash（暫存修改）未碰。
+- `reset`（重設）未使用。
+
+因此第一關 Live Radar（實戰雷達）三項全部完成。
+
 ## 目前已知阻塞
 
-`ITEM_3_RUNTIME_HEAD_DRIFT`
+`ITEM_4_CAPITAL_STATE_SSOT_NOT_YET_IMPLEMENTED`
 
-真正值班：
+目前雷達可以自主觀察市場並產生 Evidence / Wake / Notice（證據／喚醒／通知），但尚無一份完整且單一的 Capital State SSOT（資本狀態唯一真實來源）可讓系統可靠知道：
 
-`C:\Users\maxwe\CRT_EvidenceRunner_018c263d_git`
+- 使用者目前實際持倉
+- 可用現金
+- 各資產角色
+- 三段式資本計畫
+- 各段預算
+- 各段目前狀態
+- 各段仍有效的條件
 
-其 Git HEAD 與 current GitHub main（目前主分支）不一致。
-
-RuntimeRoot（執行環境根目錄）仍為：
-
-`C:\Users\maxwe\CRT_Runtime`
+因此市場價格即使已經逃離原計畫區間，CRT 仍無法可靠知道哪一段已完成、哪一段仍待命，以及剩餘資本應重新如何部署。
 
 ## 下一個唯一有效動作
 
-處理 #3 Runtime Alignment（執行環境對齊）。
+處理 #4 Capital State SSOT（資本狀態唯一真實來源）。
 
-施工前再次確認：
+施工前先盤點 current main（目前主分支）既有 private portfolio（私人投資組合）結構與所有使用點，優先擴充既有結構，不建立平行的第二套 Portfolio（投資組合）系統。
 
-- 真正值班 Runtime 的實際 Git HEAD
-- working tree（工作樹）是否乾淨
-- current GitHub main（目前主分支）
-- Scheduled Task（Windows 排程工作）仍指向同一 RepoRoot
-- 現有 Observation DB（觀測資料庫）不得刪除或重建
+#4 本身只建立「最新資本狀態的可靠機器來源」。
 
-安全條件成立後，才以最小方式讓值班 Runtime 對齊 current main，並完成至少一個新的真實 observation cycle（觀測循環）。
+不得在 #4：
 
-不得碰既有 stash（暫存修改），不得 reset（重設）或覆寫未知本機修改。
+- 自行推定任何交易已成交
+- 自動修改持倉
+- 建立交易執行權限
+- 實作 Price Escape（價格逃逸）判斷；該能力屬 #6
+- 實作 GPT 主動喚醒；該能力屬 #7
 
 ## 暫緩工作
 
