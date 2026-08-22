@@ -19,11 +19,11 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 ## 固定進度
 
 - 總驗收項目：`8`
-- 已完成：`3`
+- 已完成：`4`
 - 進行中：`1`
-- 完成率：`37.5%`
-- 目前唯一進行中項目：`#4`
-- 目前任務：`CAPITAL_STATE_SSOT`
+- 完成率：`50%`
+- 目前唯一進行中項目：`#5`
+- 目前任務：`EXECUTION_UPDATE`
 
 完成率只使用：
 
@@ -60,14 +60,14 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 ### 第二關：Capital State（資本狀態）
 
-- [ ] **#4 建立 Capital State SSOT（資本狀態唯一真實來源） — ACTIVE**
+- [x] **#4 建立 Capital State SSOT（資本狀態唯一真實來源） — COMPLETE**
   - 完整追蹤持倉。
   - 可用現金。
   - 資產角色。
   - 三段式資本計畫。
   - 每一段的預算、狀態與有效條件。
 
-- [ ] **#5 建立使用者確認的 Execution Update（成交更新）**
+- [ ] **#5 建立使用者確認的 Execution Update（成交更新） — ACTIVE**
   - 只有使用者明確確認成交，機器才可把該段標記為已執行。
   - 不得因價格觸及、掛單存在或模型推測而自行認定成交。
 
@@ -136,37 +136,75 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 因此第一關 Live Radar（實戰雷達）三項全部完成。
 
+## #4 驗收結果
+
+`CAPITAL_STATE_LIVE_ACCEPTANCE_PASS`
+
+已驗證：
+
+- 真正值班 Runtime（執行環境）已對齊 current GitHub main（目前主分支）。
+- 使用者確認的 holdings（持倉）已由 local-only Capital State（僅本機資本狀態）驗證。
+- 使用者確認的 capital policy（資本政策）已驗證。
+- 三段式 Capital Plan（資本計畫）已存在且符合契約。
+- 目前計畫可明確表達 `WAIT`（等待），不需要捏造買入或賣出價格。
+- 三段狀態與 validity conditions（有效條件）已通過契約驗證。
+- 新的真實 observation cycle（觀測循環）已完成。
+- Evidence Pack（證據包）已刷新並成功載入最新 Capital State（資本狀態）與三段式計畫。
+- 實際私人持倉、現金與計畫金額仍只存在 local-only private profile（僅本機私人設定），不寫入 Git 狀態檔。
+- External Action Authority（外部行動權限）維持 `NONE`。
+- Scheduled Task（排程工作）設定未修改。
+- stash（暫存修改）未碰。
+
+因此：
+
+- #4：`COMPLETE`
+- Capital State SSOT（資本狀態唯一真實來源）已具備實戰可讀能力。
+- 工作移交 #5 Execution Update（成交更新）。
+
 ## 目前已知阻塞
 
-`ITEM_4_CAPITAL_STATE_SSOT_NOT_YET_IMPLEMENTED`
+`ITEM_5_EXECUTION_UPDATE_NOT_YET_IMPLEMENTED`
 
-目前雷達可以自主觀察市場並產生 Evidence / Wake / Notice（證據／喚醒／通知），但尚無一份完整且單一的 Capital State SSOT（資本狀態唯一真實來源）可讓系統可靠知道：
+Capital State（資本狀態）現在可以可靠知道：
 
 - 使用者目前實際持倉
-- 可用現金
+- 可用／保留現金
 - 各資產角色
 - 三段式資本計畫
 - 各段預算
-- 各段目前狀態
-- 各段仍有效的條件
+- 各段狀態
+- 各段有效條件
 
-因此市場價格即使已經逃離原計畫區間，CRT 仍無法可靠知道哪一段已完成、哪一段仍待命，以及剩餘資本應重新如何部署。
+但目前仍缺少一條明確、fail-closed（失敗關閉）的 Execution Update（成交更新）路徑：
+
+`使用者明確確認成交`
+→ `驗證更新內容`
+→ `更新對應 tranche（批次）`
+→ `更新持倉／現金`
+→ `刷新 Evidence Pack（證據包）`
+
+在 #5 完成前：
+
+- 價格觸及不得自動視為成交。
+- 掛單存在不得自動視為成交。
+- GPT 推測不得自動視為成交。
+- 市場資料不得自行修改使用者持倉。
+- 只有使用者明確確認的成交才具有 Capital State（資本狀態）更新權限。
 
 ## 下一個唯一有效動作
 
-處理 #4 Capital State SSOT（資本狀態唯一真實來源）。
+處理 #5 Execution Update（成交更新）。
 
-施工前先盤點 current main（目前主分支）既有 private portfolio（私人投資組合）結構與所有使用點，優先擴充既有結構，不建立平行的第二套 Portfolio（投資組合）系統。
+#5 只建立「使用者確認成交後，可靠更新 Capital State（資本狀態）」的能力。
 
-#4 本身只建立「最新資本狀態的可靠機器來源」。
+不得在 #5：
 
-不得在 #4：
-
-- 自行推定任何交易已成交
-- 自動修改持倉
-- 建立交易執行權限
-- 實作 Price Escape（價格逃逸）判斷；該能力屬 #6
+- 自動下單
+- 自行認定成交
+- 實作 Price Escape（價格逃逸）；該能力屬 #6
 - 實作 GPT 主動喚醒；該能力屬 #7
+- 修改正式模型、權重、燈號閾值或 mNAV 語義
+- 修改 External Action Authority（外部行動權限）
 
 ## 暫緩工作
 
