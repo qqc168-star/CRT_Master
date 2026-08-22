@@ -16,9 +16,13 @@
 
 ## Current engineering snapshot
 
-- Snapshot main SHA: `1426b56a7877d3c6357f76b9ecdda632ff1e50a3`
+- State reconciliation lineage: `PR #36`
+- Reconciliation basis main SHA: `1426b56a7877d3c6357f76b9ecdda632ff1e50a3`
+- Reconciliation verified candidate: `dfe2738cd4a7fb57a3d34f0c73613985efac1feb`
+- Reconciliation merge SHA: `e3aadc64f39b709fc9a5d1cf3ff31136c7cabc14`
+- Snapshot freshness rule: semantic state change, not ordinary repository HEAD movement
 - Formal version: `CRT V1.10`
-- Last verified full regression: `366/366 PASS`
+- Last verified full regression: `366/366 PASS` via `radar/run_offline_tests.sh`
 - Program Registry: `PASS`
 - Read-only surface: `PASS`
 - Live Shadow: `LIVE_SHADOW_PASS`
