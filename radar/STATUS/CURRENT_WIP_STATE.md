@@ -18,6 +18,14 @@
 - External action authority: `NONE`
 - Parallel automation stash: `PRESERVED / NOT_APPLIED`
 
+## Active objective（目前主動目標）
+
+- Active Baton（主動接力棒）: `radar/STATUS/CRT_ACTIVE_BATON.md`
+- Mission（任務）: `CRT Live Action Loop V0.1`
+- Progress（進度）: `1 / 8 = 12.5%`
+- Active item（目前唯一進行中項目）: `#2 ACTUAL_RUNTIME_AUDIT`
+- Priority（優先順序）: `Live Radar -> Capital State -> GPT Wake`
+- Formal Season recovery（正式季節恢復）保留，但在本實戰閉環完成前暫緩，除非被證明直接形成阻塞。
 ## Current engineering distinction
 
 Engineering sources now exist across `AS-L1` through `AS-L6`.
