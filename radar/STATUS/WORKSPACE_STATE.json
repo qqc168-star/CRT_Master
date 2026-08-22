@@ -4,8 +4,14 @@
   "formal_version": "CRT V1.10",
   "formal_predecessor": "CRT Master V1.9",
   "status": "FORMAL_SEALED_READ_ONLY_DECISION_SUPPORT",
-  "state_snapshot_as_of_main_sha": "1426b56a7877d3c6357f76b9ecdda632ff1e50a3",
-  "snapshot_must_be_reconciled_if_head_differs": true,
+  "state_reconciliation_provenance": {
+    "version": "V0.1",
+    "origin_pr": 36,
+    "basis_main_sha": "1426b56a7877d3c6357f76b9ecdda632ff1e50a3",
+    "verified_candidate_commit_sha": "dfe2738cd4a7fb57a3d34f0c73613985efac1feb",
+    "merged_main_sha": "e3aadc64f39b709fc9a5d1cf3ff31136c7cabc14",
+    "freshness_rule": "SEMANTIC_STATE_CHANGE_NOT_HEAD_CHANGE"
+  },
   "production": "NOT_APPROVED",
   "external_action_authority": "NONE",
   "live_shadow": "LIVE_SHADOW_PASS",
@@ -22,7 +28,8 @@
   "last_verified_full_regression": {
     "pass": 366,
     "fail": 0,
-    "as_of_main_sha": "1426b56a7877d3c6357f76b9ecdda632ff1e50a3"
+    "entrypoint": "radar/run_offline_tests.sh",
+    "exact_commit_provenance": "GIT_HISTORY_AND_CI"
   },
   "legacy_v0_2_tests": {
     "pass": 17,

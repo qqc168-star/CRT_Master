@@ -1,7 +1,10 @@
 # CRT Radar Current Formal State
 
 - Formal SSOT: `CRT V1.10`
-- Engineering snapshot main SHA: `1426b56a7877d3c6357f76b9ecdda632ff1e50a3`
+- State reconciliation lineage: `PR #36`
+- Reconciliation basis main SHA: `1426b56a7877d3c6357f76b9ecdda632ff1e50a3`
+- Reconciliation merge SHA: `e3aadc64f39b709fc9a5d1cf3ff31136c7cabc14`
+- Snapshot freshness rule: semantic state change, not ordinary repository HEAD movement
 - Formal seal approval: `2026-08-05 19:09 +08:00`
 - 24-hour Live Shadow Gate: `PASS`
 - P1-01 technical post-live review: `PASS`
