@@ -23,7 +23,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - 進行中：`1`
 - 完成率：`75%`
 - 目前唯一進行中項目：`#7`
-- 目前任務：`GPT_TRANSPORT_BOUNDARY_CLOSURE`
+- 目前任務：`OPENAI_RESPONSES_ADAPTER_CONTRACT`
 
 完成率只使用：
 
@@ -232,7 +232,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 ## 目前已知阻塞
 
-`ITEM_7_TRANSPORT_DELIVERY_NOT_SELECTED`
+`ITEM_7_LIVE_GPT_TRANSPORT_NOT_APPROVED`
 
 目前系統已能可靠完成：
 
