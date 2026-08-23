@@ -16,6 +16,7 @@ $WakeOutput = Join-Path $RuntimeRoot "wake\latest.json"
 $NoticeOutput = Join-Path $RuntimeRoot "notifications\latest.json"
 $HandoffOutput = Join-Path $RuntimeRoot "gpt_handoff\latest.json"
 $HandoffLedger = Join-Path $RuntimeRoot "gpt_handoff\ledger.jsonl"
+$BridgeOutbox = Join-Path $RuntimeRoot "gpt_bridge\outbox"
 $MaturityLedger = Join-Path $RuntimeRoot "maturity\attempts.jsonl"
 $MaturityStatus = Join-Path $RuntimeRoot "maturity\status.json"
 $CollectorRunner = Join-Path $RadarRoot "scripts\windows\run_liquidation_collector_windows.ps1"
@@ -40,6 +41,7 @@ New-Item -ItemType Directory -Force (Split-Path $PrivateProfile -Parent) | Out-N
 New-Item -ItemType Directory -Force (Split-Path $WakeOutput -Parent) | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $NoticeOutput -Parent) | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $HandoffOutput -Parent) | Out-Null
+New-Item -ItemType Directory -Force $BridgeOutbox | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $MaturityStatus -Parent) | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $IssuerAnnouncementOutput -Parent) | Out-Null
 
@@ -98,6 +100,7 @@ $RunnerArgs = @(
     "--notice-output", $NoticeOutput,
     "--handoff-output", $HandoffOutput,
     "--handoff-ledger", $HandoffLedger,
+    "--bridge-outbox-dir", $BridgeOutbox,
     "--maturity-ledger", $MaturityLedger,
     "--maturity-status", $MaturityStatus,
     "--phone-l4-freshness-path", $PhoneL4,

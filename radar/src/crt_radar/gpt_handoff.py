@@ -6,6 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .gpt_bridge_outbox import enqueue_bridge_payload
 from .run_ledger import GENESIS_HASH, RunLedger
 
 
@@ -1017,6 +1018,7 @@ def run_gpt_handoff_gate(
     notice: dict[str, Any],
     *,
     ledger_path: str | Path,
+    bridge_outbox_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     if not isinstance(pack, dict):
         raise ValueError(
@@ -1282,6 +1284,18 @@ def run_gpt_handoff_gate(
         payload
     )
 
+    outbox_result = None
+
+    if bridge_outbox_dir is not None:
+        bridge_payload = build_minimized_bridge_payload(
+            pack,
+            payload,
+        )
+        outbox_result = enqueue_bridge_payload(
+            bridge_outbox_dir,
+            bridge_payload,
+        )
+
     record = ledger.append(
         HANDOFF_RECORD_TYPE,
         payload,
@@ -1292,5 +1306,8 @@ def run_gpt_handoff_gate(
     result["ledger_record_hash"] = record[
         "record_hash"
     ]
+
+    if outbox_result is not None:
+        result["bridge_outbox"] = outbox_result
 
     return result

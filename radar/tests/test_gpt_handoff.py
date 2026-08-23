@@ -4,7 +4,11 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from crt_radar.gpt_bridge_outbox import (
+    enqueue_bridge_payload,
+)
 from crt_radar.gpt_handoff import (
     build_minimized_bridge_payload,
     run_gpt_handoff_gate,
@@ -1067,6 +1071,273 @@ class GptHandoffGateTests(unittest.TestCase):
                         / "handoff.jsonl"
                     ),
                 )
+
+    def test_local_bridge_outbox_is_written_once(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger_path = root / "handoff.jsonl"
+            outbox = root / "outbox"
+
+            active_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+            notice = build_plain_language_notice(active_pack)
+
+            first = run_gpt_handoff_gate(
+                active_pack,
+                notice,
+                ledger_path=ledger_path,
+                bridge_outbox_dir=outbox,
+            )
+
+            self.assertEqual(first["state"], "GPT_HANDOFF_READY")
+            self.assertEqual(
+                first["bridge_outbox"]["state"],
+                "OUTBOX_ENQUEUED",
+            )
+            self.assertEqual(
+                len(list(outbox.glob("*.json"))),
+                1,
+            )
+
+            second = run_gpt_handoff_gate(
+                active_pack,
+                notice,
+                ledger_path=ledger_path,
+                bridge_outbox_dir=outbox,
+            )
+
+            self.assertEqual(
+                second["state"],
+                "DUPLICATE_SKIPPED",
+            )
+            self.assertEqual(
+                len(list(outbox.glob("*.json"))),
+                1,
+            )
+
+    def test_outbox_failure_does_not_commit_handoff(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger_path = root / "handoff.jsonl"
+
+            active_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+            notice = build_plain_language_notice(active_pack)
+
+            with patch(
+                "crt_radar.gpt_handoff.enqueue_bridge_payload",
+                side_effect=OSError("synthetic disk failure"),
+            ):
+                with self.assertRaises(OSError):
+                    run_gpt_handoff_gate(
+                        active_pack,
+                        notice,
+                        ledger_path=ledger_path,
+                        bridge_outbox_dir=root / "outbox",
+                    )
+
+            self.assertEqual(
+                RunLedger(ledger_path).records(),
+                [],
+            )
+
+    def test_orphan_outbox_recovers_if_ledger_append_fails(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            ledger_path = root / "handoff.jsonl"
+            outbox = root / "outbox"
+
+            active_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+            notice = build_plain_language_notice(active_pack)
+
+            with patch.object(
+                RunLedger,
+                "append",
+                side_effect=OSError("synthetic ledger failure"),
+            ):
+                with self.assertRaises(OSError):
+                    run_gpt_handoff_gate(
+                        active_pack,
+                        notice,
+                        ledger_path=ledger_path,
+                        bridge_outbox_dir=outbox,
+                    )
+
+            self.assertEqual(
+                len(list(outbox.glob("*.json"))),
+                1,
+            )
+            self.assertEqual(
+                RunLedger(ledger_path).records(),
+                [],
+            )
+
+            recovered = run_gpt_handoff_gate(
+                active_pack,
+                notice,
+                ledger_path=ledger_path,
+                bridge_outbox_dir=outbox,
+            )
+
+            self.assertEqual(
+                recovered["state"],
+                "GPT_HANDOFF_READY",
+            )
+            self.assertEqual(
+                recovered["bridge_outbox"]["state"],
+                "DUPLICATE_SKIPPED",
+            )
+            self.assertEqual(
+                len(RunLedger(ledger_path).records()),
+                1,
+            )
+
+    def test_outbox_same_event_conflict_fails_closed(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+
+            first_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+            second_pack = bridge_pack(
+                pack(
+                    evidence_hash="b" * 64,
+                    requested=True,
+                )
+            )
+
+            first_handoff = run_gpt_handoff_gate(
+                first_pack,
+                build_plain_language_notice(first_pack),
+                ledger_path=root / "first.jsonl",
+            )
+            second_handoff = run_gpt_handoff_gate(
+                second_pack,
+                build_plain_language_notice(second_pack),
+                ledger_path=root / "second.jsonl",
+            )
+
+            self.assertEqual(
+                first_handoff["event_id"],
+                second_handoff["event_id"],
+            )
+
+            first_bridge = build_minimized_bridge_payload(
+                first_pack,
+                first_handoff,
+            )
+            second_bridge = build_minimized_bridge_payload(
+                second_pack,
+                second_handoff,
+            )
+
+            outbox = root / "outbox"
+            enqueue_bridge_payload(outbox, first_bridge)
+
+            with self.assertRaises(ValueError):
+                enqueue_bridge_payload(
+                    outbox,
+                    second_bridge,
+                )
+
+    def test_outbox_publish_race_does_not_overwrite_existing(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            outbox = root / "outbox"
+
+            first_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+            second_pack = bridge_pack(
+                pack(
+                    evidence_hash="b" * 64,
+                    requested=True,
+                )
+            )
+
+            first_handoff = run_gpt_handoff_gate(
+                first_pack,
+                build_plain_language_notice(first_pack),
+                ledger_path=root / "first.jsonl",
+            )
+            second_handoff = run_gpt_handoff_gate(
+                second_pack,
+                build_plain_language_notice(second_pack),
+                ledger_path=root / "second.jsonl",
+            )
+
+            first_bridge = build_minimized_bridge_payload(
+                first_pack,
+                first_handoff,
+            )
+            second_bridge = build_minimized_bridge_payload(
+                second_pack,
+                second_handoff,
+            )
+
+            enqueue_bridge_payload(
+                outbox,
+                first_bridge,
+            )
+
+            event_id = first_bridge["event"]["event_id"]
+            target = outbox / f"{event_id}.json"
+            original_exists = Path.exists
+
+            def racing_exists(path: Path) -> bool:
+                if path == target:
+                    return False
+                return original_exists(path)
+
+            with patch.object(
+                Path,
+                "exists",
+                autospec=True,
+                side_effect=racing_exists,
+            ):
+                with self.assertRaises(ValueError):
+                    enqueue_bridge_payload(
+                        outbox,
+                        second_bridge,
+                    )
+
+            stored = json.loads(
+                target.read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(
+                stored["bridge_payload_hash"],
+                first_bridge["bridge_payload_hash"],
+            )
 
 
 if __name__ == "__main__":
