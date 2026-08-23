@@ -188,7 +188,7 @@ def enqueue_bridge_payload(
             os.fsync(handle.fileno())
 
         try:
-            os.rename(temp_path, target)
+            os.link(temp_path, target)
         except FileExistsError:
             existing = _read_existing(target)
             existing_event_id, existing_hash = (

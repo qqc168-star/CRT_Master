@@ -1264,6 +1264,81 @@ class GptHandoffGateTests(unittest.TestCase):
                     second_bridge,
                 )
 
+    def test_outbox_publish_race_does_not_overwrite_existing(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            outbox = root / "outbox"
+
+            first_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+            second_pack = bridge_pack(
+                pack(
+                    evidence_hash="b" * 64,
+                    requested=True,
+                )
+            )
+
+            first_handoff = run_gpt_handoff_gate(
+                first_pack,
+                build_plain_language_notice(first_pack),
+                ledger_path=root / "first.jsonl",
+            )
+            second_handoff = run_gpt_handoff_gate(
+                second_pack,
+                build_plain_language_notice(second_pack),
+                ledger_path=root / "second.jsonl",
+            )
+
+            first_bridge = build_minimized_bridge_payload(
+                first_pack,
+                first_handoff,
+            )
+            second_bridge = build_minimized_bridge_payload(
+                second_pack,
+                second_handoff,
+            )
+
+            enqueue_bridge_payload(
+                outbox,
+                first_bridge,
+            )
+
+            event_id = first_bridge["event"]["event_id"]
+            target = outbox / f"{event_id}.json"
+            original_exists = Path.exists
+
+            def racing_exists(path: Path) -> bool:
+                if path == target:
+                    return False
+                return original_exists(path)
+
+            with patch.object(
+                Path,
+                "exists",
+                autospec=True,
+                side_effect=racing_exists,
+            ):
+                with self.assertRaises(ValueError):
+                    enqueue_bridge_payload(
+                        outbox,
+                        second_bridge,
+                    )
+
+            stored = json.loads(
+                target.read_text(encoding="utf-8")
+            )
+
+            self.assertEqual(
+                stored["bridge_payload_hash"],
+                first_bridge["bridge_payload_hash"],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
