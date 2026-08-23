@@ -12,6 +12,38 @@ SCHEMA_VERSION = "CRT_GPT_HANDOFF_V0.1"
 HANDOFF_RECORD_TYPE = "GPT_HANDOFF"
 RESET_RECORD_TYPE = "GPT_HANDOFF_RESET"
 
+REANALYSIS_SEMANTICS_SCHEMA_VERSION = (
+    "CRT_GPT_REANALYSIS_SEMANTICS_V0.1"
+)
+
+REANALYSIS_SEQUENCE = (
+    "CATALYST",
+    "AMPLIFIER",
+    "PERSISTENCE",
+    "ACCEPTANCE",
+    "CONTRADICTIONS",
+    "MISSING_EVIDENCE",
+)
+
+CAUSAL_GUARDRAILS = (
+    "TEMPORAL_ORDER_IS_NOT_CAUSATION",
+    "TRANSIENT_PRICE_CROSSING_IS_NOT_ACCEPTANCE_OR_REAL_DEMAND",
+    "CONTRADICTORY_EVIDENCE_MUST_BE_SURFACED",
+    "MISSING_EVIDENCE_MUST_NOT_BE_IMPUTED_OR_GUESSED",
+)
+
+EVIDENCE_RULES = (
+    "SEPARATE_OBSERVATION_FROM_INFERENCE",
+    "STATE_UNRESOLVED_CAUSALITY_EXPLICITLY",
+    "USE_LATEST_REQUIRED_INPUTS",
+)
+
+GOVERNANCE_GUARDRAILS = (
+    "RESEARCH_OVERLAY_CANNOT_PROMOTE_FORMAL_SEASON",
+    "NO_AUTOMATIC_BUY_SELL",
+    "NO_EXTERNAL_ACTION",
+)
+
 
 def _canonical_hash(value: Any) -> str:
     raw = json.dumps(
@@ -30,6 +62,31 @@ def _authority() -> dict[str, Any]:
         "external_action_performed": False,
         "transport_authority": "NONE",
         "transport_performed": False,
+    }
+
+
+def _reanalysis_semantics() -> dict[str, Any]:
+    return {
+        "schema_version": (
+            REANALYSIS_SEMANTICS_SCHEMA_VERSION
+        ),
+        "scope": "POST_WAKE_ANALYSIS_ONLY",
+        "analysis_sequence": list(
+            REANALYSIS_SEQUENCE
+        ),
+        "causal_guardrails": list(
+            CAUSAL_GUARDRAILS
+        ),
+        "evidence_rules": list(
+            EVIDENCE_RULES
+        ),
+        "governance_guardrails": list(
+            GOVERNANCE_GUARDRAILS
+        ),
+        "wake_authority": "NONE",
+        "formal_season_authority": "NONE",
+        "trading_authority": "NONE",
+        "external_action_authority": "NONE",
     }
 
 
@@ -447,6 +504,9 @@ def run_gpt_handoff_gate(
         },
         "instruction_for_gpt": notice.get(
             "instruction_for_gpt"
+        ),
+        "reanalysis_semantics": (
+            _reanalysis_semantics()
         ),
         "required_inputs": [
             "LATEST_EVIDENCE_PACK",
