@@ -258,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--notice-output", type=Path, default=None)
     parser.add_argument("--handoff-output", type=Path, default=None)
     parser.add_argument("--handoff-ledger", type=Path, default=None)
+    parser.add_argument("--bridge-outbox-dir", type=Path, default=None)
     parser.add_argument("--maturity-ledger", type=Path, default=None)
     parser.add_argument("--maturity-status", type=Path, default=None)
     parser.add_argument(
@@ -281,6 +282,15 @@ def main(argv: list[str] | None = None) -> int:
         raise ValueError(
             "--handoff-output and --handoff-ledger "
             "must be supplied together"
+        )
+
+    if (
+        args.bridge_outbox_dir is not None
+        and args.handoff_output is None
+    ):
+        raise ValueError(
+            "--bridge-outbox-dir requires "
+            "--handoff-output and --handoff-ledger"
         )
 
     registry = SourceRegistry.load(args.registry)
@@ -337,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
             pack,
             notice,
             ledger_path=args.handoff_ledger,
+            bridge_outbox_dir=args.bridge_outbox_dir,
         )
 
         write_json_atomic(
