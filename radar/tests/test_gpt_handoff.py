@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from crt_radar.gpt_handoff import (
+    build_minimized_bridge_payload,
     run_gpt_handoff_gate,
     semantic_wake_key,
 )
@@ -124,6 +126,212 @@ def pack(
             "critical_blockers": [],
         },
     }
+
+
+def bridge_pack(
+    base: dict,
+) -> dict:
+    result = json.loads(
+        json.dumps(base)
+    )
+
+    result["authority"][
+        "production"
+    ] = "NOT_APPROVED"
+
+    result.update(
+        {
+            "generated_at_ms": 1787496000000,
+            "pack_state": "READY_FOR_ANALYST",
+            "layers": {
+                "L6": {
+                    "status": "VALID",
+                    "metrics": {
+                        "btc_spot_price_usd": {
+                            "value": 77000.0,
+                            "source_id": "PUBLIC",
+                        }
+                    },
+                }
+            },
+            "changes": {
+                "btc_spot_price_usd": {
+                    "horizons": {
+                        "1d": {
+                            "history_state": "AVAILABLE",
+                            "percent_change": -2.5,
+                        }
+                    }
+                }
+            },
+            "distillation": {
+                "top_changes": [
+                    {
+                        "metric": "btc_spot_price_usd",
+                        "percent_change": -2.5,
+                    }
+                ]
+            },
+            "model_status": {
+                "btc_season_router": {
+                    "state": "CANDIDATE_BLOCKED",
+                    "season": None,
+                }
+            },
+            "btc_bull_validation": {
+                "state": "SUPPORTIVE",
+            },
+            "private_context": {
+                "state": "AVAILABLE",
+                "path": (
+                    r"C:\Users\private\portfolio.json"
+                ),
+                "profile": {
+                    "email": "never-export@example.com",
+                    "capital_state": {
+                        "contract_version": (
+                            "CRT_CAPITAL_STATE_V0.1"
+                        ),
+                        "source": "USER_CONFIRMED",
+                        "as_of": (
+                            "2026-08-23T22:00:00+08:00"
+                        ),
+                        "base_currency": "USD",
+                    },
+                    "capital_state_status": {
+                        "state": "AVAILABLE",
+                        "execution_authority": (
+                            "USER_ONLY"
+                        ),
+                    },
+                    "holdings": [
+                        {
+                            "asset": "STRC",
+                            "quantity": 80.0,
+                            "broker_account": (
+                                "NEVER_EXPORT"
+                            ),
+                        },
+                        {
+                            "asset": "MSTR",
+                            "quantity": 5.0,
+                        },
+                    ],
+                    "cash": {
+                        "available_usd": 4500.0,
+                        "reserved_usd": 180.0,
+                        "account_number": (
+                            "NEVER_EXPORT"
+                        ),
+                    },
+                    "asset_roles": {
+                        "STRC": "INCOME_CORE",
+                        "MSTR": "BTC_PROXY",
+                        "USD": "ATTACK_CAPITAL",
+                        "UNUSED": "DO_NOT_EXPORT",
+                    },
+                    "plans": [
+                        {
+                            "plan_id": (
+                                "ATTACK_CAPITAL_WAIT"
+                            ),
+                            "asset": "USD",
+                            "side": "WAIT",
+                            "status": "ACTIVE",
+                            "private_note": (
+                                "NEVER_EXPORT"
+                            ),
+                            "tranches": [
+                                {
+                                    "tranche_id": "T1",
+                                    "budget_usd": 1500.0,
+                                    "status": "PENDING",
+                                    "validity_conditions": [
+                                        {
+                                            "field": (
+                                                "mstr_asst_relative_value_"
+                                                "validation_status"
+                                            ),
+                                            "operator": "EQ",
+                                            "value": (
+                                                "NOT_YET_VALIDATED"
+                                            ),
+                                            "private_note": (
+                                                "NEVER_EXPORT"
+                                            ),
+                                        }
+                                    ],
+                                },
+                                {
+                                    "tranche_id": "T2",
+                                    "budget_usd": 1500.0,
+                                    "status": "PENDING",
+                                    "validity_conditions": [
+                                        {
+                                            "field": (
+                                                "mstr_asst_relative_value_"
+                                                "validation_status"
+                                            ),
+                                            "operator": "EQ",
+                                            "value": (
+                                                "NOT_YET_VALIDATED"
+                                            ),
+                                        }
+                                    ],
+                                },
+                                {
+                                    "tranche_id": "T3",
+                                    "budget_usd": 1500.0,
+                                    "status": "PENDING",
+                                    "validity_conditions": [
+                                        {
+                                            "field": (
+                                                "mstr_asst_relative_value_"
+                                                "validation_status"
+                                            ),
+                                            "operator": "EQ",
+                                            "value": (
+                                                "NOT_YET_VALIDATED"
+                                            ),
+                                        }
+                                    ],
+                                },
+                            ],
+                        },
+                        {
+                            "plan_id": "OLD_PLAN",
+                            "asset": "MSTR",
+                            "side": "BUY",
+                            "status": "CANCELLED",
+                            "tranches": [],
+                        },
+                    ],
+
+                    # Existing Notice contract dependencies.
+                    "strc": {
+                        "shares": 80.0,
+                        "current_annual_distribution_rate": (
+                            0.12
+                        ),
+                        "tax_treatment": (
+                            "RETURN_OF_CAPITAL"
+                        ),
+                        "secret": "NEVER_EXPORT",
+                    },
+                    "cash_goal": {
+                        "six_month_target_usd": 1500.0,
+                    },
+                    "derived": {
+                        "six_month_cash_usd": 480.0,
+                        "minimum_shares_for_target": 250,
+                        "private_metric": 123,
+                    },
+                },
+            },
+        }
+    )
+
+    return result
 
 
 class GptHandoffGateTests(unittest.TestCase):
@@ -554,6 +762,272 @@ class GptHandoffGateTests(unittest.TestCase):
                 decorated_pack
             ),
         )
+
+
+    def test_minimized_bridge_payload_allowlists_private_state(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            active_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+
+            handoff = run_gpt_handoff_gate(
+                active_pack,
+                build_plain_language_notice(
+                    active_pack
+                ),
+                ledger_path=(
+                    Path(td)
+                    / "handoff.jsonl"
+                ),
+            )
+
+            bridge = build_minimized_bridge_payload(
+                active_pack,
+                handoff,
+            )
+
+            self.assertEqual(
+                bridge["state"],
+                "BRIDGE_PAYLOAD_READY_LOCAL_ONLY",
+            )
+
+            self.assertEqual(
+                bridge[
+                    "privacy_contract_version"
+                ],
+                (
+                    "CRT_BRIDGE_PAYLOAD_"
+                    "PRIVACY_CONTRACT_V0.1"
+                ),
+            )
+
+            self.assertEqual(
+                bridge["authority"][
+                    "production"
+                ],
+                "NOT_APPROVED",
+            )
+
+            self.assertEqual(
+                bridge["authority"][
+                    "external_action_authority"
+                ],
+                "NONE",
+            )
+
+            self.assertEqual(
+                bridge["authority"][
+                    "transport_authority"
+                ],
+                "NONE",
+            )
+
+            self.assertFalse(
+                bridge["authority"][
+                    "transport_performed"
+                ]
+            )
+
+            self.assertEqual(
+                bridge["capital_state"][
+                    "execution_authority"
+                ],
+                "USER_ONLY",
+            )
+
+            self.assertEqual(
+                bridge["capital_state"][
+                    "holdings"
+                ],
+                [
+                    {
+                        "asset": "STRC",
+                        "quantity": 80.0,
+                    },
+                    {
+                        "asset": "MSTR",
+                        "quantity": 5.0,
+                    },
+                ],
+            )
+
+            self.assertEqual(
+                bridge["capital_state"][
+                    "cash"
+                ],
+                {
+                    "available_usd": 4500.0,
+                    "reserved_usd": 180.0,
+                },
+            )
+
+            self.assertEqual(
+                set(
+                    bridge["capital_state"][
+                        "asset_roles"
+                    ]
+                ),
+                {
+                    "STRC",
+                    "MSTR",
+                    "USD",
+                },
+            )
+
+            self.assertEqual(
+                len(
+                    bridge["capital_state"][
+                        "active_plans"
+                    ]
+                ),
+                1,
+            )
+
+            serialized = json.dumps(
+                bridge,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+
+            for forbidden in (
+                '"private_context":',
+                r"C:\Users\private",
+                "never-export@example.com",
+                "broker_account",
+                "account_number",
+                "NEVER_EXPORT",
+                "RETURN_OF_CAPITAL",
+                "cash_goal",
+                '"strc"',
+                "private_note",
+                "OLD_PLAN",
+                "UNUSED",
+            ):
+                self.assertNotIn(
+                    forbidden,
+                    serialized,
+                )
+
+            self.assertEqual(
+                len(
+                    bridge[
+                        "bridge_payload_hash"
+                    ]
+                ),
+                64,
+            )
+
+    def test_minimized_bridge_payload_requires_current_capital_state(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            active_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+
+            active_pack[
+                "private_context"
+            ][
+                "profile"
+            ][
+                "capital_state_status"
+            ][
+                "state"
+            ] = "BLOCKED"
+
+            handoff = run_gpt_handoff_gate(
+                active_pack,
+                build_plain_language_notice(
+                    active_pack
+                ),
+                ledger_path=(
+                    Path(td)
+                    / "handoff.jsonl"
+                ),
+            )
+
+            with self.assertRaises(
+                ValueError
+            ):
+                build_minimized_bridge_payload(
+                    active_pack,
+                    handoff,
+                )
+
+    def test_minimized_bridge_payload_requires_ready_handoff(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            quiet_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=False,
+                )
+            )
+
+            handoff = run_gpt_handoff_gate(
+                quiet_pack,
+                build_plain_language_notice(
+                    quiet_pack
+                ),
+                ledger_path=(
+                    Path(td)
+                    / "handoff.jsonl"
+                ),
+            )
+
+            with self.assertRaises(
+                ValueError
+            ):
+                build_minimized_bridge_payload(
+                    quiet_pack,
+                    handoff,
+                )
+
+    def test_minimized_bridge_payload_rejects_forbidden_market_key(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            active_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+
+            active_pack[
+                "btc_entry_gate"
+            ] = {
+                "state": "AVAILABLE",
+                "api_key": "NEVER_EXPORT",
+            }
+
+            handoff = run_gpt_handoff_gate(
+                active_pack,
+                build_plain_language_notice(
+                    active_pack
+                ),
+                ledger_path=(
+                    Path(td)
+                    / "handoff.jsonl"
+                ),
+            )
+
+            with self.assertRaises(
+                ValueError
+            ):
+                build_minimized_bridge_payload(
+                    active_pack,
+                    handoff,
+                )
 
     def test_invalid_authority_fails_closed(
         self,
