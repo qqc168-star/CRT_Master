@@ -237,6 +237,7 @@ def build_evidence_pack(
     observation_db: str | Path,
     generated_at_ms: int | None = None,
     reflexivity_input: dict[str, Any] | None = None,
+    dvol_regime_watch: dict[str, Any] | None = None,
     reanalysis_wake: dict[str, Any] | None = None,
     transition_diagnostic: dict[str, Any] | None = None,
     btc_entry_gate: dict[str, Any] | None = None,
@@ -300,6 +301,8 @@ def build_evidence_pack(
             "capital_strategy": None,
         },
     }
+    if dvol_regime_watch is not None:
+        pack["dvol_regime_watch"] = deepcopy(dvol_regime_watch)
     if reanalysis_wake is not None:
         pack["reanalysis_wake"] = deepcopy(reanalysis_wake)
     if transition_diagnostic is not None:

@@ -185,5 +185,83 @@ class DailyEvidenceRunnerTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text(encoding="utf-8")), payload)
 
 
+    def test_dvol_overlay_can_wake_analysis_without_touching_formal_locks(self):
+        dvol_payload = {
+            "schema_version": "CRT_DVOL_REGIME_WATCH_V0.1",
+            "scope": "NON_WEIGHTED_RESEARCH_OVERLAY",
+            "state": "EXPANSION_ACTIVATED",
+            "reason": "TEST",
+            "direction": "UNKNOWN",
+            "current_dvol": 42.0,
+            "dvol_30d_low": 34.0,
+            "rebound_from_30d_low_pct": 23.5294117647,
+            "level_percentile_1y": 8.0,
+            "baseline_count": 365,
+            "recommended_wake_operational_percentile": 90.0,
+            "formal_model_authority": "NONE",
+            "formal_weight_authority": "NONE",
+            "formal_threshold_authority": "NONE",
+            "season_transition_authority": "NONE",
+            "investment_threshold_authority": "NONE",
+            "external_action_authority": "NONE",
+            "external_action_performed": False,
+            "action_output": "NONE",
+            "machine_may_confirm_bull_transition": False,
+            "analyst_judgment_required": True,
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            pack = run_daily_evidence(
+                self.registry,
+                observation_db=Path(td) / "observations.sqlite3",
+                fetch_overrides=self.overrides,
+                liquidation_aggregate_payload=self.aggregate(),
+                now_ms=NOW_MS,
+                generated_at_ms=NOW_MS,
+                dvol_regime_runner=lambda **_: dvol_payload,
+            )
+
+        self.assertEqual(
+            pack["dvol_regime_watch"]["state"],
+            "EXPANSION_ACTIVATED",
+        )
+        self.assertEqual(
+            pack["reanalysis_wake"]["state"],
+            "REANALYSIS_REQUESTED",
+        )
+        self.assertEqual(
+            pack["reanalysis_wake"]["reason"],
+            "DVOL_EXPANSION_ACTIVATED",
+        )
+        self.assertEqual(
+            pack["reanalysis_wake"]["operational_percentile"],
+            90.0,
+        )
+        self.assertEqual(
+            pack["model_status"]["locked_formal_scoring"][
+                "layer_weights_percent"
+            ],
+            {
+                "L1": 20,
+                "L2": 20,
+                "L3": 17,
+                "L4": 25,
+                "L5": 13,
+                "L6": 5,
+            },
+        )
+        self.assertEqual(
+            pack["model_status"]["locked_formal_scoring"][
+                "light_thresholds"
+            ],
+            [-60, -35, 35, 60],
+        )
+        self.assertFalse(
+            pack["btc_bull_validation"][
+                "machine_may_confirm_bull_transition"
+            ]
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

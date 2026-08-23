@@ -21,6 +21,10 @@ from .btc_transition_diagnostics import (
     not_requested_transition_diagnostic,
     run_live_btc_transition_diagnostics,
 )
+from .dvol_regime_watch import (
+    blocked_dvol_regime_watch,
+    run_live_dvol_regime_watch,
+)
 from .evidence_pack import build_evidence_pack
 from .intraday_reanalysis_runner import run_intraday_reanalysis
 from .liquidation_aggregator import SnapshotCorruption, load_verified_snapshot
@@ -78,6 +82,7 @@ def run_daily_evidence(
     now_ms: int | None = None,
     generated_at_ms: int | None = None,
     private_context: dict[str, Any] | None = None,
+    dvol_regime_runner: Callable[..., dict[str, Any]] | None = None,
     transition_diagnostic_runner: Callable[..., dict[str, Any]] | None = None,
     btc_entry_gate_context: dict[str, Any] | None = None,
     btc_entry_gate_runner: Callable[..., dict[str, Any]] | None = None,
@@ -93,6 +98,33 @@ def run_daily_evidence(
     source_gate = apply_runtime_checks(source_gate, runtime_checks)
     recorded_at_ms = int(generated_at_ms) if generated_at_ms is not None else None
     current_observations = extract_observations(source_gate, recorded_at_ms=recorded_at_ms)
+
+    dvol_now_ms = generated_at_ms if generated_at_ms is not None else now_ms
+    if dvol_regime_runner is None:
+        dvol_regime_watch = blocked_dvol_regime_watch(
+            "DVOL_REGIME_RUNNER_NOT_CONFIGURED"
+        )
+    else:
+        try:
+            dvol_regime_watch = dvol_regime_runner(now_ms=dvol_now_ms)
+        except Exception as exc:
+            dvol_regime_watch = blocked_dvol_regime_watch(
+                "DVOL_REGIME_RUNNER_FAILED",
+                error=f"{type(exc).__name__}:{exc}",
+            )
+
+    wake_operational_percentile = dvol_regime_watch.get(
+        "recommended_wake_operational_percentile",
+        95.0,
+    )
+    try:
+        wake_operational_percentile = float(wake_operational_percentile)
+    except (TypeError, ValueError):
+        wake_operational_percentile = 95.0
+
+    if not (0.0 < wake_operational_percentile <= 100.0):
+        wake_operational_percentile = 95.0
+
     btc_rows = [
         row
         for row in current_observations
@@ -101,7 +133,11 @@ def run_daily_evidence(
     if btc_rows:
         current_btc = max(btc_rows, key=lambda row: row.as_of_ms)
         with ObservationStore(observation_db) as store:
-            reanalysis_wake = run_intraday_reanalysis(store, current_btc)
+            reanalysis_wake = run_intraday_reanalysis(
+                store,
+                current_btc,
+                operational_percentile=wake_operational_percentile,
+            )
     else:
         reanalysis_wake = {
             "state": "NO_WAKE",
@@ -113,11 +149,41 @@ def run_daily_evidence(
             "percent_change": None,
             "historical_percentile": None,
             "baseline_count": 0,
+            "operational_percentile": wake_operational_percentile,
             "analyst_reanalysis_requested": False,
             "action_output": "NONE",
             "external_action_authority": "NONE",
             "external_action_performed": False,
         }
+    if (
+        dvol_regime_watch.get("state") == "EXPANSION_ACTIVATED"
+        and reanalysis_wake.get("state") != "REANALYSIS_REQUESTED"
+    ):
+        reanalysis_wake = {
+            "state": "REANALYSIS_REQUESTED",
+            "reason": "DVOL_EXPANSION_ACTIVATED",
+            "metric": "btc_dvol",
+            "input_family": "BTC_DVOL_RESEARCH",
+            "current_value": dvol_regime_watch.get("current_dvol"),
+            "previous_value": dvol_regime_watch.get("dvol_30d_low"),
+            "percent_change": dvol_regime_watch.get(
+                "rebound_from_30d_low_pct"
+            ),
+            "historical_percentile": dvol_regime_watch.get(
+                "level_percentile_1y"
+            ),
+            "baseline_count": dvol_regime_watch.get(
+                "baseline_count",
+                0,
+            ),
+            "operational_percentile": wake_operational_percentile,
+            "analyst_reanalysis_requested": True,
+            "direction": "UNKNOWN",
+            "action_output": "NONE",
+            "external_action_authority": "NONE",
+            "external_action_performed": False,
+        }
+
     if reanalysis_wake["state"] == "REANALYSIS_REQUESTED":
         if transition_diagnostic_runner is None:
             transition_diagnostic = blocked_transition_diagnostic(
@@ -150,6 +216,7 @@ def run_daily_evidence(
         observation_db=observation_db,
         generated_at_ms=generated_at_ms,
         reflexivity_input=reflexivity_input,
+        dvol_regime_watch=dvol_regime_watch,
         reanalysis_wake=reanalysis_wake,
         transition_diagnostic=transition_diagnostic,
         btc_entry_gate=btc_entry_gate,
@@ -226,6 +293,7 @@ def main(argv: list[str] | None = None) -> int:
         probe_fetcher=probe_liquidation_stream,
         runtime_checks=runtime_checks,
         private_context=private_context,
+        dvol_regime_runner=run_live_dvol_regime_watch,
         transition_diagnostic_runner=run_live_btc_transition_diagnostics,
         btc_entry_gate_context=btc_entry_gate_context,
         btc_entry_gate_runner=run_live_btc_entry_gate,
