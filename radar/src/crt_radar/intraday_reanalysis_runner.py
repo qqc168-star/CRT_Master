@@ -9,6 +9,8 @@ from .reanalysis_wake import evaluate_intraday_reanalysis_wake
 def run_intraday_reanalysis(
     store: ObservationStore,
     current: Observation,
+    *,
+    operational_percentile: float = 95.0,
 ) -> dict[str, Any]:
     """Evaluate one BTC spot observation against stored intraday history.
 
@@ -22,12 +24,21 @@ def run_intraday_reanalysis(
     if current.layer_id != "AS-L3":
         raise ValueError("intraday reanalysis requires AS-L3 observations")
 
+    percentile = float(operational_percentile)
+    if not (0.0 < percentile <= 100.0):
+        raise ValueError("operational_percentile must be in (0, 100]")
+
     history = store.series(current.input_family, current.metric)
-    decision = evaluate_intraday_reanalysis_wake(current, history)
+    decision = evaluate_intraday_reanalysis_wake(
+        current,
+        history,
+        operational_percentile=percentile,
+    )
     if decision.state not in {"NO_WAKE", "REANALYSIS_REQUESTED"}:
         raise RuntimeError(f"unexpected intraday reanalysis state: {decision.state}")
 
     payload = decision.to_dict()
+    payload["operational_percentile"] = percentile
     payload.update(
         {
             "action_output": "NONE",

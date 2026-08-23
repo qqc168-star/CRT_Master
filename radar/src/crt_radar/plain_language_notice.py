@@ -175,8 +175,12 @@ def _position_line(private_context: dict[str, Any] | None) -> str:
 
 def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
     authority = pack.get("authority", {})
-    if authority.get("external_action_authority") != "NONE" or authority.get("external_action_performed") is not False:
+    if (
+        authority.get("external_action_authority") != "NONE"
+        or authority.get("external_action_performed") is not False
+    ):
         raise ValueError("evidence pack external action boundary is invalid")
+
     wake = pack.get("reanalysis_wake")
     if not isinstance(wake, dict):
         wake = {
@@ -186,38 +190,136 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
             "external_action_authority": "NONE",
             "external_action_performed": False,
         }
+
+    dvol = pack.get("dvol_regime_watch")
+    if not isinstance(dvol, dict):
+        dvol = {
+            "state": "BLOCKED",
+            "reason": "DVOL_REGIME_NOT_AVAILABLE",
+            "direction": "UNKNOWN",
+        }
+
     requested = wake.get("state") == "REANALYSIS_REQUESTED"
+    wake_reason = str(wake.get("reason", ""))
+    dvol_state = str(dvol.get("state", "BLOCKED"))
+    compression_alert = dvol_state == "COMPRESSION_EXTREME"
+
     percent_change = wake.get("percent_change")
-    if requested and isinstance(percent_change, (int, float)):
-        what_happened = f"BTC \u51fa\u73fe\u76f8\u5c0d\u6b77\u53f2\u6ce2\u52d5\u5c6c\u65bc\u91cd\u5927\u7b49\u7d1a\u7684\u8b8a\u5316\uff0c\u6700\u65b0\u4e00\u6bb5\u8b8a\u5316\u7d04 {float(percent_change):+.2f}%\u3002"
+
+    if requested and wake_reason == "DVOL_EXPANSION_ACTIVATED":
+        current_dvol = dvol.get("current_dvol")
+        rebound = dvol.get("rebound_from_30d_low_pct")
+        if isinstance(current_dvol, (int, float)) and isinstance(
+            rebound,
+            (int, float),
+        ):
+            what_happened = (
+                f"BTC DVOL ?????????????"
+                f"?? DVOL ? {float(current_dvol):.2f}?"
+                f"????????? {float(rebound):.2f}%?"
+                "????????????????????????"
+            )
+        else:
+            what_happened = (
+                "BTC DVOL ?????????????"
+                "????????????????????????"
+            )
+    elif requested and isinstance(percent_change, (int, float)):
+        what_happened = (
+            "BTC ??????????????????"
+            f"??????? {float(percent_change):+.2f}%?"
+        )
     elif requested:
-        what_happened = "BTC \u51fa\u73fe\u76f8\u5c0d\u6b77\u53f2\u6ce2\u52d5\u5c6c\u65bc\u91cd\u5927\u7b49\u7d1a\u7684\u8b8a\u5316\u3002"
+        what_happened = (
+            "BTC ??????????????????"
+        )
+    elif compression_alert:
+        current_dvol = dvol.get("current_dvol")
+        percentile = dvol.get("level_percentile_1y")
+        if isinstance(current_dvol, (int, float)) and isinstance(
+            percentile,
+            (int, float),
+        ):
+            what_happened = (
+                f"BTC DVOL ? {float(current_dvol):.2f}?"
+                f"???????? {float(percentile):.1f} ????"
+                "????????????????????"
+                "?????????"
+            )
+        else:
+            what_happened = (
+                "BTC DVOL ????????"
+                "??????????????"
+            )
     else:
-        what_happened = "\u76ee\u524d\u6c92\u6709\u89f8\u767c BTC \u91cd\u5927\u7570\u52d5\u91cd\u65b0\u5224\u8b80\u3002"
+        what_happened = (
+            "?????? BTC ?????????"
+        )
 
     top_changes = _top_change_lines(pack)
+    why_parts: list[str] = []
+
+    if top_changes:
+        why_parts.append(
+            "??????????" + "?".join(top_changes) + "?"
+        )
+
+    if dvol_state in {
+        "COMPRESSION_ELEVATED",
+        "COMPRESSION_EXTREME",
+        "EXPANSION_ACTIVATED",
+    }:
+        why_parts.append(
+            "DVOL ?????????????????"
+            "??????????????????"
+        )
+
     why_it_matters = (
-        "\u540c\u6642\u503c\u5f97\u6ce8\u610f\u7684\u8b49\u64da\uff1a" + "\uff1b".join(top_changes) + "\u3002"
-        if top_changes
-        else "\u76ee\u524d\u6c92\u6709\u5176\u4ed6\u8db3\u4ee5\u5217\u5165\u91cd\u9ede\u7684\u53ef\u6bd4\u8f03\u8b8a\u5316\u3002"
+        " ".join(why_parts)
+        if why_parts
+        else "???????????????????"
     )
-    blockers = pack.get("data_health", {}).get("critical_blockers", [])
+
+    blockers = pack.get("data_health", {}).get(
+        "critical_blockers",
+        [],
+    )
     if not isinstance(blockers, list):
         blockers = []
+
+    if requested:
+        title = "BTC ????????????"
+        state = "GPT_REANALYSIS_REQUESTED"
+        instruction = (
+            "???????????????????"
+            "???????????"
+            "DVOL ??????????????????????"
+        )
+    elif compression_alert:
+        title = "BTC ??????????????"
+        state = "NO_WAKE"
+        instruction = (
+            "????????????? DVOL ?????????"
+            "????? DVOL ???????????"
+        )
+    else:
+        title = "CRT ?????????????"
+        state = "NO_WAKE"
+        instruction = (
+            "??????????????????"
+        )
+
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
-        "state": "GPT_REANALYSIS_REQUESTED" if requested else "NO_WAKE",
-        "title": "BTC \u6709\u91cd\u5927\u7570\u52d5\uff0c\u9700\u8981\u91cd\u65b0\u5224\u8b80" if requested else "CRT \u96f7\u9054\u6b63\u5e38\u503c\u73ed\uff0c\u6c92\u6709\u91cd\u5927\u7570\u52d5",
+        "state": state,
+        "title": title,
         "what_happened": what_happened,
         "why_it_matters": why_it_matters,
         "position_context": _position_line(pack.get("private_context")),
         "data_limits": blockers,
+        "dvol_regime_watch": dvol,
         "btc_transition_light": build_btc_transition_light(pack),
-        "instruction_for_gpt": (
-            "\u8acb\u7528\u7e41\u9ad4\u4e2d\u6587\u89e3\u91cb\u767c\u751f\u4ec0\u9ebc\u3001\u70ba\u4ec0\u9ebc\u91cd\u8981\u3001\u76ee\u524d\u6301\u5009\u662f\u5426\u9700\u8981\u91cd\u770b\uff1b\u4e0d\u5f97\u4ee3\u66ff\u4f7f\u7528\u8005\u4e0b\u55ae\u3002"
-            if requested
-            else "\u7121\u9808\u4e3b\u52d5\u63d0\u51fa\u4ea4\u6613\u5efa\u8b70\uff1b\u7dad\u6301\u96f7\u9054\u503c\u73ed\u3002"
-        ),
+        "instruction_for_gpt": instruction,
         "source_evidence_pack_hash": pack.get("evidence_pack_hash"),
         "action_output": "NONE",
         "external_action_authority": "NONE",
