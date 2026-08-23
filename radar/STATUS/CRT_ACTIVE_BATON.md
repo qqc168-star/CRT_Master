@@ -23,7 +23,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - 進行中：`1`
 - 完成率：`75%`
 - 目前唯一進行中項目：`#7`
-- 目前任務：`GPT_WAKE_HANDOFF`
+- 目前任務：`GPT_TRANSPORT_BOUNDARY_CLOSURE`
 
 完成率只使用：
 
@@ -232,27 +232,44 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 ## 目前已知阻塞
 
-`ITEM_7_GPT_WAKE_HANDOFF_NOT_YET_IMPLEMENTED`
+`ITEM_7_TRANSPORT_DELIVERY_NOT_SELECTED`
 
 目前系統已能可靠完成：
 
 `市場資料`
 → `Evidence Pack（證據包）`
 → `最新 Capital State（資本狀態）`
-→ `未完成 Capital Plan（資本計畫）`
-→ `Plan Drift（計畫偏離）條件解析`
-→ `STABLE / BLOCKED / REANALYSIS_REQUIRED`
+→ `Plan Drift（計畫偏離）`
+→ `Wake Fusion（喚醒融合）`
+→ `GPT Handoff Gate（GPT 交接閘門）`
+→ `GPT Reanalysis Semantics（GPT 重新分析語義）`
+→ `Minimized Bridge Payload（最小化橋接資料包）`
+→ `Durable Local Outbox（可靠本機寄件匣）`
 
-但目前仍缺少 #7 的正式主動交接：
+Transport Boundary Closure V0.1（傳輸邊界閉合 V0.1）新增：
 
-`合格重大異動`
-→ `Wake（喚醒訊號）`
-→ `GPT 讀取最新 Evidence Pack（證據包）`
+- Durable Local Outbox（可靠本機寄件匣）事件同步為 local-only（僅本機）`PENDING` delivery state（送達狀態）。
+- 同一 `event_id` 與相同 payload hash（資料包雜湊）採 idempotent（冪等）處理。
+- 同一 `event_id` 但不同 payload hash（資料包雜湊）採 fail-closed（失敗關閉）。
+- `CLAIMED`（已領取）、`RETRYABLE`（可重試）、`DELIVERED`（已送達）只建立狀態機契約與測試。
+- 真正值班 Runtime（執行環境）目前只執行 `sync`，不執行 claim（領取）或 delivery（送達）。
+- 未選定 Transport Adapter（傳輸轉接器）時，不得 claim（領取），也不得宣告 delivered（已送達）。
+
+因此 #7 尚未完成。仍缺：
+
+`PENDING`
+→ `使用者批准的 Transport Adapter（傳輸轉接器）`
+→ `CLAIMED`
+→ `GPT 讀取最新最小化證據`
 → `GPT 重新分析`
 → `形成一次可通知使用者的決策建議`
+→ `Delivery Receipt（送達收據）`
+→ `DELIVERED`
 
 在 #7 完成前：
 
+- GPT Transport（GPT 傳輸）維持 `NOT_IMPLEMENTED`。
+- Network Write（網路寫入）不得由本刀新增。
 - `REANALYSIS_REQUIRED`（需要重新分析）不得直接等同交易指令。
 - 不得由機器自行修改持倉、計畫價格或資金配置。
 - 不得自動下單。
@@ -263,15 +280,16 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 ## 下一個唯一有效動作
 
-處理 #7 Evidence / Wake → GPT（證據／喚醒 → GPT）主動交接。
+完成 Transport Boundary Closure V0.1（傳輸邊界閉合 V0.1）驗收後，再由使用者明確選擇與批准 GPT Transport（GPT 傳輸）實作。
 
-#7 只建立：
+#7 目前只允許：
 
 `合格重大異動`
 → `可靠 Wake（喚醒）`
-→ `GPT 重新讀取最新證據與資本狀態`
-→ `重新分析`
-→ `形成一次主動通知`
+→ `GPT Handoff（GPT 交接）`
+→ `Minimized Bridge（最小化橋接）`
+→ `Durable Local Outbox（可靠本機寄件匣）`
+→ `PENDING Transport Boundary（待傳輸邊界）`
 
 不得在 #7：
 

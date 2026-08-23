@@ -17,6 +17,7 @@ $NoticeOutput = Join-Path $RuntimeRoot "notifications\latest.json"
 $HandoffOutput = Join-Path $RuntimeRoot "gpt_handoff\latest.json"
 $HandoffLedger = Join-Path $RuntimeRoot "gpt_handoff\ledger.jsonl"
 $BridgeOutbox = Join-Path $RuntimeRoot "gpt_bridge\outbox"
+$TransportBoundary = Join-Path $RuntimeRoot "gpt_bridge\transport_boundary"
 $MaturityLedger = Join-Path $RuntimeRoot "maturity\attempts.jsonl"
 $MaturityStatus = Join-Path $RuntimeRoot "maturity\status.json"
 $CollectorRunner = Join-Path $RadarRoot "scripts\windows\run_liquidation_collector_windows.ps1"
@@ -42,6 +43,7 @@ New-Item -ItemType Directory -Force (Split-Path $WakeOutput -Parent) | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $NoticeOutput -Parent) | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $HandoffOutput -Parent) | Out-Null
 New-Item -ItemType Directory -Force $BridgeOutbox | Out-Null
+New-Item -ItemType Directory -Force $TransportBoundary | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $MaturityStatus -Parent) | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $IssuerAnnouncementOutput -Parent) | Out-Null
 
@@ -111,6 +113,18 @@ $RunnerArgs = @(
 $EvidenceExit = $LASTEXITCODE
 if ($EvidenceExit -ne 0) {
     exit $EvidenceExit
+}
+
+$TransportBoundaryArgs = @(
+    "-m", "crt_radar.gpt_transport_boundary",
+    "sync",
+    "--outbox-dir", $BridgeOutbox,
+    "--state-dir", $TransportBoundary
+)
+& $Python @TransportBoundaryArgs
+$TransportBoundaryExit = $LASTEXITCODE
+if ($TransportBoundaryExit -ne 0) {
+    exit $TransportBoundaryExit
 }
 
 if (Test-Path -LiteralPath $EtpCaptureIfDue) {
