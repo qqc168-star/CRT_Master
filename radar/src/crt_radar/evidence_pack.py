@@ -12,6 +12,7 @@ from .asset_strategy_delta import build_asset_strategy_delta
 from .btc_bull_validation import evaluate_btc_bull_validation
 from .change_engine import compute_changes, distill_top_changes
 from .observation_store import Observation, ObservationStore, extract_observations
+from .plan_drift import evaluate_plan_drift
 from .reflexivity_overlay import build_reflexivity_overlay
 from .v110_candidate import evaluate_v110_candidate
 
@@ -311,6 +312,12 @@ def build_evidence_pack(
         pack["btc_entry_gate"] = deepcopy(btc_entry_gate)
     if private_context is not None:
         pack["private_context"] = deepcopy(private_context)
+
+    pack["plan_drift"] = evaluate_plan_drift(
+        private_context=private_context,
+        layers=layers,
+    )
+
     if assumption_watch_context is not None:
         assumption_watch = evaluate_assumption_watch(
             btc_entry_gate=btc_entry_gate,
