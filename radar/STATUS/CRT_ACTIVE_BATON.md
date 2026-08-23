@@ -23,7 +23,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - 進行中：`1`
 - 完成率：`75%`
 - 目前唯一進行中項目：`#7`
-- 目前任務：`GPT_TRANSPORT_BOUNDARY_CLOSURE`
+- 目前任務：`OPENAI_RESPONSES_ADAPTER_CONTRACT`
 
 完成率只使用：
 
@@ -232,7 +232,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 ## 目前已知阻塞
 
-`ITEM_7_TRANSPORT_DELIVERY_NOT_SELECTED`
+`ITEM_7_LIVE_GPT_TRANSPORT_NOT_APPROVED`
 
 目前系統已能可靠完成：
 
@@ -255,10 +255,19 @@ Transport Boundary Closure V0.1（傳輸邊界閉合 V0.1）新增：
 - 真正值班 Runtime（執行環境）目前只執行 `sync`，不執行 claim（領取）或 delivery（送達）。
 - 未選定 Transport Adapter（傳輸轉接器）時，不得 claim（領取），也不得宣告 delivered（已送達）。
 
+OpenAI Responses Adapter Contract V0.1（OpenAI 回應介面轉接器契約 V0.1）新增離線契約：
+
+- Request Envelope（請求封套）固定 `store = false`、`background = false`，並禁止 tools（工具）。
+- API Key（介面金鑰）只記錄 `OPENAI_API_KEY` 環境變數名稱，契約本身不得讀取或保存 secret（秘密值）。
+- 直接重用既有 GPT Reanalysis Semantics（GPT 重新分析語義）。
+- Response（回應）只有 `status = completed` 才能形成 Delivery Receipt（送達收據）。
+- Retry Policy（重試政策）已建立 bounded（有界）分類契約。
+- 本契約未匯入 OpenAI SDK（OpenAI 軟體開發套件）、未執行 HTTP（網路請求）、未接入值班 Runtime（執行環境）。
+
 因此 #7 尚未完成。仍缺：
 
 `PENDING`
-→ `使用者批准的 Transport Adapter（傳輸轉接器）`
+→ `使用者另外批准的 Live OpenAI Responses Transport（真實 OpenAI 回應傳輸）`
 → `CLAIMED`
 → `GPT 讀取最新最小化證據`
 → `GPT 重新分析`
@@ -268,7 +277,7 @@ Transport Boundary Closure V0.1（傳輸邊界閉合 V0.1）新增：
 
 在 #7 完成前：
 
-- GPT Transport（GPT 傳輸）維持 `NOT_IMPLEMENTED`。
+- Live GPT Transport（真實 GPT 傳輸）維持 `NOT_IMPLEMENTED`；目前只有 offline Adapter Contract（離線轉接器契約）。
 - Network Write（網路寫入）不得由本刀新增。
 - `REANALYSIS_REQUIRED`（需要重新分析）不得直接等同交易指令。
 - 不得由機器自行修改持倉、計畫價格或資金配置。
@@ -280,7 +289,9 @@ Transport Boundary Closure V0.1（傳輸邊界閉合 V0.1）新增：
 
 ## 下一個唯一有效動作
 
-完成 Transport Boundary Closure V0.1（傳輸邊界閉合 V0.1）驗收後，再由使用者明確選擇與批准 GPT Transport（GPT 傳輸）實作。
+完成 OpenAI Responses Adapter Contract V0.1（OpenAI 回應介面轉接器契約 V0.1）驗收後，只有在使用者另外明確批准下，才可進入單一 synthetic event（合成事件）的 Live Smoke Test（真實煙霧測試）。
+
+在該批准前：Network Write（網路寫入）維持 `NONE`、API Key（介面金鑰）不得讀取、API cost（介面費用）維持 `ZERO`、Production approval（正式生產批准）維持不變、External Action Authority（外部行動權限）維持 `NONE`。
 
 #7 目前只允許：
 
