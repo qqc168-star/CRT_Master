@@ -282,3 +282,40 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - 修改正式模型、六層權重、燈號閾值或 mNAV 語義
 - 修改 Production approval（正式生產批准）
 - 修改 External Action Authority（外部行動權限）
+
+## 暫緩工作
+
+在本 Baton（接力棒）達成 `8 / 8` 前，以下工作不主動推進，除非它們被證明直接阻塞本任務：
+
+- Formal Season Router（正式季節路由器）恢復
+- Formal Season Input Binding（正式季節輸入綁定）
+- 20-run maturity（20 次成熟度）
+- 新指標
+- 新 Overlay（覆蓋分析）
+- 新 Dashboard（儀表板）
+- 新流程型治理結構
+
+## 防迷航規則
+
+新的 CRT 工程聊天室開始時：
+
+1. 先讀 GitHub current `main`。
+2. 再讀本檔。
+3. 先報告：最初工作目標、總項目數、已完成數、完成率、目前唯一工作、阻塞與下一刀。
+4. 不得依聊天室記憶自行跳過未完成項目。
+5. 每次只推進目前唯一進行中項目。
+6. 只有驗收項目狀態、真實阻塞或下一個有效動作改變時，才更新本 Baton。
+7. 普通 Git HEAD 移動本身不代表 Baton 過期。
+
+## 正式鎖
+
+本 Baton 不是新的正式模型，也不具有投資門檻權限。
+
+以下維持不變：
+
+- 六層權重：`20 / 20 / 17 / 25 / 13 / 5`
+- 燈號閾值：`-60 / -35 / 35 / 60`
+- 未加限定的 `mNAV`：`Diluted Equity mNAV`
+- Production approval（正式生產批准）：不變
+- External Action Authority（外部行動權限）：`NONE`
+- 使用者保有最終資本決定權
