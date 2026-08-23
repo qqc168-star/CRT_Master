@@ -26,6 +26,7 @@ from .dvol_regime_watch import (
     run_live_dvol_regime_watch,
 )
 from .evidence_pack import build_evidence_pack
+from .gpt_handoff import run_gpt_handoff_gate
 from .intraday_reanalysis_runner import run_intraday_reanalysis
 from .liquidation_aggregator import SnapshotCorruption, load_verified_snapshot
 from .maturity_tracker import record_maturity_attempt
@@ -255,6 +256,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--wake-output", type=Path, default=None)
     parser.add_argument("--notice-output", type=Path, default=None)
+    parser.add_argument("--handoff-output", type=Path, default=None)
+    parser.add_argument("--handoff-ledger", type=Path, default=None)
     parser.add_argument("--maturity-ledger", type=Path, default=None)
     parser.add_argument("--maturity-status", type=Path, default=None)
     parser.add_argument(
@@ -270,6 +273,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Transport-only freshness limit for --phone-l4-freshness-path. Source-level freshness remains authoritative.",
     )
     args = parser.parse_args(argv)
+
+    if (
+        (args.handoff_output is None)
+        != (args.handoff_ledger is None)
+    ):
+        raise ValueError(
+            "--handoff-output and --handoff-ledger "
+            "must be supplied together"
+        )
 
     registry = SourceRegistry.load(args.registry)
     liquidation_payload = _load_liquidation_snapshot(args.liquidation_snapshot)
@@ -302,8 +314,36 @@ def main(argv: list[str] | None = None) -> int:
     write_json_atomic(args.output, pack)
     if args.wake_output is not None:
         write_json_atomic(args.wake_output, pack["reanalysis_wake"])
+
+    notice = None
+    if (
+        args.notice_output is not None
+        or args.handoff_output is not None
+    ):
+        notice = build_plain_language_notice(pack)
+
     if args.notice_output is not None:
-        write_json_atomic(args.notice_output, build_plain_language_notice(pack))
+        assert notice is not None
+        write_json_atomic(
+            args.notice_output,
+            notice,
+        )
+
+    if args.handoff_output is not None:
+        assert notice is not None
+        assert args.handoff_ledger is not None
+
+        handoff = run_gpt_handoff_gate(
+            pack,
+            notice,
+            ledger_path=args.handoff_ledger,
+        )
+
+        write_json_atomic(
+            args.handoff_output,
+            handoff,
+        )
+
     if (args.maturity_ledger is None) != (args.maturity_status is None):
         raise ValueError("--maturity-ledger and --maturity-status must be supplied together")
     if args.maturity_ledger is not None and args.maturity_status is not None:
