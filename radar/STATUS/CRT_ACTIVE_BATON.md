@@ -19,11 +19,11 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 ## 固定進度
 
 - 總驗收項目：`8`
-- 已完成：`5`
+- 已完成：`6`
 - 進行中：`1`
-- 完成率：`62.5%`
-- 目前唯一進行中項目：`#6`
-- 目前任務：`PLAN_DRIFT_PRICE_ESCAPE`
+- 完成率：`75%`
+- 目前唯一進行中項目：`#7`
+- 目前任務：`GPT_WAKE_HANDOFF`
 
 完成率只使用：
 
@@ -71,7 +71,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
   - 只有使用者明確確認成交，機器才可把該段標記為已執行。
   - 不得因價格觸及、掛單存在或模型推測而自行認定成交。
 
-- [ ] **#6 建立 Plan Drift / Price Escape（計畫偏離／價格逃逸）偵測 — ACTIVE**
+- [x] **#6 建立 Plan Drift / Price Escape（計畫偏離／價格逃逸）偵測 — COMPLETE**
   - 市場價格脫離原進場區時不得沉默。
   - 必須判斷原計畫是否仍有效。
   - 必須要求重新驗收市場結構。
@@ -189,52 +189,96 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - Execution Update（成交更新）已具備實戰可用能力。
 - 工作移交 #6 Plan Drift / Price Escape（計畫偏離／價格逃逸）。
 
+## #6 驗收結果
+
+`PLAN_DRIFT_PRICE_ESCAPE_LIVE_ACCEPTANCE_PASS`
+
+已驗證：
+
+- PR #48（合併請求48）已合併至 current GitHub main（目前主分支）。
+- merged main SHA（合併後主分支提交）：
+  `927be1ec950b67db9d640de249fda153e026d758`
+- 真正值班 Runtime（執行環境）已對齊上述 current main（目前主分支）。
+- 新的真實 observation cycle（觀測循環）已完成。
+- Evidence Pack（證據包）已刷新。
+- Plan Drift（計畫偏離）已正式寫入 Evidence Pack（證據包），並納入 `evidence_pack_hash`。
+- 真實 Capital Plan（資本計畫）：
+  `ATTACK_CAPITAL_WAIT`
+- 真實 Plan Drift（計畫偏離）結果：
+  `STABLE`
+- pending tranches（待執行批次）：`3`
+- satisfied conditions（成立條件）：`3`
+- violated conditions（違反條件）：`0`
+- blocked conditions（阻塞條件）：`0`
+- `reanalysis_required = false`
+- 條件來源正確解析至 Capital State（資本狀態）。
+- 未綁定或多重來源條件採 fail-closed（失敗關閉）。
+- 條件真正被違反時才形成 `REANALYSIS_REQUIRED`（需要重新分析）。
+- 不把價格觸及自行視為成交。
+- 不自動修改 Capital State（資本狀態）。
+- 不自動修改 tranche（批次）。
+- 不自動下單。
+- 真實 private portfolio（私人投資組合）hash（雜湊值）未變。
+- Windows Scheduled Task（Windows 排程工作）設定未修改。
+- Runtime working tree（執行環境工作樹）乾淨。
+- stash（暫存修改）未碰。
+- External Action Authority（外部行動權限）維持 `NONE`。
+
+因此：
+
+- #6：`COMPLETE`
+- Live Action Loop（實戰行動迴圈）完成度：`6 / 8 = 75%`
+- 工作正式移交 #7 GPT Wake（GPT 喚醒）。
+
 ## 目前已知阻塞
 
-`ITEM_6_PLAN_DRIFT_PRICE_ESCAPE_NOT_YET_IMPLEMENTED`
+`ITEM_7_GPT_WAKE_HANDOFF_NOT_YET_IMPLEMENTED`
 
-目前系統已能可靠知道：
+目前系統已能可靠完成：
 
-- 最新市場資料
-- 最新 Capital State（資本狀態）
-- 未完成 Capital Plan（資本計畫）
-- 每一 tranche（批次）的預算與狀態
-- 使用者明確確認的真實成交
+`市場資料`
+→ `Evidence Pack（證據包）`
+→ `最新 Capital State（資本狀態）`
+→ `未完成 Capital Plan（資本計畫）`
+→ `Plan Drift（計畫偏離）條件解析`
+→ `STABLE / BLOCKED / REANALYSIS_REQUIRED`
 
-但目前仍缺少一條明確、fail-closed（失敗關閉）的 Plan Drift / Price Escape（計畫偏離／價格逃逸）偵測路徑：
+但目前仍缺少 #7 的正式主動交接：
 
-`最新市場價格／市場結構`
-→ `讀取仍有效的 Capital Plan（資本計畫）`
-→ `比較原計畫與目前市場`
-→ `判斷是否發生計畫偏離`
-→ `要求重新分析／重新定價`
+`合格重大異動`
+→ `Wake（喚醒訊號）`
+→ `GPT 讀取最新 Evidence Pack（證據包）`
+→ `GPT 重新分析`
+→ `形成一次可通知使用者的決策建議`
 
-在 #6 完成前：
+在 #7 完成前：
 
-- 原買入價被市場越過後，系統可能仍保持沉默。
-- 價格觸及不得自行視為成交。
-- 價格逃逸不得自動改寫 Capital State（資本狀態）。
-- 不得自行改變 tranche（批次）預算。
-- 不得自行建立新買價或賣價。
+- `REANALYSIS_REQUIRED`（需要重新分析）不得直接等同交易指令。
+- 不得由機器自行修改持倉、計畫價格或資金配置。
 - 不得自動下單。
+- 相同狀態不得造成重複通知風暴。
+- GPT（大廚）必須讀取最新 Evidence Pack（證據包）與最新 Capital State（資本狀態）後才重新分析。
+- External Action Authority（外部行動權限）維持 `NONE`。
+- Production approval（正式生產批准）維持不變。
 
 ## 下一個唯一有效動作
 
-處理 #6 Plan Drift / Price Escape（計畫偏離／價格逃逸）。
+處理 #7 Evidence / Wake → GPT（證據／喚醒 → GPT）主動交接。
 
-#6 只建立：
+#7 只建立：
 
-`市場已離開原計畫`
-→ `可靠偵測`
-→ `形成需要重新分析的證據`
+`合格重大異動`
+→ `可靠 Wake（喚醒）`
+→ `GPT 重新讀取最新證據與資本狀態`
+→ `重新分析`
+→ `形成一次主動通知`
 
-不得在 #6：
+不得在 #7：
 
 - 自動認定成交
 - 自動修改使用者持倉
 - 自動下單
 - 自動移動資金
-- 直接實作 GPT Wake（GPT 喚醒）；該能力屬 #7
 - 修改正式模型、六層權重、燈號閾值或 mNAV 語義
 - 修改 Production approval（正式生產批准）
 - 修改 External Action Authority（外部行動權限）
