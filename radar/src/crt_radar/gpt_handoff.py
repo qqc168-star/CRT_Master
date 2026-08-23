@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +43,39 @@ GOVERNANCE_GUARDRAILS = (
     "RESEARCH_OVERLAY_CANNOT_PROMOTE_FORMAL_SEASON",
     "NO_AUTOMATIC_BUY_SELL",
     "NO_EXTERNAL_ACTION",
+)
+
+BRIDGE_PAYLOAD_SCHEMA_VERSION = (
+    "CRT_MINIMIZED_BRIDGE_PAYLOAD_V0.1"
+)
+
+BRIDGE_PRIVACY_CONTRACT_VERSION = (
+    "CRT_BRIDGE_PAYLOAD_PRIVACY_CONTRACT_V0.1"
+)
+
+BRIDGE_FORBIDDEN_EXACT_KEYS = {
+    "private_context",
+    "profile",
+    "path",
+    "email",
+    "phone",
+    "address",
+    "account_number",
+    "broker_account",
+    "brokerage_account",
+    "api_key",
+    "access_token",
+    "password",
+    "secret",
+    "credential",
+    "credentials",
+}
+
+BRIDGE_OPTIONAL_MARKET_SECTIONS = (
+    "dvol_regime_watch",
+    "transition_diagnostic",
+    "btc_entry_gate",
+    "btc_bull_validation",
 )
 
 
@@ -88,6 +122,728 @@ def _reanalysis_semantics() -> dict[str, Any]:
         "trading_authority": "NONE",
         "external_action_authority": "NONE",
     }
+
+
+def _assert_bridge_privacy(
+    value: Any,
+    *,
+    location: str = "$",
+) -> None:
+    if isinstance(value, dict):
+        for raw_key, child in value.items():
+            key = str(raw_key)
+            normalized = key.strip().lower()
+
+            if normalized in BRIDGE_FORBIDDEN_EXACT_KEYS:
+                raise ValueError(
+                    "Bridge payload contains forbidden key "
+                    f"{location}.{key}"
+                )
+
+            _assert_bridge_privacy(
+                child,
+                location=f"{location}.{key}",
+            )
+
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _assert_bridge_privacy(
+                child,
+                location=f"{location}[{index}]",
+            )
+
+
+def _bridge_data_health(
+    pack: dict[str, Any],
+) -> dict[str, Any]:
+    raw = pack.get("data_health")
+
+    if not isinstance(raw, dict):
+        return {
+            "source_gate_state": None,
+            "critical_blockers": [],
+            "unusable_or_missing_evidence": [],
+        }
+
+    unusable = []
+
+    for row in raw.get(
+        "unusable_or_missing_evidence",
+        [],
+    ):
+        if not isinstance(row, dict):
+            continue
+
+        unusable.append(
+            {
+                "input_family": row.get(
+                    "input_family"
+                ),
+                "quality_state": row.get(
+                    "quality_state"
+                ),
+            }
+        )
+
+    return {
+        "source_gate_state": raw.get(
+            "source_gate_state"
+        ),
+        "critical_blockers": deepcopy(
+            raw.get(
+                "critical_blockers",
+                [],
+            )
+        ),
+        "unusable_or_missing_evidence": (
+            unusable
+        ),
+    }
+
+
+def _bridge_market_context(
+    pack: dict[str, Any],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "generated_at_ms": pack.get(
+            "generated_at_ms"
+        ),
+        "pack_state": pack.get(
+            "pack_state"
+        ),
+        "data_health": _bridge_data_health(
+            pack
+        ),
+        "layers": deepcopy(
+            pack.get(
+                "layers",
+                {},
+            )
+        ),
+        "changes": deepcopy(
+            pack.get(
+                "changes",
+                {},
+            )
+        ),
+        "distillation": deepcopy(
+            pack.get(
+                "distillation",
+                {},
+            )
+        ),
+        "model_status": deepcopy(
+            pack.get(
+                "model_status",
+                {},
+            )
+        ),
+    }
+
+    for key in BRIDGE_OPTIONAL_MARKET_SECTIONS:
+        if key in pack:
+            result[key] = deepcopy(
+                pack[key]
+            )
+
+    return result
+
+
+def _bridge_capital_condition(
+    payload: Any,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "capital-state validity condition "
+            "must be an object"
+        )
+
+    result: dict[str, Any] = {}
+
+    for key in (
+        "field",
+        "operator",
+        "value",
+    ):
+        if key in payload:
+            result[key] = deepcopy(
+                payload[key]
+            )
+
+    return result
+
+
+def _bridge_capital_state(
+    private_context: Any,
+) -> dict[str, Any]:
+    if not isinstance(
+        private_context,
+        dict,
+    ):
+        raise ValueError(
+            "current private context unavailable"
+        )
+
+    if (
+        private_context.get("state")
+        != "AVAILABLE"
+    ):
+        raise ValueError(
+            "current private context must be AVAILABLE"
+        )
+
+    profile = private_context.get(
+        "profile"
+    )
+
+    if not isinstance(profile, dict):
+        raise ValueError(
+            "current private profile unavailable"
+        )
+
+    status = profile.get(
+        "capital_state_status"
+    )
+
+    if (
+        not isinstance(status, dict)
+        or status.get("state")
+        != "AVAILABLE"
+    ):
+        raise ValueError(
+            "current Capital State must be AVAILABLE"
+        )
+
+    if (
+        status.get("execution_authority")
+        != "USER_ONLY"
+    ):
+        raise ValueError(
+            "Capital State execution authority "
+            "must remain USER_ONLY"
+        )
+
+    meta = profile.get("capital_state")
+
+    if not isinstance(meta, dict):
+        raise ValueError(
+            "capital_state unavailable"
+        )
+
+    capital_state = {
+        key: deepcopy(meta.get(key))
+        for key in (
+            "contract_version",
+            "source",
+            "as_of",
+            "base_currency",
+        )
+    }
+
+    holdings_raw = profile.get(
+        "holdings"
+    )
+
+    if not isinstance(
+        holdings_raw,
+        list,
+    ):
+        raise ValueError(
+            "holdings unavailable"
+        )
+
+    holdings = []
+
+    for row in holdings_raw:
+        if not isinstance(row, dict):
+            raise ValueError(
+                "holding must be an object"
+            )
+
+        holdings.append(
+            {
+                "asset": row.get("asset"),
+                "quantity": row.get(
+                    "quantity"
+                ),
+            }
+        )
+
+    cash_raw = profile.get("cash")
+
+    if not isinstance(cash_raw, dict):
+        raise ValueError(
+            "cash unavailable"
+        )
+
+    cash = {
+        "available_usd": cash_raw.get(
+            "available_usd"
+        ),
+        "reserved_usd": cash_raw.get(
+            "reserved_usd"
+        ),
+    }
+
+    roles_raw = profile.get(
+        "asset_roles"
+    )
+
+    if not isinstance(roles_raw, dict):
+        raise ValueError(
+            "asset_roles unavailable"
+        )
+
+    plans_raw = profile.get("plans")
+
+    if not isinstance(plans_raw, list):
+        raise ValueError(
+            "plans unavailable"
+        )
+
+    plans = []
+
+    for plan_raw in plans_raw:
+        if not isinstance(plan_raw, dict):
+            raise ValueError(
+                "plan must be an object"
+            )
+
+        if (
+            str(
+                plan_raw.get("status")
+            ).upper()
+            != "ACTIVE"
+        ):
+            continue
+
+        tranches_raw = plan_raw.get(
+            "tranches",
+            [],
+        )
+
+        if not isinstance(
+            tranches_raw,
+            list,
+        ):
+            raise ValueError(
+                "plan tranches unavailable"
+            )
+
+        tranches = []
+
+        for tranche_raw in tranches_raw:
+            if not isinstance(
+                tranche_raw,
+                dict,
+            ):
+                raise ValueError(
+                    "tranche must be an object"
+                )
+
+            conditions_raw = (
+                tranche_raw.get(
+                    "validity_conditions",
+                    [],
+                )
+            )
+
+            if not isinstance(
+                conditions_raw,
+                list,
+            ):
+                raise ValueError(
+                    "validity_conditions "
+                    "must be a list"
+                )
+
+            tranches.append(
+                {
+                    "tranche_id": (
+                        tranche_raw.get(
+                            "tranche_id"
+                        )
+                    ),
+                    "budget_usd": (
+                        tranche_raw.get(
+                            "budget_usd"
+                        )
+                    ),
+                    "status": (
+                        tranche_raw.get(
+                            "status"
+                        )
+                    ),
+                    "validity_conditions": [
+                        _bridge_capital_condition(
+                            condition
+                        )
+                        for condition
+                        in conditions_raw
+                    ],
+                }
+            )
+
+        plans.append(
+            {
+                "plan_id": plan_raw.get(
+                    "plan_id"
+                ),
+                "asset": plan_raw.get(
+                    "asset"
+                ),
+                "side": plan_raw.get(
+                    "side"
+                ),
+                "status": plan_raw.get(
+                    "status"
+                ),
+                "tranches": tranches,
+            }
+        )
+
+    referenced_assets = {
+        str(row.get("asset"))
+        for row in holdings
+        if row.get("asset") is not None
+    }
+
+    referenced_assets.update(
+        str(row.get("asset"))
+        for row in plans
+        if row.get("asset") is not None
+    )
+
+    asset_roles = {
+        str(asset): deepcopy(role)
+        for asset, role in roles_raw.items()
+        if str(asset) in referenced_assets
+    }
+
+    return {
+        "capital_state": capital_state,
+        "holdings": holdings,
+        "cash": cash,
+        "asset_roles": asset_roles,
+        "active_plans": plans,
+        "execution_authority": "USER_ONLY",
+    }
+
+
+def _bridge_plan_drift(
+    handoff: dict[str, Any],
+) -> dict[str, Any]:
+    raw = handoff.get(
+        "plan_drift"
+    )
+
+    if not isinstance(raw, dict):
+        raise ValueError(
+            "handoff plan_drift unavailable"
+        )
+
+    conditions = []
+
+    for row in raw.get(
+        "violated_conditions",
+        [],
+    ):
+        if not isinstance(row, dict):
+            continue
+
+        conditions.append(
+            {
+                key: deepcopy(
+                    row.get(key)
+                )
+                for key in (
+                    "plan_id",
+                    "tranche_id",
+                    "field",
+                    "operator",
+                    "target_value",
+                    "source_kind",
+                )
+            }
+        )
+
+    return {
+        "state": raw.get("state"),
+        "reason": raw.get("reason"),
+        "reanalysis_required": raw.get(
+            "reanalysis_required"
+        ),
+        "violated_conditions": conditions,
+    }
+
+
+def build_minimized_bridge_payload(
+    pack: dict[str, Any],
+    handoff: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(pack, dict):
+        raise ValueError(
+            "Evidence Pack must be an object"
+        )
+
+    if not isinstance(handoff, dict):
+        raise ValueError(
+            "GPT handoff must be an object"
+        )
+
+    if (
+        handoff.get("state")
+        != "GPT_HANDOFF_READY"
+    ):
+        raise ValueError(
+            "Bridge payload requires "
+            "GPT_HANDOFF_READY"
+        )
+
+    pack_hash = pack.get(
+        "evidence_pack_hash"
+    )
+
+    if (
+        not isinstance(pack_hash, str)
+        or not pack_hash
+    ):
+        raise ValueError(
+            "Evidence Pack hash unavailable"
+        )
+
+    if (
+        handoff.get(
+            "source_evidence_pack_hash"
+        )
+        != pack_hash
+    ):
+        raise ValueError(
+            "handoff is not linked to "
+            "current Evidence Pack"
+        )
+
+    pack_authority = pack.get(
+        "authority"
+    )
+
+    if not isinstance(
+        pack_authority,
+        dict,
+    ):
+        raise ValueError(
+            "Evidence Pack authority unavailable"
+        )
+
+    if (
+        pack_authority.get(
+            "production"
+        )
+        != "NOT_APPROVED"
+    ):
+        raise ValueError(
+            "Production approval must remain "
+            "NOT_APPROVED"
+        )
+
+    if (
+        pack_authority.get(
+            "external_action_authority"
+        )
+        != "NONE"
+    ):
+        raise ValueError(
+            "Evidence Pack EAA must remain NONE"
+        )
+
+    required_handoff_authority = {
+        "action_output": "NONE",
+        "external_action_authority": "NONE",
+        "external_action_performed": False,
+        "transport_authority": "NONE",
+        "transport_performed": False,
+    }
+
+    for key, expected in (
+        required_handoff_authority.items()
+    ):
+        if handoff.get(key) != expected:
+            raise ValueError(
+                f"handoff {key} must remain "
+                f"{expected!r}"
+            )
+
+    semantics = handoff.get(
+        "reanalysis_semantics"
+    )
+
+    if not isinstance(
+        semantics,
+        dict,
+    ):
+        raise ValueError(
+            "reanalysis semantics unavailable"
+        )
+
+    instruction = handoff.get(
+        "instruction_for_gpt"
+    )
+
+    if (
+        not isinstance(instruction, str)
+        or not instruction.strip()
+    ):
+        raise ValueError(
+            "instruction_for_gpt unavailable"
+        )
+
+    wake_raw = handoff.get("wake")
+
+    if not isinstance(wake_raw, dict):
+        raise ValueError(
+            "handoff wake unavailable"
+        )
+
+    payload: dict[str, Any] = {
+        "schema_version": (
+            BRIDGE_PAYLOAD_SCHEMA_VERSION
+        ),
+        "privacy_contract_version": (
+            BRIDGE_PRIVACY_CONTRACT_VERSION
+        ),
+        "state": (
+            "BRIDGE_PAYLOAD_READY_LOCAL_ONLY"
+        ),
+        "event": {
+            "event_id": handoff.get(
+                "event_id"
+            ),
+            "semantic_wake_key": (
+                handoff.get(
+                    "semantic_wake_key"
+                )
+            ),
+            "handoff_hash": handoff.get(
+                "handoff_hash"
+            ),
+            "source_evidence_pack_hash": (
+                pack_hash
+            ),
+            "source_notice_hash": (
+                handoff.get(
+                    "source_notice_hash"
+                )
+            ),
+            "wake": {
+                "state": wake_raw.get(
+                    "state"
+                ),
+                "reason": wake_raw.get(
+                    "reason"
+                ),
+                "wake_sources": deepcopy(
+                    wake_raw.get(
+                        "wake_sources",
+                        [],
+                    )
+                ),
+                "wake_reasons": deepcopy(
+                    wake_raw.get(
+                        "wake_reasons",
+                        [],
+                    )
+                ),
+            },
+            "plan_drift": (
+                _bridge_plan_drift(
+                    handoff
+                )
+            ),
+        },
+        "market_context": (
+            _bridge_market_context(
+                pack
+            )
+        ),
+        "capital_state": (
+            _bridge_capital_state(
+                pack.get(
+                    "private_context"
+                )
+            )
+        ),
+        "analysis_contract": {
+            "instruction_for_gpt": (
+                instruction
+            ),
+            "reanalysis_semantics": (
+                deepcopy(semantics)
+            ),
+            "source_required_inputs": (
+                deepcopy(
+                    handoff.get(
+                        "required_inputs",
+                        [],
+                    )
+                )
+            ),
+            "required_behavior": (
+                deepcopy(
+                    handoff.get(
+                        "required_behavior",
+                        [],
+                    )
+                )
+            ),
+        },
+        "privacy": {
+            "mode": (
+                "MINIMIZED_ALLOWLIST_ONLY"
+            ),
+            "user_authorization_scope": (
+                "ANALYSIS_AND_NOTIFICATION_ONLY"
+            ),
+            "raw_private_context_included": (
+                False
+            ),
+            "full_private_profile_included": (
+                False
+            ),
+            "filesystem_paths_included": (
+                False
+            ),
+            "broker_or_account_identifiers_included": (
+                False
+            ),
+            "credentials_or_secrets_included": (
+                False
+            ),
+            "transport_selected": False,
+        },
+        "authority": {
+            "production": "NOT_APPROVED",
+            "trading_authority": "NONE",
+            "external_action_authority": (
+                "NONE"
+            ),
+            "external_action_performed": (
+                False
+            ),
+            "transport_authority": "NONE",
+            "transport_performed": False,
+            "action_output": "NONE",
+        },
+    }
+
+    _assert_bridge_privacy(payload)
+
+    payload[
+        "bridge_payload_hash"
+    ] = _canonical_hash(payload)
+
+    _assert_bridge_privacy(payload)
+
+    return payload
 
 
 def _assert_optional_authority(
