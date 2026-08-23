@@ -13,6 +13,7 @@ from .btc_bull_validation import evaluate_btc_bull_validation
 from .change_engine import compute_changes, distill_top_changes
 from .observation_store import Observation, ObservationStore, extract_observations
 from .plan_drift import evaluate_plan_drift
+from .reanalysis_wake import fuse_reanalysis_wake
 from .reflexivity_overlay import build_reflexivity_overlay
 from .v110_candidate import evaluate_v110_candidate
 
@@ -317,6 +318,14 @@ def build_evidence_pack(
         private_context=private_context,
         layers=layers,
     )
+
+    fused_reanalysis_wake = fuse_reanalysis_wake(
+        pack.get("reanalysis_wake"),
+        plan_drift=pack["plan_drift"],
+    )
+
+    if fused_reanalysis_wake is not None:
+        pack["reanalysis_wake"] = fused_reanalysis_wake
 
     if assumption_watch_context is not None:
         assumption_watch = evaluate_assumption_watch(
