@@ -6,6 +6,7 @@ from pathlib import Path
 
 from crt_radar.gpt_handoff import (
     run_gpt_handoff_gate,
+    semantic_wake_key,
 )
 from crt_radar.plain_language_notice import (
     build_plain_language_notice,
@@ -404,6 +405,155 @@ class GptHandoffGateTests(unittest.TestCase):
                 ),
                 2,
             )
+
+    def test_handoff_carries_reanalysis_semantics(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            ledger_path = Path(td) / "handoff.jsonl"
+
+            active_pack = pack(
+                evidence_hash="a" * 64,
+                requested=True,
+            )
+
+            result = run_gpt_handoff_gate(
+                active_pack,
+                build_plain_language_notice(
+                    active_pack
+                ),
+                ledger_path=ledger_path,
+            )
+
+            semantics = result[
+                "reanalysis_semantics"
+            ]
+
+            self.assertEqual(
+                semantics["schema_version"],
+                "CRT_GPT_REANALYSIS_SEMANTICS_V0.1",
+            )
+
+            self.assertEqual(
+                semantics["scope"],
+                "POST_WAKE_ANALYSIS_ONLY",
+            )
+
+            self.assertEqual(
+                semantics["analysis_sequence"],
+                [
+                    "CATALYST",
+                    "AMPLIFIER",
+                    "PERSISTENCE",
+                    "ACCEPTANCE",
+                    "CONTRADICTIONS",
+                    "MISSING_EVIDENCE",
+                ],
+            )
+
+            self.assertEqual(
+                semantics["causal_guardrails"],
+                [
+                    "TEMPORAL_ORDER_IS_NOT_CAUSATION",
+                    (
+                        "TRANSIENT_PRICE_CROSSING_IS_NOT_"
+                        "ACCEPTANCE_OR_REAL_DEMAND"
+                    ),
+                    (
+                        "CONTRADICTORY_EVIDENCE_MUST_BE_"
+                        "SURFACED"
+                    ),
+                    (
+                        "MISSING_EVIDENCE_MUST_NOT_BE_"
+                        "IMPUTED_OR_GUESSED"
+                    ),
+                ],
+            )
+
+            self.assertEqual(
+                semantics["evidence_rules"],
+                [
+                    "SEPARATE_OBSERVATION_FROM_INFERENCE",
+                    (
+                        "STATE_UNRESOLVED_CAUSALITY_"
+                        "EXPLICITLY"
+                    ),
+                    "USE_LATEST_REQUIRED_INPUTS",
+                ],
+            )
+
+            self.assertEqual(
+                semantics["governance_guardrails"],
+                [
+                    (
+                        "RESEARCH_OVERLAY_CANNOT_PROMOTE_"
+                        "FORMAL_SEASON"
+                    ),
+                    "NO_AUTOMATIC_BUY_SELL",
+                    "NO_EXTERNAL_ACTION",
+                ],
+            )
+
+            self.assertEqual(
+                semantics["wake_authority"],
+                "NONE",
+            )
+
+            self.assertEqual(
+                semantics[
+                    "formal_season_authority"
+                ],
+                "NONE",
+            )
+
+            self.assertEqual(
+                semantics["trading_authority"],
+                "NONE",
+            )
+
+            self.assertEqual(
+                semantics[
+                    "external_action_authority"
+                ],
+                "NONE",
+            )
+
+            rows = RunLedger(
+                ledger_path
+            ).records()
+
+            self.assertEqual(
+                rows[0]["payload"][
+                    "reanalysis_semantics"
+                ],
+                semantics,
+            )
+
+    def test_reanalysis_semantics_do_not_change_semantic_wake_identity(
+        self,
+    ) -> None:
+        active_pack = pack(
+            evidence_hash="a" * 64,
+            requested=True,
+        )
+
+        decorated_pack = {
+            **active_pack,
+            "reanalysis_semantics": {
+                "analysis_sequence": [
+                    "SENTINEL"
+                ],
+            },
+        }
+
+        self.assertEqual(
+            semantic_wake_key(
+                active_pack
+            ),
+            semantic_wake_key(
+                decorated_pack
+            ),
+        )
 
     def test_invalid_authority_fails_closed(
         self,
