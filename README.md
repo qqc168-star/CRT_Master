@@ -17,10 +17,11 @@ North Star: **Automation prepares evidence. GPT creates judgment. Human commits 
 1. Treat current `main` as the only engineering truth.
 2. Read `CRT_CORE_CONTRACT.md`.
 3. Read `CRT_EVIDENCE_PACK_CONTRACT.md`.
-4. Read `radar/RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md` for preserved formal locks.
-5. Inspect current executable code and tests before claiming a capability exists.
-6. Read the single `CRT Active Baton` working bookmark if one exists.
-7. Report: North Star, role boundaries, governance locks, verified capabilities, BLOCKED gaps, current objective, and next effective action.
+4. Read `CRT_GPT_ANALYSIS_DOCTRINE_V0.1.md` for the GPT（分析主廚） reasoning sequence（推理順序）, evidence-independence rules（證據獨立性規則）, regime synthesis（市場狀態整合）, asset-role translation（資產角色轉譯）, portfolio interaction（投資組合互動）, and capital-judgment requirements（資本判斷要求）.
+5. Read `radar/RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md` for preserved formal locks.
+6. Inspect current executable code and tests before claiming a capability exists.
+7. Read the single `CRT Active Baton` working bookmark if one exists.
+8. Report: North Star, role boundaries, governance locks, verified capabilities, BLOCKED gaps, current objective, and next effective action.
 
 Never reconstruct missing formal implementation from old chats or memory. If the formal basis is absent, report `BLOCKED`.
 
