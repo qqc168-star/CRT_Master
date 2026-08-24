@@ -13,10 +13,23 @@ from .gpt_handoff import (
 )
 
 CONTRACT_VERSION = "CRT_OPENAI_RESPONSES_ADAPTER_CONTRACT_V0.1"
+SMOKE_GUARDRAILS_VERSION = "CRT_LIVE_SMOKE_TEST_GUARDRAILS_V0.1"
 RESPONSES_PATH = "/v1/responses"
 API_KEY_ENV_VAR = "OPENAI_API_KEY"
+SMOKE_MODEL = "gpt-5.6-luna"
+MAX_INPUT_UTF8_BYTES = 16 * 1024
 MAX_OUTPUT_TOKENS = 1800
-RETRYABLE_HTTP_STATUS = {408, 409, 429, 500, 502, 503, 504}
+MAX_ATTEMPTS = 1
+AUTO_RETRY = False
+
+_REQUEST_BODY_FIELDS = {
+    "model",
+    "instructions",
+    "input",
+    "store",
+    "background",
+    "max_output_tokens",
+}
 
 
 def _hash(value: Any) -> str:
@@ -46,11 +59,29 @@ def build_request_envelope(
     model: str,
 ) -> dict[str, Any]:
     event_id, payload_hash = _validate_bridge_payload(bridge_payload)
-    if not isinstance(model, str) or not model.strip():
-        raise ValueError("Responses model must be non-empty")
+    if model != SMOKE_MODEL:
+        raise ValueError(f"Smoke model must be exactly {SMOKE_MODEL}")
+
+    serialized_input = json.dumps(
+        bridge_payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if len(serialized_input.encode("utf-8")) > MAX_INPUT_UTF8_BYTES:
+        raise ValueError("Smoke input exceeds UTF-8 byte ceiling")
 
     envelope = {
         "contract_version": CONTRACT_VERSION,
+        "smoke_guardrails": {
+            "version": SMOKE_GUARDRAILS_VERSION,
+            "mode": "ONE_SHOT",
+            "model": SMOKE_MODEL,
+            "max_input_utf8_bytes": MAX_INPUT_UTF8_BYTES,
+            "max_output_tokens": MAX_OUTPUT_TOKENS,
+            "max_attempts": MAX_ATTEMPTS,
+            "auto_retry": AUTO_RETRY,
+        },
         "transport": {
             "method": "POST",
             "path": RESPONSES_PATH,
@@ -60,14 +91,9 @@ def build_request_envelope(
         "event_id": event_id,
         "bridge_payload_hash": payload_hash,
         "request_body": {
-            "model": model.strip(),
+            "model": SMOKE_MODEL,
             "instructions": build_instructions(),
-            "input": json.dumps(
-                bridge_payload,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ),
+            "input": serialized_input,
             "store": False,
             "background": False,
             "max_output_tokens": MAX_OUTPUT_TOKENS,
@@ -88,8 +114,21 @@ def validate_request_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
 
     transport = envelope.get("transport")
     body = envelope.get("request_body")
+    smoke_guardrails = envelope.get("smoke_guardrails")
     if not isinstance(transport, dict) or not isinstance(body, dict):
         raise ValueError("Adapter envelope incomplete")
+
+    expected_guardrails = {
+        "version": SMOKE_GUARDRAILS_VERSION,
+        "mode": "ONE_SHOT",
+        "model": SMOKE_MODEL,
+        "max_input_utf8_bytes": MAX_INPUT_UTF8_BYTES,
+        "max_output_tokens": MAX_OUTPUT_TOKENS,
+        "max_attempts": MAX_ATTEMPTS,
+        "auto_retry": AUTO_RETRY,
+    }
+    if smoke_guardrails != expected_guardrails:
+        raise ValueError("Smoke guardrails mismatch")
 
     if transport.get("method") != "POST" or transport.get("path") != RESPONSES_PATH:
         raise ValueError("Responses transport mismatch")
@@ -98,6 +137,14 @@ def validate_request_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     if transport.get("secret_value_included") is not False:
         raise ValueError("Secret values must not be included")
 
+    if set(body) != _REQUEST_BODY_FIELDS:
+        raise ValueError("Responses request body field set mismatch")
+    if body.get("model") != SMOKE_MODEL:
+        raise ValueError("Smoke request model mismatch")
+    if body.get("instructions") != build_instructions():
+        raise ValueError("Smoke instructions mismatch")
+    if body.get("max_output_tokens") != MAX_OUTPUT_TOKENS:
+        raise ValueError("Smoke output token ceiling mismatch")
     if body.get("store") is not False or body.get("background") is not False:
         raise ValueError("Responses persistence/background must remain disabled")
     if "tools" in body or envelope.get("tools_allowed") is not False:
@@ -111,7 +158,13 @@ def validate_request_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     if envelope.get("action_output") != "NONE":
         raise ValueError("Action output must remain NONE")
 
-    decoded = json.loads(body["input"])
+    serialized_input = body.get("input")
+    if not isinstance(serialized_input, str):
+        raise ValueError("Smoke input must be serialized text")
+    if len(serialized_input.encode("utf-8")) > MAX_INPUT_UTF8_BYTES:
+        raise ValueError("Smoke input exceeds UTF-8 byte ceiling")
+
+    decoded = json.loads(serialized_input)
     event_id, payload_hash = _validate_bridge_payload(decoded)
     if event_id != envelope.get("event_id"):
         raise ValueError("Event identity mismatch")
@@ -132,12 +185,11 @@ def classify_http_result(
     status_code: int,
     *,
     attempt_count: int,
-    max_attempts: int = 3,
 ) -> str:
+    if attempt_count != MAX_ATTEMPTS:
+        raise ValueError("Smoke attempt count must be exactly one")
     if 200 <= status_code < 300:
         return "SUCCESS"
-    if status_code in RETRYABLE_HTTP_STATUS and attempt_count < max_attempts:
-        return "RETRYABLE"
     return "TERMINAL"
 
 
@@ -155,8 +207,8 @@ def build_delivery_receipt(
     output = response.get("output")
     if not isinstance(response_id, str) or not response_id:
         raise ValueError("Response id unavailable")
-    if not isinstance(model, str) or not model:
-        raise ValueError("Response model unavailable")
+    if model != SMOKE_MODEL:
+        raise ValueError("Response model does not match smoke model")
     if not isinstance(output, list):
         raise ValueError("Response output unavailable")
 

@@ -23,7 +23,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - 進行中：`1`
 - 完成率：`75%`
 - 目前唯一進行中項目：`#7`
-- 目前任務：`OPENAI_RESPONSES_ADAPTER_CONTRACT`
+- 目前任務：`LIVE_SMOKE_TEST_GUARDRAILS`
 
 完成率只使用：
 
@@ -264,6 +264,17 @@ OpenAI Responses Adapter Contract V0.1（OpenAI 回應介面轉接器契約 V0.1
 - Retry Policy（重試政策）已建立 bounded（有界）分類契約。
 - 本契約未匯入 OpenAI SDK（OpenAI 軟體開發套件）、未執行 HTTP（網路請求）、未接入值班 Runtime（執行環境）。
 
+Live Smoke Test Guardrails V0.1（真實煙霧測試護欄 V0.1）在離線契約中新增：
+
+- Smoke Model（煙霧測試模型）精準鎖定為 `gpt-5.6-luna`；其他模型 fail-closed（失敗關閉）。
+- Input（輸入）採 UTF-8 byte ceiling（位元組硬上限）`16384`；超限不得形成 Request Envelope（請求封套）。
+- `max_output_tokens` 精準鎖定為 `1800`；即使重新封裝 request hash（請求雜湊）也不得提高。
+- Request Body（請求本體）採 exact field allowlist（精準欄位允許清單），不得加入其他可能擴張費用或權限的欄位。
+- `max_attempts = 1`、`auto_retry = false`；HTTP `408 / 409 / 429 / 5xx` 等失敗結果一律 `TERMINAL`（終止），不得自動再打一發。
+- Delivery Receipt（送達收據）的 response model（回應模型）必須與鎖定模型一致。
+- 護欄模組仍不匯入 OpenAI SDK（OpenAI 軟體開發套件）、HTTP client（網路用戶端）或 secret-reading surface（秘密讀取介面）。
+- 本刀沒有執行 Network Write（網路寫入）、沒有讀取 API Key（介面金鑰）、沒有產生 API cost（介面費用），也沒有接入值班 Runtime（執行環境）。
+
 因此 #7 尚未完成。仍缺：
 
 `PENDING`
@@ -289,7 +300,7 @@ OpenAI Responses Adapter Contract V0.1（OpenAI 回應介面轉接器契約 V0.1
 
 ## 下一個唯一有效動作
 
-完成 OpenAI Responses Adapter Contract V0.1（OpenAI 回應介面轉接器契約 V0.1）驗收後，只有在使用者另外明確批准下，才可進入單一 synthetic event（合成事件）的 Live Smoke Test（真實煙霧測試）。
+完成 Live Smoke Test Guardrails V0.1（真實煙霧測試護欄 V0.1）驗收並合併 current main（目前主分支）後，仍須先確認獨立 API account / billing（介面帳戶／計費）與單次 credential readiness（憑證就緒）；只有在使用者另外明確批准下，才可進入單一 synthetic event（合成事件）的 Live Smoke Test（真實煙霧測試）。
 
 在該批准前：Network Write（網路寫入）維持 `NONE`、API Key（介面金鑰）不得讀取、API cost（介面費用）維持 `ZERO`、Production approval（正式生產批准）維持不變、External Action Authority（外部行動權限）維持 `NONE`。
 
