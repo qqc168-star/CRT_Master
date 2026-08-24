@@ -23,7 +23,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - 進行中：`1`
 - 完成率：`75%`
 - 目前唯一進行中項目：`#7`
-- 目前任務：`LIVE_SMOKE_TEST_GUARDRAILS`
+- 目前任務：`ZERO_COST_MANUAL_TRANSPORT_CLOSURE`
 
 完成率只使用：
 
@@ -232,7 +232,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 ## 目前已知阻塞
 
-`ITEM_7_LIVE_GPT_TRANSPORT_NOT_APPROVED`
+`ITEM_7_UNATTENDED_GPT_TRANSPORT_NOT_IMPLEMENTED`
 
 目前系統已能可靠完成：
 
@@ -275,10 +275,35 @@ Live Smoke Test Guardrails V0.1（真實煙霧測試護欄 V0.1）在離線契�
 - 護欄模組仍不匯入 OpenAI SDK（OpenAI 軟體開發套件）、HTTP client（網路用戶端）或 secret-reading surface（秘密讀取介面）。
 - 本刀沒有執行 Network Write（網路寫入）、沒有讀取 API Key（介面金鑰）、沒有產生 API cost（介面費用），也沒有接入值班 Runtime（執行環境）。
 
-因此 #7 尚未完成。仍缺：
+Zero-Cost Manual Transport Closure V0.1（零費用人工傳輸閉合 V0.1）新增平行人工路徑：
+
+- 使用 literal `127.0.0.1`（固定本機位址）的 one-shot Loopback HTTP（單次本機迴路請求）驗證實際序列化、HTTP POST（網路送出）、HTTP response（網路回應）與 Receipt（收據）形成能力。
+- Loopback（本機迴路）只允許固定 `/v1/responses` 路徑；`localhost`、其他 IP（網路位址）、外部網域、query（查詢參數）、userinfo（使用者資訊）一律 fail-closed（失敗關閉）。
+- Loopback request（本機迴路請求）不得帶入 Authorization（授權）、API key（介面金鑰）、OpenAI organization/project（OpenAI 組織／專案）等 credential header（憑證標頭）。
+- Manual Handoff Bundle（人工交接包）輸出 `manual-handoff.json`、`manual-prompt.txt` 與 `loopback-receipt.json`，並採 no-clobber（禁止覆寫）處理。
+- 使用者把 `manual-prompt.txt` 人工貼入自行選定的 ChatGPT session（ChatGPT 對話），再把文字回應存成本機檔案。
+- 只有使用者明確帶入 `--confirm-user-transfer`（確認人工傳輸）後，才可形成 hash-bound Manual Receipt（雜湊綁定人工收據）。
+- Handoff（交接）、response（回應）與 receipt（收據）各自有雜湊綁定；內容與雜湊不一致、限制即使重新封裝雜湊仍被改寫，或不同回應與既有收據衝突時一律 fail-closed（失敗關閉）。
+- 本程式不讀取 API Key（介面金鑰）、不連接 OpenAI API（OpenAI 介面）、不產生額外 API cost（介面費用）；只在測試與明確 `prepare`（準備）命令中執行本機 Loopback HTTP（迴路請求）。
+- Manual Receipt（人工收據）明確維持 `live_openai_api_transport_verified = false`、`provider_model_identity_verified = false`、`unattended_delivery_verified = false` 與 `existing_transport_boundary_completed = false`。
+- 人工閉合不把既有 Transport Boundary（傳輸邊界）的 `PENDING` 改寫成 `DELIVERED`，也不宣稱完成自動主動交接。
+
+因此 #7 尚未完成。零費用人工路徑可完成：
+
+`Minimized Bridge Payload（最小化橋接資料包）`
+→ `Loopback Acceptance（本機迴路驗收）`
+→ `Manual Handoff（人工交接）`
+→ `使用者自行貼入 ChatGPT 對話`
+→ `使用者保存文字回應`
+→ `Manual Receipt（人工收據）`
+→ `MANUAL_TRANSFER_ATTESTED（人工傳輸已證明）`
+
+這條路徑不需要 API account / billing（介面帳戶／計費）或 API Key（介面金鑰），但必須有人執行 copy/paste（複製／貼上），不能證明 OpenAI API（OpenAI 介面）本身、指定 provider model（供應端模型）或 unattended delivery（無人值守送達）。既有自動 Transport Boundary（傳輸邊界）仍維持 `PENDING`。
+
+#7 若要依原始「主動交接」定義完成，仍缺：
 
 `PENDING`
-→ `使用者另外批准的 Live OpenAI Responses Transport（真實 OpenAI 回應傳輸）`
+→ `使用者另外批准的 Unattended Transport Adapter（無人值守傳輸轉接器）`
 → `CLAIMED`
 → `GPT 讀取最新最小化證據`
 → `GPT 重新分析`
@@ -288,8 +313,8 @@ Live Smoke Test Guardrails V0.1（真實煙霧測試護欄 V0.1）在離線契�
 
 在 #7 完成前：
 
-- Live GPT Transport（真實 GPT 傳輸）維持 `NOT_IMPLEMENTED`；目前只有 offline Adapter Contract（離線轉接器契約）。
-- Network Write（網路寫入）不得由本刀新增。
+- Unattended GPT Transport（無人值守 GPT 傳輸）維持 `NOT_IMPLEMENTED`；目前只有 offline Adapter Contract（離線轉接器契約）與 human-mediated manual path（人工中介路徑）。
+- External Network Write（外部網路寫入）不得由本刀新增；只有 literal `127.0.0.1`（固定本機位址）Loopback HTTP（本機迴路請求）可以執行。
 - `REANALYSIS_REQUIRED`（需要重新分析）不得直接等同交易指令。
 - 不得由機器自行修改持倉、計畫價格或資金配置。
 - 不得自動下單。
@@ -300,9 +325,17 @@ Live Smoke Test Guardrails V0.1（真實煙霧測試護欄 V0.1）在離線契�
 
 ## 下一個唯一有效動作
 
-完成 Live Smoke Test Guardrails V0.1（真實煙霧測試護欄 V0.1）驗收並合併 current main（目前主分支）後，仍須先確認獨立 API account / billing（介面帳戶／計費）與單次 credential readiness（憑證就緒）；只有在使用者另外明確批准下，才可進入單一 synthetic event（合成事件）的 Live Smoke Test（真實煙霧測試）。
+完成 Zero-Cost Manual Transport Closure V0.1（零費用人工傳輸閉合 V0.1）的離線驗收並合併 current main（目前主分支）後，使用一個合格的本機 Minimized Bridge Payload（最小化橋接資料包）執行：
 
-在該批准前：Network Write（網路寫入）維持 `NONE`、API Key（介面金鑰）不得讀取、API cost（介面費用）維持 `ZERO`、Production approval（正式生產批准）維持不變、External Action Authority（外部行動權限）維持 `NONE`。
+`python -m crt_radar.manual_transport_closure prepare --bridge-payload <payload.json> --bundle-dir <output-bundle>`
+
+使用者人工貼上 `<output-bundle>/manual-prompt.txt` 並把回應另存為本機文字檔後，再明確執行：
+
+`python -m crt_radar.manual_transport_closure close --bundle-dir <output-bundle> --response-file <response.txt> --confirm-user-transfer`
+
+最後以 `verify`（驗證）命令重驗收完整 bundle（資料包）。這次實際演練只驗收 human-mediated closure（人工中介閉合），不得把結果改標成 OpenAI API delivery（OpenAI 介面送達）或 unattended delivery（無人值守送達）。
+
+使用者已選擇零額外 API cost（介面費用）路徑；獨立 API account / billing / credential readiness（介面帳戶／計費／憑證就緒）改為 `DEFERRED_BY_USER_CHOICE`（依使用者選擇暫緩），不是本路徑的前置條件。API Key（介面金鑰）不得讀取、External Network Write（外部網路寫入）維持 `NONE`、API cost（介面費用）維持 `ZERO`、Production approval（正式生產批准）維持不變、External Action Authority（外部行動權限）維持 `NONE`。
 
 #7 目前只允許：
 
@@ -312,6 +345,7 @@ Live Smoke Test Guardrails V0.1（真實煙霧測試護欄 V0.1）在離線契�
 → `Minimized Bridge（最小化橋接）`
 → `Durable Local Outbox（可靠本機寄件匣）`
 → `PENDING Transport Boundary（待傳輸邊界）`
+→ `可選的 Manual Handoff / Manual Receipt（人工交接／人工收據）平行證據`
 
 不得在 #7：
 
