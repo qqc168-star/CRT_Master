@@ -98,6 +98,13 @@ def _event_binding(
             "reason": "ISSUER_EVENT_ITEMS_MISSING",
         }
 
+    if not items and section.get("empty_reason") != VERIFIED_EMPTY:
+        return {
+            "state": "BLOCKED",
+            "event_state": None,
+            "reason": "ISSUER_EVENT_EMPTY_STATE_UNVERIFIED",
+        }
+
     selected = []
     for item in items:
         if not isinstance(item, dict):

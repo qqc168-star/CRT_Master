@@ -345,6 +345,21 @@ class PremarketEvidenceBindingTests(unittest.TestCase):
             "ISSUER_EVENT_EVALUATION_WINDOW_REQUIRED",
         )
 
+    def test_complete_empty_without_verified_reason_fails_closed(self):
+        overlay = _overlay([])
+        del overlay["decision_relevant_events"]["empty_reason"]
+
+        result = build_premarket_evidence_binding(
+            reflexivity_overlay=overlay,
+            evaluation_window={"start_ms": 100, "end_ms": 200},
+        )
+
+        self.assertEqual(result["issuer_reflexivity"]["state"], "BLOCKED")
+        self.assertEqual(
+            result["issuer_reflexivity"]["reason"],
+            "ISSUER_EVENT_EMPTY_STATE_UNVERIFIED",
+        )
+
     def test_historical_event_outside_window_is_not_new_event(self):
         historical = _repurchase_event(
             1,
