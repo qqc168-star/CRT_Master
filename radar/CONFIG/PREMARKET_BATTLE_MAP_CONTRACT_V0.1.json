@@ -1,0 +1,107 @@
+{
+  "contract_version": "CRT_PREMARKET_BATTLE_MAP_CONTRACT_V0.1",
+  "status": "CANDIDATE",
+  "purpose_zh": "把既有 CRT 證據組裝成盤前全標的分析上下文；機器只整理與驗證證據，GPT 負責判讀，使用者保有最終資本決定權。",
+  "asset_order": ["MSTR", "ASST", "STRC", "SATA"],
+  "first_screen_fields": [
+    {"field": "asset", "owner": "AUTOMATION"},
+    {"field": "light", "owner": "GPT"},
+    {"field": "premarket_price", "owner": "AUTOMATION_OR_BLOCKED"},
+    {"field": "attack_line", "owner": "GPT"},
+    {"field": "diluted_mnav", "owner": "AUTOMATION_OR_BLOCKED", "assets": ["MSTR", "ASST"]},
+    {"field": "first_defense", "owner": "GPT"},
+    {"field": "invalidation_line", "owner": "GPT"},
+    {"field": "capital_judgment", "owner": "GPT"}
+  ],
+  "analysis_sections": [
+    {"index": 1, "id": "ISSUER_REFLEXIVITY", "required": true},
+    {"index": 2, "id": "PRICE_STRUCTURE", "required": true},
+    {"index": 3, "id": "VOLUME_QUALITY", "required": true},
+    {"index": 4, "id": "SPOT_VS_DERIVATIVES", "required": true},
+    {"index": 5, "id": "BULL_BEAR_FORCE_DISTRIBUTION", "required": true},
+    {"index": 6, "id": "BTC_MACRO_TRANSMISSION", "required": true},
+    {"index": 7, "id": "CAPITAL_CONVEXITY", "required": true},
+    {"index": 8, "id": "ACTION_MAP", "required": true}
+  ],
+  "required_facts": {
+    "MSTR": [
+      "premarket_price",
+      "diluted_mnav",
+      "btc_holdings_current",
+      "btc_holdings_last_3",
+      "btc_per_diluted_share",
+      "diluted_shares",
+      "atm_issuance",
+      "dilution_accretion",
+      "issuer_events"
+    ],
+    "ASST": [
+      "premarket_price",
+      "diluted_mnav",
+      "btc_holdings_current",
+      "btc_holdings_last_3",
+      "btc_per_diluted_share",
+      "diluted_shares",
+      "dilution",
+      "sata_burden",
+      "warrants",
+      "short_interest",
+      "gamma",
+      "options_vs_spot",
+      "issuer_events"
+    ],
+    "STRC": [
+      "premarket_price",
+      "repurchase_rounds",
+      "latest_round",
+      "cumulative_repurchase",
+      "next_ex_dividend_date",
+      "record_date",
+      "payment_date",
+      "distribution_rate",
+      "market_handoff",
+      "issuer_events"
+    ],
+    "SATA": [
+      "premarket_price",
+      "strive_strc_holdings_current",
+      "strive_strc_holdings_previous",
+      "strive_strc_holdings_delta",
+      "strive_strc_fair_value",
+      "distribution_rate",
+      "stated_amount",
+      "liquidation_preference",
+      "issuer_events"
+    ]
+  },
+  "mnav_policy": {
+    "semantic_lock": "DO_NOT_REDEFINE_EXISTING_CRT_MNAV_SEMANTICS",
+    "nav_composition_owner": "UPSTREAM_FORMAL_SEMANTICS",
+    "required_fact_state": "AVAILABLE",
+    "missing_or_unaligned": "BLOCKED",
+    "external_substitution": "FORBIDDEN"
+  },
+  "issuer_reflexivity_policy": {
+    "must_be_first": true,
+    "no_new_event_state": "NO_NEW_MATERIAL_ISSUER_EVENT",
+    "section_must_never_disappear": true
+  },
+  "source_modes": {
+    "MANUAL_WEB_SUPPLEMENT": {
+      "description_zh": "本機 CRT 提供已驗證證據與缺失清單；使用者人工貼入 ChatGPT 後可補公開即時市場資訊。"
+    },
+    "MACHINE_VERIFIED_ONLY": {
+      "description_zh": "無人值守路徑只使用機器已驗證資料；缺失資料必須 BLOCKED，不得自行替換資料源。"
+    }
+  },
+  "governance": {
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE",
+    "action_output": "NONE",
+    "capital_decision_authority": "USER_ONLY",
+    "machine_may_execute_trade": false,
+    "formal_weights_unchanged": true,
+    "traffic_light_thresholds_unchanged": true,
+    "mnav_semantics_unchanged": true
+  }
+}
