@@ -1,0 +1,157 @@
+from __future__ import annotations
+
+import json
+import unittest
+from copy import deepcopy
+from pathlib import Path
+
+from crt_radar.premarket_battle_map import (
+    ANALYSIS_SECTION_IDS,
+    ASSET_ORDER,
+    FIRST_SCREEN_FIELDS,
+    build_premarket_battle_map,
+    validate_premarket_battle_map_contract,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+CONTRACT_PATH = ROOT / "CONFIG" / "PREMARKET_BATTLE_MAP_CONTRACT_V0.1.json"
+
+
+class PremarketBattleMapTests(unittest.TestCase):
+    def setUp(self):
+        self.contract = json.loads(CONTRACT_PATH.read_text(encoding="utf-8"))
+
+    def test_contract_locks_asset_field_and_analysis_order(self):
+        locked = validate_premarket_battle_map_contract(self.contract)
+        self.assertEqual(locked["asset_order"], ASSET_ORDER)
+        self.assertEqual(
+            [row["field"] for row in locked["first_screen_fields"]],
+            FIRST_SCREEN_FIELDS,
+        )
+        self.assertEqual(
+            [row["id"] for row in locked["analysis_sections"]],
+            ANALYSIS_SECTION_IDS,
+        )
+        self.assertEqual(locked["analysis_sections"][0]["id"], "ISSUER_REFLEXIVITY")
+        self.assertTrue(locked["governance"]["mnav_semantics_unchanged"])
+
+    def test_first_screen_never_machine_fills_analyst_fields(self):
+        result = build_premarket_battle_map(
+            contract=self.contract,
+            asset_facts={
+                "MSTR": {
+                    "premarket_price": {"state": "AVAILABLE", "value": 120.0},
+                    "diluted_mnav": {"state": "AVAILABLE", "mnav": 0.91},
+                }
+            },
+            issuer_reflexivity={
+                "state": "VALID",
+                "event_state": "NO_NEW_MATERIAL_ISSUER_EVENT",
+            },
+            as_of="2026-08-26T20:30:00+08:00",
+            source_mode="MANUAL_WEB_SUPPLEMENT",
+        )
+        self.assertEqual([row["asset"] for row in result["first_screen"]], ASSET_ORDER)
+        mstr = result["first_screen"][0]
+        self.assertEqual(mstr["premarket_price"], 120.0)
+        self.assertEqual(mstr["diluted_mnav"], 0.91)
+        for field in (
+            "light",
+            "attack_line",
+            "first_defense",
+            "invalidation_line",
+            "capital_judgment",
+        ):
+            self.assertIsNone(mstr[field])
+        self.assertEqual(result["action_output"], "NONE")
+        self.assertEqual(result["capital_decision_authority"], "USER_ONLY")
+
+    def test_blocked_mnav_is_not_exposed_as_a_number(self):
+        result = build_premarket_battle_map(
+            contract=self.contract,
+            asset_facts={
+                "ASST": {
+                    "diluted_mnav": {
+                        "state": "BLOCKED",
+                        "mnav": 0.84,
+                        "reason": "INPUTS_NOT_CLOSED",
+                    }
+                }
+            },
+            issuer_reflexivity=None,
+            as_of=None,
+            source_mode="MACHINE_VERIFIED_ONLY",
+        )
+        asst = result["first_screen"][1]
+        self.assertIsNone(asst["diluted_mnav"])
+        self.assertIn(
+            {"asset": "ASST", "field": "diluted_mnav", "state": "BLOCKED"},
+            result["missing_evidence"],
+        )
+
+    def test_issuer_reflexivity_section_survives_when_evidence_missing(self):
+        result = build_premarket_battle_map(
+            contract=self.contract,
+            asset_facts={},
+            issuer_reflexivity=None,
+            as_of=None,
+            source_mode="MACHINE_VERIFIED_ONLY",
+        )
+        first = result["analysis_sections"][0]
+        self.assertEqual(first["id"], "ISSUER_REFLEXIVITY")
+        self.assertEqual(first["state"], "BLOCKED")
+        self.assertEqual(
+            first["machine_evidence"]["reason"],
+            "ISSUER_REFLEXIVITY_EVIDENCE_MISSING",
+        )
+
+    def test_partial_real_evidence_remains_visible(self):
+        result = build_premarket_battle_map(
+            contract=self.contract,
+            asset_facts={
+                "STRC": {
+                    "premarket_price": {"state": "AVAILABLE", "value": 95.0},
+                    "latest_round": {"state": "AVAILABLE", "value": {"round_id": 6}},
+                    "repurchase_rounds": {
+                        "state": "PARTIAL",
+                        "value": [{"round_id": 6}],
+                    },
+                }
+            },
+            issuer_reflexivity={
+                "state": "VALID",
+                "event_state": "NO_NEW_MATERIAL_ISSUER_EVENT",
+            },
+            as_of="2026-08-26",
+            source_mode="MANUAL_WEB_SUPPLEMENT",
+        )
+        strc = result["first_screen"][2]
+        self.assertEqual(strc["premarket_price"], 95.0)
+        self.assertEqual(result["state"], "PARTIAL")
+        self.assertIn(
+            {"asset": "STRC", "field": "repurchase_rounds", "state": "PARTIAL"},
+            result["missing_evidence"],
+        )
+
+    def test_tampered_contract_fails_closed(self):
+        tampered = deepcopy(self.contract)
+        tampered["analysis_sections"][0], tampered["analysis_sections"][1] = (
+            tampered["analysis_sections"][1],
+            tampered["analysis_sections"][0],
+        )
+        with self.assertRaises(ValueError):
+            validate_premarket_battle_map_contract(tampered)
+
+    def test_source_mode_must_be_declared_by_contract(self):
+        with self.assertRaises(ValueError):
+            build_premarket_battle_map(
+                contract=self.contract,
+                asset_facts={},
+                issuer_reflexivity=None,
+                as_of=None,
+                source_mode="SECRET_AUTO_WEB",
+            )
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
