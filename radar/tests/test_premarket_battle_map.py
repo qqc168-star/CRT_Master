@@ -86,8 +86,12 @@ class PremarketBattleMapTests(unittest.TestCase):
             },
         )
 
-        self.assertIsNone(
-            mstr["exit_shares_delta"]
+        self.assertEqual(
+            mstr["exit_shares_delta"],
+            {
+                "stop_loss": None,
+                "take_profit": None,
+            },
         )
         self.assertEqual(result["action_output"], "NONE")
         self.assertEqual(result["capital_decision_authority"], "USER_ONLY")
@@ -165,14 +169,75 @@ class PremarketBattleMapTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            policy["exit_shares_delta"]["sign"],
+            policy["exit_shares_delta"][
+                "stop_loss"
+            ]["sign"],
             "NONPOSITIVE",
         )
 
         self.assertTrue(
             policy["exit_shares_delta"][
-                "zero_allowed"
+                "stop_loss"
+            ]["zero_allowed"]
+        )
+
+        self.assertEqual(
+            policy["exit_shares_delta"][
+                "take_profit"
+            ]["sign"],
+            "NONPOSITIVE",
+        )
+
+        self.assertTrue(
+            policy["exit_shares_delta"][
+                "take_profit"
+            ]["zero_allowed"]
+        )
+
+        self.assertTrue(
+            policy["exit_shares_delta"][
+                "independent_by_channel"
             ]
+        )
+
+    def test_stop_loss_and_take_profit_share_deltas_are_independent(self):
+        result = build_premarket_battle_map(
+            contract=self.contract,
+            asset_facts={
+                "MSTR": {
+                    "premarket_price": {
+                        "state": "AVAILABLE",
+                        "value": 120.0,
+                    },
+                    "diluted_mnav": {
+                        "state": "AVAILABLE",
+                        "mnav": 0.91,
+                    },
+                }
+            },
+            issuer_reflexivity={
+                "state": "VALID",
+                "event_state": (
+                    "NO_NEW_MATERIAL_ISSUER_EVENT"
+                ),
+            },
+            as_of="2026-08-26T20:30:00+08:00",
+            source_mode="MANUAL_WEB_SUPPLEMENT",
+        )
+
+        row = result["first_screen"][0]
+
+        self.assertEqual(
+            row["exit_shares_delta"],
+            {
+                "stop_loss": None,
+                "take_profit": None,
+            },
+        )
+
+        self.assertIsNot(
+            row["exit_condition"]["stop_loss"],
+            row["exit_condition"]["take_profit"],
         )
 
     def test_action_surface_cannot_grant_machine_execution(self):

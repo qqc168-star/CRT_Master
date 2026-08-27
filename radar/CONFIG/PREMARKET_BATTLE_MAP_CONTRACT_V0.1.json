@@ -191,8 +191,15 @@
       "confirmation_clause_supported": true
     },
     "exit_shares_delta": {
-      "sign": "NONPOSITIVE",
-      "zero_allowed": true
+      "stop_loss": {
+        "sign": "NONPOSITIVE",
+        "zero_allowed": true
+      },
+      "take_profit": {
+        "sign": "NONPOSITIVE",
+        "zero_allowed": true
+      },
+      "independent_by_channel": true
     },
     "price_reaching_is_not_action_trigger": true,
     "condition_requires_context": true,

@@ -118,8 +118,15 @@ def validate_premarket_battle_map_contract(
             "confirmation_clause_supported": True,
         },
         "exit_shares_delta": {
-            "sign": "NONPOSITIVE",
-            "zero_allowed": True,
+            "stop_loss": {
+                "sign": "NONPOSITIVE",
+                "zero_allowed": True,
+            },
+            "take_profit": {
+                "sign": "NONPOSITIVE",
+                "zero_allowed": True,
+            },
+            "independent_by_channel": True,
         },
         "price_reaching_is_not_action_trigger": True,
         "condition_requires_context": True,
@@ -303,7 +310,10 @@ def build_premarket_battle_map(
                         "confirmation_clause": None,
                     },
                 },
-                "exit_shares_delta": None,
+                "exit_shares_delta": {
+                    "stop_loss": None,
+                    "take_profit": None,
+                },
             }
         )
 

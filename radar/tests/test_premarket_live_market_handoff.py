@@ -588,8 +588,12 @@ class PremarketLiveMarketHandoffTests(
                 },
             )
 
-            self.assertIsNone(
-                row["exit_shares_delta"]
+            self.assertEqual(
+                row["exit_shares_delta"],
+                {
+                    "stop_loss": None,
+                    "take_profit": None,
+                },
             )
 
         self.assertEqual(
