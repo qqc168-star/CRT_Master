@@ -667,8 +667,20 @@ class PremarketEvidenceBindingTests(unittest.TestCase):
         sata = result["asset_facts"]["SATA"]
 
         self.assertEqual(
+            asst["sata_burden"]["state"],
+            "PARTIAL",
+        )
+        self.assertEqual(
+            asst["sata_burden"]["reason"],
+            "SATA_BURDEN_COMPONENT_ONLY",
+        )
+        self.assertEqual(
             asst["sata_burden"]["value"],
             350000000,
+        )
+        self.assertEqual(
+            asst["sata_burden"]["component_fact_type"],
+            "SATA_LIQUIDATION_PREFERENCE_AGGREGATE",
         )
         self.assertEqual(
             asst["warrants"]["value"],

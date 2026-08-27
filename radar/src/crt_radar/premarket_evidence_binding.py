@@ -38,7 +38,7 @@ CANONICAL_GROWTH_SPECS = {
         "btc_holdings_fact_type": "BTC_HOLDINGS",
         "diluted_shares_fact_type": "DILUTED_SHARES",
         "atm_issuance_fact_type": "ATM_SHARES_ISSUED",
-        "sata_burden_fact_type": (
+        "sata_burden_component_fact_type": (
             "SATA_LIQUIDATION_PREFERENCE_AGGREGATE"
         ),
         "warrants_fact_type": "WARRANTS_OUTSTANDING",
@@ -791,6 +791,41 @@ def _bind_asst_extra(
                         security_id=security_id,
                     )
                 )
+
+        burden_component_type = spec.get(
+            "sata_burden_component_fact_type"
+        )
+
+        if (
+            result["sata_burden"].get("state") == "BLOCKED"
+            and isinstance(burden_component_type, str)
+            and burden_component_type
+            and isinstance(issuer_id, str)
+            and isinstance(security_id, str)
+        ):
+            component = _latest_wrapper(
+                select_fact_history(
+                    overlay,
+                    fact_type=burden_component_type,
+                    issuer_id=issuer_id,
+                    security_id=security_id,
+                )
+            )
+
+            if component.get("state") == "AVAILABLE":
+                result["sata_burden"] = {
+                    "state": "PARTIAL",
+                    "reason": "SATA_BURDEN_COMPONENT_ONLY",
+                    "value": component.get("value"),
+                    "unit": component.get("unit"),
+                    "effective_at_ms": component.get(
+                        "effective_at_ms"
+                    ),
+                    "source_refs": deepcopy(
+                        component.get("source_refs", [])
+                    ),
+                    "component_fact_type": burden_component_type,
+                }
 
     return result
 
