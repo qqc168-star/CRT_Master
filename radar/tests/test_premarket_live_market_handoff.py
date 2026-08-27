@@ -10,6 +10,7 @@ from crt_radar.premarket_battle_map import (
 from crt_radar.premarket_live_market_handoff import (
     apply_live_market_handoff_to_asset_facts,
     build_premarket_live_market_handoff,
+    validate_premarket_live_market_handoff,
 )
 
 
@@ -148,6 +149,71 @@ class PremarketLiveMarketHandoffTests(
             handoff["capital_decision_authority"],
             "USER_ONLY",
         )
+
+    def test_manual_supplement_never_replaces_existing_available_price(self):
+        handoff = build_premarket_live_market_handoff(
+            source_mode="MANUAL_WEB_SUPPLEMENT",
+            evaluation_window={
+                "start_ms": 100,
+                "end_ms": 200,
+            },
+            source_gate_result=_source_gate(),
+            manual_asset_observations=_observations(),
+        )
+
+        existing = {
+            "MSTR": {
+                "premarket_price": {
+                    "state": "AVAILABLE",
+                    "value": 999.0,
+                    "unit": "USD",
+                    "source_refs": [
+                        {
+                            "source_id": "UPSTREAM-VERIFIED",
+                        }
+                    ],
+                }
+            }
+        }
+
+        fused = apply_live_market_handoff_to_asset_facts(
+            existing,
+            handoff,
+        )
+
+        self.assertEqual(
+            fused["MSTR"]["premarket_price"]["value"],
+            999.0,
+        )
+        self.assertEqual(
+            fused["MSTR"]["premarket_price"][
+                "source_refs"
+            ][0]["source_id"],
+            "UPSTREAM-VERIFIED",
+        )
+
+    def test_machine_mode_rejects_injected_available_equity_price(self):
+        handoff = build_premarket_live_market_handoff(
+            source_mode="MACHINE_VERIFIED_ONLY",
+            evaluation_window={
+                "start_ms": 100,
+                "end_ms": 200,
+            },
+            source_gate_result=_source_gate(),
+        )
+
+        handoff["asset_market"]["MSTR"][
+            "premarket_price"
+        ] = {
+            "state": "AVAILABLE",
+            "value": 125.0,
+            "unit": "USD",
+        }
+
+        with self.assertRaises(ValueError):
+            validate_premarket_live_market_handoff(
+                handoff
+            )
 
     def test_outside_window_quote_fails_closed(self):
         handoff = build_premarket_live_market_handoff(

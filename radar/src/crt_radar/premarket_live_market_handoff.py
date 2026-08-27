@@ -743,6 +743,33 @@ def validate_premarket_live_market_handoff(
             "live market asset map invalid"
         )
 
+    for asset in ASSET_ORDER:
+        snapshot = asset_market.get(asset)
+
+        if not isinstance(snapshot, dict):
+            raise ValueError(
+                "live market asset snapshot invalid"
+            )
+
+        price = snapshot.get("premarket_price")
+
+        if not isinstance(price, dict):
+            raise ValueError(
+                "live market premarket price wrapper invalid"
+            )
+
+        # Until a formal machine equity live source is bound,
+        # MACHINE_VERIFIED_ONLY must never carry an AVAILABLE
+        # equity premarket price.
+        if (
+            value.get("source_mode")
+            == "MACHINE_VERIFIED_ONLY"
+            and price.get("state") == "AVAILABLE"
+        ):
+            raise ValueError(
+                "machine equity live source is not bound"
+            )
+
     analysis_inputs = value.get(
         "analysis_inputs"
     )
@@ -791,10 +818,9 @@ def apply_live_market_handoff_to_asset_facts(
             and existing.get("state") == "AVAILABLE"
         )
 
-        if (
-            incoming.get("state") == "AVAILABLE"
-            or not existing_available
-        ):
+        # A live-market handoff supplements missing evidence.
+        # It must never replace an already AVAILABLE upstream fact.
+        if not existing_available:
             target["premarket_price"] = deepcopy(
                 incoming
             )
