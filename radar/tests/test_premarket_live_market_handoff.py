@@ -558,13 +558,42 @@ class PremarketLiveMarketHandoffTests(
 
         for row in battle_map["first_screen"]:
             self.assertIsNone(row["light"])
-            self.assertIsNone(row["attack_line"])
-            self.assertIsNone(row["first_defense"])
-            self.assertIsNone(
-                row["invalidation_line"]
+
+            self.assertEqual(
+                row["entry_condition"],
+                {
+                    "asset_price_clause": None,
+                    "btc_price_clause": None,
+                    "confirmation_clause": None,
+                },
             )
+
             self.assertIsNone(
-                row["capital_judgment"]
+                row["entry_shares_delta"]
+            )
+
+            self.assertEqual(
+                row["exit_condition"],
+                {
+                    "stop_loss": {
+                        "asset_price_clause": None,
+                        "btc_price_clause": None,
+                        "confirmation_clause": None,
+                    },
+                    "take_profit": {
+                        "asset_price_clause": None,
+                        "btc_price_clause": None,
+                        "confirmation_clause": None,
+                    },
+                },
+            )
+
+            self.assertEqual(
+                row["exit_shares_delta"],
+                {
+                    "stop_loss": None,
+                    "take_profit": None,
+                },
             )
 
         self.assertEqual(

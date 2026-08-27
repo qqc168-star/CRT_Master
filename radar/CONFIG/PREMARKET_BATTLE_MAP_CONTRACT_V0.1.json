@@ -2,26 +2,91 @@
   "contract_version": "CRT_PREMARKET_BATTLE_MAP_CONTRACT_V0.1",
   "status": "CANDIDATE",
   "purpose_zh": "把既有 CRT 證據組裝成盤前全標的分析上下文；機器只整理與驗證證據，GPT 負責判讀，使用者保有最終資本決定權。",
-  "asset_order": ["MSTR", "ASST", "STRC", "SATA"],
+  "asset_order": [
+    "MSTR",
+    "ASST",
+    "STRC",
+    "SATA"
+  ],
   "first_screen_fields": [
-    {"field": "asset", "owner": "AUTOMATION"},
-    {"field": "light", "owner": "GPT"},
-    {"field": "premarket_price", "owner": "AUTOMATION_OR_BLOCKED"},
-    {"field": "attack_line", "owner": "GPT"},
-    {"field": "diluted_mnav", "owner": "AUTOMATION_OR_BLOCKED", "assets": ["MSTR", "ASST"]},
-    {"field": "first_defense", "owner": "GPT"},
-    {"field": "invalidation_line", "owner": "GPT"},
-    {"field": "capital_judgment", "owner": "GPT"}
+    {
+      "field": "light",
+      "owner": "GPT"
+    },
+    {
+      "field": "asset",
+      "owner": "AUTOMATION"
+    },
+    {
+      "field": "premarket_price",
+      "owner": "AUTOMATION_OR_BLOCKED"
+    },
+    {
+      "field": "diluted_mnav",
+      "owner": "AUTOMATION_OR_BLOCKED",
+      "assets": [
+        "MSTR",
+        "ASST"
+      ]
+    },
+    {
+      "field": "entry_condition",
+      "owner": "GPT"
+    },
+    {
+      "field": "entry_shares_delta",
+      "owner": "GPT"
+    },
+    {
+      "field": "exit_condition",
+      "owner": "GPT"
+    },
+    {
+      "field": "exit_shares_delta",
+      "owner": "GPT"
+    }
   ],
   "analysis_sections": [
-    {"index": 1, "id": "ISSUER_REFLEXIVITY", "required": true},
-    {"index": 2, "id": "PRICE_STRUCTURE", "required": true},
-    {"index": 3, "id": "VOLUME_QUALITY", "required": true},
-    {"index": 4, "id": "SPOT_VS_DERIVATIVES", "required": true},
-    {"index": 5, "id": "BULL_BEAR_FORCE_DISTRIBUTION", "required": true},
-    {"index": 6, "id": "BTC_MACRO_TRANSMISSION", "required": true},
-    {"index": 7, "id": "CAPITAL_CONVEXITY", "required": true},
-    {"index": 8, "id": "ACTION_MAP", "required": true}
+    {
+      "index": 1,
+      "id": "ISSUER_REFLEXIVITY",
+      "required": true
+    },
+    {
+      "index": 2,
+      "id": "PRICE_STRUCTURE",
+      "required": true
+    },
+    {
+      "index": 3,
+      "id": "VOLUME_QUALITY",
+      "required": true
+    },
+    {
+      "index": 4,
+      "id": "SPOT_VS_DERIVATIVES",
+      "required": true
+    },
+    {
+      "index": 5,
+      "id": "BULL_BEAR_FORCE_DISTRIBUTION",
+      "required": true
+    },
+    {
+      "index": 6,
+      "id": "BTC_MACRO_TRANSMISSION",
+      "required": true
+    },
+    {
+      "index": 7,
+      "id": "CAPITAL_CONVEXITY",
+      "required": true
+    },
+    {
+      "index": 8,
+      "id": "ACTION_MAP",
+      "required": true
+    }
   ],
   "required_facts": {
     "MSTR": [
@@ -103,5 +168,43 @@
     "formal_weights_unchanged": true,
     "traffic_light_thresholds_unchanged": true,
     "mnav_semantics_unchanged": true
+  },
+  "action_surface_policy": {
+    "owner": "GPT",
+    "purpose": "CONDITIONAL_CAPITAL_EXPOSURE_DECISION_SURFACE",
+    "entry_condition": {
+      "asset_price_clause_required": true,
+      "btc_price_clause_required": true,
+      "confirmation_clause_supported": true
+    },
+    "entry_shares_delta": {
+      "sign": "NONNEGATIVE",
+      "zero_allowed": true
+    },
+    "exit_condition": {
+      "required_channels": [
+        "STOP_LOSS",
+        "TAKE_PROFIT"
+      ],
+      "asset_price_clause_required": true,
+      "btc_price_clause_required": true,
+      "confirmation_clause_supported": true
+    },
+    "exit_shares_delta": {
+      "stop_loss": {
+        "sign": "NONPOSITIVE",
+        "zero_allowed": true
+      },
+      "take_profit": {
+        "sign": "NONPOSITIVE",
+        "zero_allowed": true
+      },
+      "independent_by_channel": true
+    },
+    "price_reaching_is_not_action_trigger": true,
+    "condition_requires_context": true,
+    "machine_execution": "FORBIDDEN",
+    "external_action_authority": "NONE",
+    "capital_decision_authority": "USER_ONLY"
   }
 }
