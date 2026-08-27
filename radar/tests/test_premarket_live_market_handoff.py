@@ -215,6 +215,26 @@ class PremarketLiveMarketHandoffTests(
                 handoff
             )
 
+    def test_injected_machine_judgment_is_rejected(self):
+        handoff = build_premarket_live_market_handoff(
+            source_mode="MANUAL_WEB_SUPPLEMENT",
+            evaluation_window={
+                "start_ms": 100,
+                "end_ms": 200,
+            },
+            source_gate_result=_source_gate(),
+            manual_asset_observations=_observations(),
+        )
+
+        handoff["analysis_inputs"][
+            "SPOT_VS_DERIVATIVES"
+        ]["machine_judgment"] = "BUY"
+
+        with self.assertRaises(ValueError):
+            validate_premarket_live_market_handoff(
+                handoff
+            )
+
     def test_outside_window_quote_fails_closed(self):
         handoff = build_premarket_live_market_handoff(
             source_mode="MANUAL_WEB_SUPPLEMENT",

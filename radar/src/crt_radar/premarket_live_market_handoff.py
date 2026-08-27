@@ -783,6 +783,27 @@ def validate_premarket_live_market_handoff(
             "live market analysis input map invalid"
         )
 
+    for section_id in ANALYSIS_INPUT_SECTIONS:
+        section = analysis_inputs.get(section_id)
+
+        if not isinstance(section, dict):
+            raise ValueError(
+                "live market analysis input invalid"
+            )
+
+        if section.get("machine_judgment") is not None:
+            raise ValueError(
+                "machine judgment is forbidden"
+            )
+
+        if (
+            section.get("analyst_judgment_required")
+            is not True
+        ):
+            raise ValueError(
+                "analyst judgment boundary invalid"
+            )
+
     return deepcopy(value)
 
 
