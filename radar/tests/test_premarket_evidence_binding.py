@@ -493,6 +493,354 @@ class PremarketEvidenceBindingTests(unittest.TestCase):
             "BLOCKED",
         )
 
+    def test_canonical_mstr_fact_wiring_is_default(self):
+        items = [
+            _fact(
+                "mstr-btc",
+                "CIK-0001050446",
+                "MSTR",
+                "BTC_HOLDINGS",
+                700000,
+                100,
+                "same",
+            ),
+            _fact(
+                "mstr-shares",
+                "CIK-0001050446",
+                "MSTR",
+                "DILUTED_SHARES",
+                400000000,
+                100,
+                "same",
+            ),
+            _fact(
+                "mstr-atm",
+                "CIK-0001050446",
+                "MSTR",
+                "ATM_SHARES_ISSUED",
+                1000000,
+                100,
+                "same",
+            ),
+        ]
+
+        result = build_premarket_evidence_binding(
+            reflexivity_overlay=_overlay(items),
+            evaluation_window={
+                "start_ms": 1,
+                "end_ms": 2,
+            },
+            mnav_results={
+                "MSTR": {
+                    "state": "AVAILABLE",
+                    "mnav": 0.80,
+                }
+            },
+        )
+
+        mstr = result["asset_facts"]["MSTR"]
+
+        self.assertEqual(
+            mstr["btc_holdings_current"]["value"],
+            700000,
+        )
+        self.assertEqual(
+            mstr["diluted_shares"]["value"],
+            400000000,
+        )
+        self.assertEqual(
+            mstr["atm_issuance"]["value"],
+            1000000,
+        )
+        self.assertAlmostEqual(
+            mstr["btc_per_diluted_share"]["value"],
+            0.00175,
+        )
+        self.assertEqual(
+            mstr["diluted_mnav"]["mnav"],
+            0.80,
+        )
+
+    def test_canonical_asst_and_sata_fact_wiring_is_default(self):
+        items = [
+            _fact(
+                "asst-btc",
+                "CIK-0001920406",
+                "ASST",
+                "BTC_HOLDINGS",
+                21356,
+                100,
+                "asst",
+            ),
+            _fact(
+                "asst-shares",
+                "CIK-0001920406",
+                "ASST",
+                "DILUTED_SHARES",
+                15000000,
+                100,
+                "asst",
+            ),
+            _fact(
+                "asst-sata-pref",
+                "CIK-0001920406",
+                "ASST",
+                "SATA_LIQUIDATION_PREFERENCE_AGGREGATE",
+                350000000,
+                100,
+                "asst",
+            ),
+            _fact(
+                "asst-warrants",
+                "CIK-0001920406",
+                "ASST",
+                "WARRANTS_OUTSTANDING",
+                2500000,
+                100,
+                "asst",
+            ),
+            _fact(
+                "sata-strc-1",
+                "CIK-0001920406",
+                "SATA",
+                "STRIVE_STRC_HOLDINGS",
+                100000,
+                100,
+                "sata1",
+            ),
+            _fact(
+                "sata-strc-2",
+                "CIK-0001920406",
+                "SATA",
+                "STRIVE_STRC_HOLDINGS",
+                120000,
+                200,
+                "sata2",
+            ),
+            _fact(
+                "sata-fair",
+                "CIK-0001920406",
+                "SATA",
+                "STRIVE_STRC_FAIR_VALUE",
+                12000000,
+                200,
+                "sata2",
+            ),
+            _fact(
+                "sata-rate",
+                "CIK-0001920406",
+                "SATA",
+                "DISTRIBUTION_RATE",
+                13.0,
+                200,
+                "sata2",
+            ),
+            _fact(
+                "sata-stated",
+                "CIK-0001920406",
+                "SATA",
+                "STATED_AMOUNT",
+                100.0,
+                200,
+                "sata2",
+            ),
+            _fact(
+                "sata-liquidation",
+                "CIK-0001920406",
+                "SATA",
+                "LIQUIDATION_PREFERENCE",
+                100.0,
+                200,
+                "sata2",
+            ),
+        ]
+
+        result = build_premarket_evidence_binding(
+            reflexivity_overlay=_overlay(items),
+            evaluation_window={
+                "start_ms": 1,
+                "end_ms": 300,
+            },
+        )
+
+        asst = result["asset_facts"]["ASST"]
+        sata = result["asset_facts"]["SATA"]
+
+        self.assertEqual(
+            asst["sata_burden"]["state"],
+            "PARTIAL",
+        )
+        self.assertEqual(
+            asst["sata_burden"]["reason"],
+            "SATA_BURDEN_COMPONENT_ONLY",
+        )
+        self.assertEqual(
+            asst["sata_burden"]["value"],
+            350000000,
+        )
+        self.assertEqual(
+            asst["sata_burden"]["component_fact_type"],
+            "SATA_LIQUIDATION_PREFERENCE_AGGREGATE",
+        )
+        self.assertEqual(
+            asst["warrants"]["value"],
+            2500000,
+        )
+
+        # Do not mislabel ATM issuance as total dilution.
+        self.assertEqual(
+            asst["dilution"]["state"],
+            "BLOCKED",
+        )
+
+        # Live market / derivative evidence remains out of scope.
+        self.assertEqual(
+            asst["short_interest"]["state"],
+            "BLOCKED",
+        )
+        self.assertEqual(
+            asst["gamma"]["state"],
+            "BLOCKED",
+        )
+
+        self.assertEqual(
+            sata["strive_strc_holdings_current"]["value"],
+            120000,
+        )
+        self.assertEqual(
+            sata["strive_strc_holdings_previous"]["value"],
+            100000,
+        )
+        self.assertEqual(
+            sata["strive_strc_holdings_delta"]["value"],
+            20000,
+        )
+        self.assertEqual(
+            sata["strive_strc_fair_value"]["value"],
+            12000000,
+        )
+        self.assertEqual(
+            sata["distribution_rate"]["value"],
+            13.0,
+        )
+        self.assertEqual(
+            sata["stated_amount"]["value"],
+            100.0,
+        )
+        self.assertEqual(
+            sata["liquidation_preference"]["value"],
+            100.0,
+        )
+
+    def test_strc_dividend_terms_bind_from_strategy_facts(self):
+        day = 86_400_000
+
+        items = [
+            _fact(
+                "strc-ex",
+                "CIK-0001050446",
+                "SEC-STRC-PERP",
+                "EX_DIVIDEND_DATE",
+                3 * day,
+                100,
+                "strc",
+            ),
+            _fact(
+                "strc-record",
+                "CIK-0001050446",
+                "SEC-STRC-PERP",
+                "RECORD_DATE",
+                4 * day,
+                100,
+                "strc",
+            ),
+            _fact(
+                "strc-payment",
+                "CIK-0001050446",
+                "SEC-STRC-PERP",
+                "PAYMENT_DATE",
+                5 * day,
+                100,
+                "strc",
+            ),
+            _fact(
+                "strc-rate",
+                "CIK-0001050446",
+                "SEC-STRC-PERP",
+                "DISTRIBUTION_RATE",
+                12.0,
+                100,
+                "strc",
+            ),
+        ]
+
+        result = build_premarket_evidence_binding(
+            reflexivity_overlay=_overlay(items),
+            evaluation_window={
+                "start_ms": 2 * day,
+                "end_ms": 2 * day,
+            },
+        )
+
+        strc = result["asset_facts"]["STRC"]
+
+        self.assertEqual(
+            strc["next_ex_dividend_date"]["state"],
+            "AVAILABLE",
+        )
+        self.assertEqual(
+            strc["next_ex_dividend_date"]["value"],
+            3 * day,
+        )
+        self.assertEqual(
+            strc["record_date"]["value"],
+            4 * day,
+        )
+        self.assertEqual(
+            strc["payment_date"]["value"],
+            5 * day,
+        )
+        self.assertEqual(
+            strc["distribution_rate"]["value"],
+            12.0,
+        )
+
+    def test_stale_strc_ex_dividend_date_never_claims_next(self):
+        day = 86_400_000
+
+        items = [
+            _fact(
+                "strc-ex-old",
+                "CIK-0001050446",
+                "SEC-STRC-PERP",
+                "EX_DIVIDEND_DATE",
+                1 * day,
+                100,
+                "strc-old",
+            ),
+        ]
+
+        result = build_premarket_evidence_binding(
+            reflexivity_overlay=_overlay(items),
+            evaluation_window={
+                "start_ms": 2 * day,
+                "end_ms": 2 * day,
+            },
+        )
+
+        next_date = result["asset_facts"]["STRC"][
+            "next_ex_dividend_date"
+        ]
+
+        self.assertEqual(
+            next_date["state"],
+            "BLOCKED",
+        )
+        self.assertEqual(
+            next_date["reason"],
+            "LATEST_REPORTED_EX_DIVIDEND_DATE_NOT_FUTURE",
+        )
+
     def test_governance_remains_read_only(self):
         result = build_premarket_evidence_binding(
             reflexivity_overlay=_overlay([]),
