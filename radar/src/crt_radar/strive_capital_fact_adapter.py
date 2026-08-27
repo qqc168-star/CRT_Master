@@ -183,7 +183,7 @@ def _warrants(text: str) -> float | None:
     )
 
 
-def _sata_burden(text: str) -> float | None:
+def _sata_liquidation_preference_aggregate(text: str) -> float | None:
     return _scaled_match(
         (
             r"\bSATA\b.{0,180}?"
@@ -412,7 +412,7 @@ def build_strive_capital_reflexivity_input(
     if mode == "ASST_CAPITAL":
         btc = _btc(text)
         shares = _diluted_shares(text)
-        burden = _sata_burden(text)
+        sata_liquidation_preference_aggregate = _sata_liquidation_preference_aggregate(text)
         warrants = _warrants(text)
         atm = _atm_shares(text)
 
@@ -425,9 +425,9 @@ def build_strive_capital_reflexivity_input(
                 shares,
                 ["ASST_DILUTED_SHARES"],
             ),
-            "ASST_SATA_BURDEN_NOT_FOUND": (
-                burden,
-                ["ASST_SATA_BURDEN"],
+            "ASST_SATA_LIQUIDATION_PREFERENCE_AGGREGATE_NOT_FOUND": (
+                sata_liquidation_preference_aggregate,
+                ["ASST_SATA_LIQUIDATION_PREFERENCE_AGGREGATE"],
             ),
             "ASST_WARRANTS_NOT_FOUND": (
                 warrants,
@@ -459,7 +459,7 @@ def build_strive_capital_reflexivity_input(
             rows = (
                 ("BTC_HOLDINGS", btc, "BTC"),
                 ("DILUTED_SHARES", shares, "SHARES"),
-                ("SATA_LIQUIDATION_PREFERENCE_AGGREGATE", burden, "USD"),
+                ("SATA_LIQUIDATION_PREFERENCE_AGGREGATE", sata_liquidation_preference_aggregate, "USD"),
                 ("WARRANTS_OUTSTANDING", warrants, "SHARES"),
                 ("ATM_SHARES_ISSUED", atm, "SHARES"),
             )
@@ -498,13 +498,13 @@ def build_strive_capital_reflexivity_input(
     )
 
     required = {
-        "SATA_STRC_HOLDINGS_NOT_FOUND": (
+        "STRIVE_STRC_HOLDINGS_NOT_FOUND": (
             holdings,
-            ["SATA_STRC_HOLDINGS"],
+            ["STRIVE_STRC_HOLDINGS"],
         ),
-        "SATA_STRC_FAIR_VALUE_NOT_FOUND": (
+        "STRIVE_STRC_FAIR_VALUE_NOT_FOUND": (
             fair_value,
-            ["SATA_STRC_FAIR_VALUE"],
+            ["STRIVE_STRC_FAIR_VALUE"],
         ),
         "SATA_DISTRIBUTION_RATE_NOT_FOUND": (
             rate,
@@ -533,7 +533,7 @@ def build_strive_capital_reflexivity_input(
     if accepted_at_ms is not None:
         rows = (
             ("STRIVE_STRC_HOLDINGS", holdings, "SHARES"),
-            ("STRC_FAIR_VALUE", fair_value, "USD"),
+            ("STRIVE_STRC_FAIR_VALUE", fair_value, "USD"),
             ("DISTRIBUTION_RATE", rate, "PERCENT_APR"),
             ("STATED_AMOUNT", stated, "USD_PER_SHARE"),
             (

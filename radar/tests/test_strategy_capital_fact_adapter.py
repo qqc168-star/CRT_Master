@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from crt_radar.reflexivity_overlay import build_reflexivity_overlay
 from crt_radar.strategy_capital_fact_adapter import (
     build_strategy_capital_reflexivity_input,
 )
@@ -59,6 +60,54 @@ class StrategyCapitalFactAdapterTests(unittest.TestCase):
         self.assertEqual(
             facts["ATM_SHARES_ISSUED"]["value"],
             5000000.0,
+        )
+
+    def test_mstr_facts_normalize_but_overlay_remains_fail_closed(self):
+        raw = """
+        As of August 26, 2026, Strategy holds 700,000 bitcoins.
+        Fully diluted shares outstanding: 400,000,000.
+        """
+
+        adapter = build_strategy_capital_reflexivity_input(
+            raw,
+            mode="MSTR_CAPITAL",
+            accepted_at_ms=ACCEPTED,
+        )
+
+        overlay = build_reflexivity_overlay(adapter)
+
+        fact_types = {
+            row["fact_type"]
+            for row in overlay["asset_facts"]["items"]
+        }
+
+        self.assertIn("BTC_HOLDINGS", fact_types)
+        self.assertIn("DILUTED_SHARES", fact_types)
+
+        # Capital-fact completion does not pretend issuer-event or
+        # market-reaction coverage is complete.
+        self.assertEqual(
+            overlay["asset_facts"]["section_state"],
+            "BLOCKED",
+        )
+        self.assertEqual(adapter["action_output"], "NONE")
+        self.assertEqual(
+            adapter["external_action_authority"],
+            "NONE",
+        )
+
+        self.assertEqual(
+            overlay["blockers"]["section_state"],
+            "BLOCKED",
+        )
+
+        blocker_codes = {
+            row["reason_code"]
+            for row in overlay["blockers"]["items"]
+        }
+        self.assertIn(
+            "SECTION_COVERAGE_INCOMPLETE",
+            blocker_codes,
         )
 
     def test_mstr_missing_diluted_shares_fails_closed(self):

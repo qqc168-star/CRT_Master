@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from crt_radar.reflexivity_overlay import build_reflexivity_overlay
 from crt_radar.strive_capital_fact_adapter import (
     build_strive_capital_reflexivity_input,
 )
@@ -66,7 +67,60 @@ class StriveCapitalFactAdapterTests(unittest.TestCase):
             2500000.0,
         )
 
-    def test_asst_missing_sata_burden_is_partial(self):
+    def test_strive_facts_normalize_but_overlay_remains_fail_closed(self):
+        raw = """
+        Strive holds 21,356 bitcoins.
+        Fully diluted shares outstanding: 15,000,000.
+        SATA aggregate liquidation preference is $350 million.
+        Warrants outstanding to purchase 2,500,000 shares.
+        """
+
+        adapter = build_strive_capital_reflexivity_input(
+            raw,
+            mode="ASST_CAPITAL",
+            accepted_at_ms=ACCEPTED,
+        )
+
+        overlay = build_reflexivity_overlay(adapter)
+
+        fact_types = {
+            row["fact_type"]
+            for row in overlay["asset_facts"]["items"]
+        }
+
+        self.assertIn("BTC_HOLDINGS", fact_types)
+        self.assertIn(
+            "SATA_LIQUIDATION_PREFERENCE_AGGREGATE",
+            fact_types,
+        )
+
+        # Facts survive normalization, while incomplete event/market
+        # evidence correctly keeps the complete overlay fail-closed.
+        self.assertEqual(
+            overlay["asset_facts"]["section_state"],
+            "BLOCKED",
+        )
+        self.assertEqual(adapter["action_output"], "NONE")
+        self.assertEqual(
+            adapter["external_action_authority"],
+            "NONE",
+        )
+
+        self.assertEqual(
+            overlay["blockers"]["section_state"],
+            "BLOCKED",
+        )
+
+        blocker_codes = {
+            row["reason_code"]
+            for row in overlay["blockers"]["items"]
+        }
+        self.assertIn(
+            "SECTION_COVERAGE_INCOMPLETE",
+            blocker_codes,
+        )
+
+    def test_asst_missing_sata_liquidation_preference_is_partial(self):
         raw = """
         Strive holds 21,356 bitcoins.
         Fully diluted shares outstanding: 15,000,000.
@@ -84,7 +138,7 @@ class StriveCapitalFactAdapterTests(unittest.TestCase):
             "PARTIAL",
         )
         self.assertIn(
-            "ASST_SATA_BURDEN_NOT_FOUND",
+            "ASST_SATA_LIQUIDATION_PREFERENCE_AGGREGATE_NOT_FOUND",
             blocker_codes(result),
         )
 
@@ -135,7 +189,7 @@ class StriveCapitalFactAdapterTests(unittest.TestCase):
             1250000.0,
         )
         self.assertEqual(
-            facts["STRC_FAIR_VALUE"]["value"],
+            facts["STRIVE_STRC_FAIR_VALUE"]["value"],
             112500000.0,
         )
         self.assertEqual(
@@ -166,7 +220,7 @@ class StriveCapitalFactAdapterTests(unittest.TestCase):
         )
 
         self.assertIn(
-            "SATA_STRC_FAIR_VALUE_NOT_FOUND",
+            "STRIVE_STRC_FAIR_VALUE_NOT_FOUND",
             blocker_codes(result),
         )
         self.assertEqual(
