@@ -7,11 +7,15 @@ from pathlib import Path
 from crt_radar.premarket_battle_map import (
     build_premarket_battle_map,
 )
+from crt_radar.premarket_equity_live_snapshot import (
+    seal_equity_live_snapshot,
+)
 from crt_radar.premarket_live_market_handoff import (
     apply_live_market_handoff_to_asset_facts,
     build_premarket_live_market_handoff,
     validate_premarket_live_market_handoff,
 )
+from crt_radar.source_registry import SourceSpec
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -114,6 +118,86 @@ def _observations(observed_at_ms=150):
     return result
 
 
+def _machine_equity_spec():
+    raw = {
+        "source_id": "CRT-CONN-EQUITY-PREMARKET-SYNTH-001",
+        "namespace": "AS-L6",
+        "input_family": "EQUITY_PREMARKET_SNAPSHOT",
+        "role": "Synthetic machine equity fixture",
+        "provider": "Synthetic Provider",
+        "transport": "LOCAL_VERIFIED_JSON_SNAPSHOT",
+        "endpoint": "runtime/equity/premarket/latest.json",
+        "parser_id": "CRT_EQUITY_PREMARKET_SNAPSHOT_V1",
+        "criticality": "NONCRITICAL_DISCLOSE_MISSING",
+        "max_age_seconds": 120,
+        "authentication": "LOCAL_READ_ONLY",
+        "implementation_state": "LIVE_READ_ONLY_COLLECTOR",
+        "provider_binding_state": "BOUND",
+        "provider_contract_id": "SYNTH-EQUITY-CONTRACT-V1",
+        "documentation": "https://example.test/equity-docs",
+    }
+
+    return SourceSpec(
+        source_id=raw["source_id"],
+        namespace=raw["namespace"],
+        input_family=raw["input_family"],
+        role=raw["role"],
+        provider=raw["provider"],
+        transport=raw["transport"],
+        endpoint=raw["endpoint"],
+        parser_id=raw["parser_id"],
+        criticality=raw["criticality"],
+        max_age_seconds=raw["max_age_seconds"],
+        raw=raw,
+    )
+
+
+def _machine_equity_snapshot():
+    prices = {
+        "MSTR": 125.0,
+        "ASST": 21.5,
+        "STRC": 94.0,
+        "SATA": 84.0,
+    }
+
+    assets = {}
+
+    for asset, price in prices.items():
+        assets[asset] = {
+            "symbol": asset,
+            "premarket_price": price,
+            "previous_close": price - 1.0,
+            "premarket_high": price + 1.0,
+            "premarket_low": price - 1.0,
+            "premarket_volume": 10000,
+        }
+
+    return seal_equity_live_snapshot(
+        {
+            "schema_version": (
+                "CRT_PREMARKET_EQUITY_LIVE_SNAPSHOT_V0.1"
+            ),
+            "source_id": (
+                "CRT-CONN-EQUITY-PREMARKET-SYNTH-001"
+            ),
+            "provider": "Synthetic Provider",
+            "provider_contract_id": (
+                "SYNTH-EQUITY-CONTRACT-V1"
+            ),
+            "session": "PREMARKET",
+            "observed_at_ms": 150,
+            "retrieved_at_ms": 160,
+            "first_seen_at_ms": 160,
+            "request_identity_hash": "a" * 64,
+            "raw_response_hash": "b" * 64,
+            "assets": assets,
+            "action_output": "NONE",
+            "external_action_authority": "NONE",
+            "external_action_performed": False,
+        }
+    )
+
+
 class PremarketLiveMarketHandoffTests(
     unittest.TestCase
 ):
@@ -191,6 +275,70 @@ class PremarketLiveMarketHandoffTests(
             ][0]["source_id"],
             "UPSTREAM-VERIFIED",
         )
+
+    def test_bound_machine_snapshot_unlocks_equity_prices(self):
+        handoff = build_premarket_live_market_handoff(
+            source_mode="MACHINE_VERIFIED_ONLY",
+            evaluation_window={
+                "start_ms": 100,
+                "end_ms": 200,
+            },
+            source_gate_result=_source_gate(),
+            machine_equity_snapshot=(
+                _machine_equity_snapshot()
+            ),
+            machine_equity_source_spec=(
+                _machine_equity_spec()
+            ),
+            machine_equity_source_registry_hash=(
+                "1" * 64
+            ),
+        )
+
+        self.assertEqual(
+            handoff["asset_market"]["MSTR"][
+                "premarket_price"
+            ]["value"],
+            125.0,
+        )
+
+        self.assertEqual(
+            handoff["asset_market"]["ASST"][
+                "premarket_price"
+            ]["value"],
+            21.5,
+        )
+
+        self.assertEqual(
+            handoff["state"],
+            "READY_FOR_ANALYST",
+        )
+
+        self.assertEqual(
+            handoff["machine_equity_source_binding"][
+                "binding_state"
+            ],
+            "BOUND",
+        )
+
+        self.assertEqual(
+            handoff["action_output"],
+            "NONE",
+        )
+
+    def test_machine_snapshot_without_bound_source_is_rejected(self):
+        with self.assertRaises(ValueError):
+            build_premarket_live_market_handoff(
+                source_mode="MACHINE_VERIFIED_ONLY",
+                evaluation_window={
+                    "start_ms": 100,
+                    "end_ms": 200,
+                },
+                source_gate_result=_source_gate(),
+                machine_equity_snapshot=(
+                    _machine_equity_snapshot()
+                ),
+            )
 
     def test_machine_mode_rejects_injected_available_equity_price(self):
         handoff = build_premarket_live_market_handoff(
