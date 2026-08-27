@@ -13,8 +13,77 @@ from .issuer_fact_history import (
 )
 
 STRATEGY_ISSUER_ID = "CIK-0001050446"
+STRIVE_ISSUER_ID = "CIK-0001920406"
+
+MSTR_SECURITY_ID = "MSTR"
+ASST_SECURITY_ID = "ASST"
 STRC_SECURITY_ID = "SEC-STRC-PERP"
+SATA_SECURITY_ID = "SATA"
+
 VERIFIED_EMPTY = "VERIFIED_NO_MATCH"
+DAY_MS = 86_400_000
+
+
+CANONICAL_GROWTH_SPECS = {
+    "MSTR": {
+        "issuer_id": STRATEGY_ISSUER_ID,
+        "security_id": MSTR_SECURITY_ID,
+        "btc_holdings_fact_type": "BTC_HOLDINGS",
+        "diluted_shares_fact_type": "DILUTED_SHARES",
+        "atm_issuance_fact_type": "ATM_SHARES_ISSUED",
+    },
+    "ASST": {
+        "issuer_id": STRIVE_ISSUER_ID,
+        "security_id": ASST_SECURITY_ID,
+        "btc_holdings_fact_type": "BTC_HOLDINGS",
+        "diluted_shares_fact_type": "DILUTED_SHARES",
+        "atm_issuance_fact_type": "ATM_SHARES_ISSUED",
+        "sata_burden_fact_type": (
+            "SATA_LIQUIDATION_PREFERENCE_AGGREGATE"
+        ),
+        "warrants_fact_type": "WARRANTS_OUTSTANDING",
+    },
+}
+
+
+CANONICAL_SATA_SPEC = {
+    "issuer_id": STRIVE_ISSUER_ID,
+    "security_id": SATA_SECURITY_ID,
+    "strive_strc_holdings_fact_type": "STRIVE_STRC_HOLDINGS",
+    "strive_strc_fair_value_fact_type": "STRIVE_STRC_FAIR_VALUE",
+    "distribution_rate_fact_type": "DISTRIBUTION_RATE",
+    "stated_amount_fact_type": "STATED_AMOUNT",
+    "liquidation_preference_fact_type": "LIQUIDATION_PREFERENCE",
+}
+
+
+def _merge_growth_specs(
+    overrides: dict[str, Any] | None,
+) -> dict[str, Any]:
+    result = deepcopy(CANONICAL_GROWTH_SPECS)
+
+    if not isinstance(overrides, dict):
+        return result
+
+    for asset, override in overrides.items():
+        if not isinstance(override, dict):
+            continue
+
+        base = result.get(asset, {})
+        result[asset] = {**base, **deepcopy(override)}
+
+    return result
+
+
+def _merge_sata_spec(
+    override: dict[str, Any] | None,
+) -> dict[str, Any]:
+    result = deepcopy(CANONICAL_SATA_SPEC)
+
+    if isinstance(override, dict):
+        result.update(deepcopy(override))
+
+    return result
 
 
 def _blocked(reason: str, value: Any = None) -> dict[str, Any]:
@@ -550,6 +619,64 @@ def _build_strc_rounds(
     }
 
 
+def _strc_term(
+    overlay: dict[str, Any] | None,
+    fact_type: str,
+) -> dict[str, Any]:
+    return _latest_wrapper(
+        select_fact_history(
+            overlay,
+            fact_type=fact_type,
+            issuer_id=STRATEGY_ISSUER_ID,
+            security_id=STRC_SECURITY_ID,
+        )
+    )
+
+
+def _next_strc_ex_dividend_date(
+    overlay: dict[str, Any] | None,
+    *,
+    evaluation_window: dict[str, Any] | None,
+) -> dict[str, Any]:
+    latest = _strc_term(
+        overlay,
+        "EX_DIVIDEND_DATE",
+    )
+
+    if latest.get("state") != "AVAILABLE":
+        return latest
+
+    window = _normalize_evaluation_window(evaluation_window)
+
+    if window is None:
+        return _blocked(
+            "DIVIDEND_DATE_EVALUATION_WINDOW_REQUIRED"
+        )
+
+    value = latest.get("value")
+
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not math.isfinite(float(value))
+        or float(value) <= 0
+    ):
+        return _blocked(
+            "EX_DIVIDEND_DATE_VALUE_INVALID"
+        )
+
+    reported_day = int(float(value)) // DAY_MS
+    evaluation_day = window["end_ms"] // DAY_MS
+
+    if reported_day < evaluation_day:
+        return _blocked(
+            "LATEST_REPORTED_EX_DIVIDEND_DATE_NOT_FUTURE",
+            latest,
+        )
+
+    return latest
+
+
 def _bind_strc(
     overlay: dict[str, Any] | None,
     *,
@@ -582,17 +709,21 @@ def _bind_strc(
         "repurchase_rounds": rounds,
         "latest_round": latest,
         "cumulative_repurchase": cumulative,
-        "next_ex_dividend_date": _blocked(
-            "DIVIDEND_TERMS_ADAPTER_NOT_BOUND"
+        "next_ex_dividend_date": _next_strc_ex_dividend_date(
+            overlay,
+            evaluation_window=evaluation_window,
         ),
-        "record_date": _blocked(
-            "DIVIDEND_TERMS_ADAPTER_NOT_BOUND"
+        "record_date": _strc_term(
+            overlay,
+            "RECORD_DATE",
         ),
-        "payment_date": _blocked(
-            "DIVIDEND_TERMS_ADAPTER_NOT_BOUND"
+        "payment_date": _strc_term(
+            overlay,
+            "PAYMENT_DATE",
         ),
-        "distribution_rate": _blocked(
-            "DIVIDEND_TERMS_ADAPTER_NOT_BOUND"
+        "distribution_rate": _strc_term(
+            overlay,
+            "DISTRIBUTION_RATE",
         ),
         "market_handoff": _blocked(
             "MARKET_RESPONSE_DATA_OUT_OF_SCOPE"
@@ -778,11 +909,8 @@ def build_premarket_evidence_binding(
     sata_spec: dict[str, Any] | None = None,
     mnav_results: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    specs = (
-        growth_specs
-        if isinstance(growth_specs, dict)
-        else {}
-    )
+    specs = _merge_growth_specs(growth_specs)
+    sata_binding_spec = _merge_sata_spec(sata_spec)
 
     mnav = (
         mnav_results
@@ -824,7 +952,7 @@ def build_premarket_evidence_binding(
             ),
             "SATA": _bind_sata(
                 reflexivity_overlay,
-                sata_spec,
+                sata_binding_spec,
                 evaluation_window=evaluation_window,
             ),
         },
