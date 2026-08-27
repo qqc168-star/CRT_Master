@@ -4,6 +4,14 @@ import math
 from copy import deepcopy
 from typing import Any
 
+from .premarket_equity_live_snapshot import (
+    build_equity_source_binding,
+    equity_snapshot_to_asset_market,
+    validate_equity_live_snapshot,
+    validate_equity_source_binding,
+)
+from .source_registry import SourceRegistry
+
 
 SCHEMA_VERSION = "CRT_PREMARKET_LIVE_MARKET_HANDOFF_V0.1"
 
@@ -569,6 +577,9 @@ def build_premarket_live_market_handoff(
     evaluation_window: dict[str, Any],
     source_gate_result: dict[str, Any] | None = None,
     manual_asset_observations: dict[str, Any] | None = None,
+    machine_equity_snapshot: dict[str, Any] | None = None,
+    machine_equity_source_registry: SourceRegistry | None = None,
+    machine_equity_source_id: str | None = None,
 ) -> dict[str, Any]:
     if source_mode not in SOURCE_MODES:
         raise ValueError(
@@ -597,21 +608,80 @@ def build_premarket_live_market_handoff(
             "in MACHINE_VERIFIED_ONLY mode"
         )
 
-    asset_market = {}
+    machine_material = (
+        machine_equity_snapshot,
+        machine_equity_source_registry,
+        machine_equity_source_id,
+    )
 
-    for asset in ASSET_ORDER:
-        if source_mode == "MANUAL_WEB_SUPPLEMENT":
-            asset_market[asset] = (
-                _manual_asset_snapshot(
-                    asset,
-                    manual.get(asset),
-                    evaluation_window=window,
+    machine_material_count = sum(
+        value is not None
+        for value in machine_material
+    )
+
+    if (
+        source_mode == "MANUAL_WEB_SUPPLEMENT"
+        and machine_material_count != 0
+    ):
+        raise ValueError(
+            "machine equity material is forbidden "
+            "in MANUAL_WEB_SUPPLEMENT mode"
+        )
+
+    if (
+        source_mode == "MACHINE_VERIFIED_ONLY"
+        and machine_material_count not in {0, 3}
+    ):
+        raise ValueError(
+            "machine equity source binding is incomplete"
+        )
+
+    locked_machine_binding = None
+    locked_machine_snapshot = None
+
+    if (
+        source_mode == "MACHINE_VERIFIED_ONLY"
+        and machine_material_count == 3
+    ):
+        locked_machine_binding = (
+            build_equity_source_binding(
+                machine_equity_source_registry,
+                source_id=machine_equity_source_id,
+            )
+        )
+
+        locked_machine_snapshot = (
+            validate_equity_live_snapshot(
+                machine_equity_snapshot,
+                source_binding=locked_machine_binding,
+                evaluation_window=window,
+            )
+        )
+
+        asset_market = (
+            equity_snapshot_to_asset_market(
+                locked_machine_snapshot,
+                source_binding=locked_machine_binding,
+                evaluation_window=window,
+            )
+        )
+
+    else:
+        asset_market = {}
+
+        for asset in ASSET_ORDER:
+            if source_mode == "MANUAL_WEB_SUPPLEMENT":
+                asset_market[asset] = (
+                    _manual_asset_snapshot(
+                        asset,
+                        manual.get(asset),
+                        evaluation_window=window,
+                    )
                 )
-            )
-        else:
-            asset_market[asset] = (
-                _machine_asset_snapshot(asset)
-            )
+            else:
+                asset_market[asset] = (
+                    _machine_asset_snapshot(asset)
+                )
 
     source_gate = _source_gate_context(
         source_gate_result
@@ -657,6 +727,16 @@ def build_premarket_live_market_handoff(
         "evaluation_window": deepcopy(window),
         "asset_order": list(ASSET_ORDER),
         "asset_market": asset_market,
+        "machine_equity_source_binding": (
+            deepcopy(locked_machine_binding)
+            if locked_machine_binding is not None
+            else None
+        ),
+        "machine_equity_snapshot": (
+            deepcopy(locked_machine_snapshot)
+            if locked_machine_snapshot is not None
+            else None
+        ),
         "source_gate_context": source_gate,
         "analysis_inputs": analysis_inputs,
         "action_output": "NONE",
@@ -758,16 +838,85 @@ def validate_premarket_live_market_handoff(
                 "live market premarket price wrapper invalid"
             )
 
-        # Until a formal machine equity live source is bound,
-        # MACHINE_VERIFIED_ONLY must never carry an AVAILABLE
-        # equity premarket price.
+    machine_binding = value.get(
+        "machine_equity_source_binding"
+    )
+    machine_snapshot = value.get(
+        "machine_equity_snapshot"
+    )
+
+    machine_mode = (
+        value.get("source_mode")
+        == "MACHINE_VERIFIED_ONLY"
+    )
+
+    if machine_mode:
+        material_count = sum(
+            item is not None
+            for item in (
+                machine_binding,
+                machine_snapshot,
+            )
+        )
+
+        if material_count == 1:
+            raise ValueError(
+                "machine equity provenance incomplete"
+            )
+
+        if material_count == 0:
+            for asset in ASSET_ORDER:
+                if (
+                    asset_market[asset][
+                        "premarket_price"
+                    ].get("state")
+                    == "AVAILABLE"
+                ):
+                    raise ValueError(
+                        "machine equity live source is not bound"
+                    )
+
+        else:
+            locked_binding = (
+                validate_equity_source_binding(
+                    machine_binding
+                )
+            )
+
+            locked_snapshot = (
+                validate_equity_live_snapshot(
+                    machine_snapshot,
+                    source_binding=locked_binding,
+                    evaluation_window=_normalize_window(
+                        value.get("evaluation_window")
+                    ),
+                )
+            )
+
+            expected_market = (
+                equity_snapshot_to_asset_market(
+                    locked_snapshot,
+                    source_binding=locked_binding,
+                    evaluation_window=_normalize_window(
+                        value.get("evaluation_window")
+                    ),
+                )
+            )
+
+            if asset_market != expected_market:
+                raise ValueError(
+                    "machine equity asset market "
+                    "does not match verified snapshot"
+                )
+
+    else:
         if (
-            value.get("source_mode")
-            == "MACHINE_VERIFIED_ONLY"
-            and price.get("state") == "AVAILABLE"
+            machine_binding is not None
+            or machine_snapshot is not None
         ):
             raise ValueError(
-                "machine equity live source is not bound"
+                "manual handoff cannot carry "
+                "machine equity provenance"
             )
 
     analysis_inputs = value.get(
