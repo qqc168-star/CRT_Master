@@ -10,7 +10,7 @@ from .premarket_equity_live_snapshot import (
     validate_equity_live_snapshot,
     validate_equity_source_binding,
 )
-from .source_registry import SourceSpec
+from .source_registry import SourceRegistry
 
 
 SCHEMA_VERSION = "CRT_PREMARKET_LIVE_MARKET_HANDOFF_V0.1"
@@ -578,8 +578,8 @@ def build_premarket_live_market_handoff(
     source_gate_result: dict[str, Any] | None = None,
     manual_asset_observations: dict[str, Any] | None = None,
     machine_equity_snapshot: dict[str, Any] | None = None,
-    machine_equity_source_spec: SourceSpec | None = None,
-    machine_equity_source_registry_hash: str | None = None,
+    machine_equity_source_registry: SourceRegistry | None = None,
+    machine_equity_source_id: str | None = None,
 ) -> dict[str, Any]:
     if source_mode not in SOURCE_MODES:
         raise ValueError(
@@ -610,8 +610,8 @@ def build_premarket_live_market_handoff(
 
     machine_material = (
         machine_equity_snapshot,
-        machine_equity_source_spec,
-        machine_equity_source_registry_hash,
+        machine_equity_source_registry,
+        machine_equity_source_id,
     )
 
     machine_material_count = sum(
@@ -645,10 +645,8 @@ def build_premarket_live_market_handoff(
     ):
         locked_machine_binding = (
             build_equity_source_binding(
-                machine_equity_source_spec,
-                source_registry_hash=(
-                    machine_equity_source_registry_hash
-                ),
+                machine_equity_source_registry,
+                source_id=machine_equity_source_id,
             )
         )
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import unittest
+from pathlib import Path
 
 from crt_radar.premarket_equity_live_snapshot import (
     build_equity_source_binding,
@@ -8,13 +10,19 @@ from crt_radar.premarket_equity_live_snapshot import (
     seal_equity_live_snapshot,
     validate_equity_live_snapshot,
 )
-from crt_radar.source_registry import SourceSpec
+from crt_radar.source_registry import (
+    SourceRegistry,
+    SourceSpec,
+)
 
 
-def _spec(
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _equity_source(
     *,
     authentication: str = "LOCAL_READ_ONLY",
-) -> SourceSpec:
+) -> dict:
     raw = {
         "source_id": "CRT-CONN-EQUITY-PREMARKET-SYNTH-001",
         "namespace": "AS-L6",
@@ -33,25 +41,38 @@ def _spec(
         "documentation": "https://example.test/equity-docs",
     }
 
-    return SourceSpec(
-        source_id=raw["source_id"],
-        namespace=raw["namespace"],
-        input_family=raw["input_family"],
-        role=raw["role"],
-        provider=raw["provider"],
-        transport=raw["transport"],
-        endpoint=raw["endpoint"],
-        parser_id=raw["parser_id"],
-        criticality=raw["criticality"],
-        max_age_seconds=raw["max_age_seconds"],
-        raw=raw,
+    return raw
+
+
+def _registry(
+    *,
+    authentication: str = "LOCAL_READ_ONLY",
+) -> SourceRegistry:
+    payload = json.loads(
+        (
+            ROOT
+            / "CONFIG"
+            / "SOURCE_REGISTRY_V1.2.json"
+        ).read_text(encoding="utf-8")
     )
+
+    payload["sources"].append(
+        _equity_source(
+            authentication=authentication
+        )
+    )
+
+    return SourceRegistry(payload)
 
 
 def _binding():
+    registry = _registry()
+
     return build_equity_source_binding(
-        _spec(),
-        source_registry_hash="1" * 64,
+        registry,
+        source_id=(
+            "CRT-CONN-EQUITY-PREMARKET-SYNTH-001"
+        ),
     )
 
 
@@ -191,11 +212,31 @@ class PremarketEquityLiveSnapshotTests(
 
     def test_unapproved_authentication_is_rejected(self):
         with self.assertRaises(ValueError):
+            _registry(
+                authentication="API_KEY"
+            )
+
+    def test_detached_source_spec_cannot_unlock_binding(self):
+        raw = _equity_source()
+
+        detached = SourceSpec(
+            source_id=raw["source_id"],
+            namespace=raw["namespace"],
+            input_family=raw["input_family"],
+            role=raw["role"],
+            provider=raw["provider"],
+            transport=raw["transport"],
+            endpoint=raw["endpoint"],
+            parser_id=raw["parser_id"],
+            criticality=raw["criticality"],
+            max_age_seconds=raw["max_age_seconds"],
+            raw=raw,
+        )
+
+        with self.assertRaises(ValueError):
             build_equity_source_binding(
-                _spec(
-                    authentication="API_KEY"
-                ),
-                source_registry_hash="1" * 64,
+                detached,
+                source_id=raw["source_id"],
             )
 
 

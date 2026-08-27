@@ -15,7 +15,7 @@ from crt_radar.premarket_live_market_handoff import (
     build_premarket_live_market_handoff,
     validate_premarket_live_market_handoff,
 )
-from crt_radar.source_registry import SourceSpec
+from crt_radar.source_registry import SourceRegistry
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -118,7 +118,7 @@ def _observations(observed_at_ms=150):
     return result
 
 
-def _machine_equity_spec():
+def _machine_equity_registry():
     raw = {
         "source_id": "CRT-CONN-EQUITY-PREMARKET-SYNTH-001",
         "namespace": "AS-L6",
@@ -137,19 +137,17 @@ def _machine_equity_spec():
         "documentation": "https://example.test/equity-docs",
     }
 
-    return SourceSpec(
-        source_id=raw["source_id"],
-        namespace=raw["namespace"],
-        input_family=raw["input_family"],
-        role=raw["role"],
-        provider=raw["provider"],
-        transport=raw["transport"],
-        endpoint=raw["endpoint"],
-        parser_id=raw["parser_id"],
-        criticality=raw["criticality"],
-        max_age_seconds=raw["max_age_seconds"],
-        raw=raw,
+    payload = json.loads(
+        (
+            ROOT
+            / "CONFIG"
+            / "SOURCE_REGISTRY_V1.2.json"
+        ).read_text(encoding="utf-8")
     )
+
+    payload["sources"].append(raw)
+
+    return SourceRegistry(payload)
 
 
 def _machine_equity_snapshot():
@@ -287,11 +285,11 @@ class PremarketLiveMarketHandoffTests(
             machine_equity_snapshot=(
                 _machine_equity_snapshot()
             ),
-            machine_equity_source_spec=(
-                _machine_equity_spec()
+            machine_equity_source_registry=(
+                _machine_equity_registry()
             ),
-            machine_equity_source_registry_hash=(
-                "1" * 64
+            machine_equity_source_id=(
+                "CRT-CONN-EQUITY-PREMARKET-SYNTH-001"
             ),
         )
 
@@ -325,6 +323,32 @@ class PremarketLiveMarketHandoffTests(
             handoff["action_output"],
             "NONE",
         )
+
+    def test_current_registry_cannot_unlock_unregistered_equity_source(self):
+        current_registry = SourceRegistry.load(
+            ROOT
+            / "CONFIG"
+            / "SOURCE_REGISTRY_V1.2.json"
+        )
+
+        with self.assertRaises(ValueError):
+            build_premarket_live_market_handoff(
+                source_mode="MACHINE_VERIFIED_ONLY",
+                evaluation_window={
+                    "start_ms": 100,
+                    "end_ms": 200,
+                },
+                source_gate_result=_source_gate(),
+                machine_equity_snapshot=(
+                    _machine_equity_snapshot()
+                ),
+                machine_equity_source_registry=(
+                    current_registry
+                ),
+                machine_equity_source_id=(
+                    "CRT-CONN-EQUITY-PREMARKET-SYNTH-001"
+                ),
+            )
 
     def test_machine_snapshot_without_bound_source_is_rejected(self):
         with self.assertRaises(ValueError):

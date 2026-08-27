@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from .source_registry import (
-    SourceSpec,
+    SourceRegistry,
     canonical_json_bytes,
     sha256_hex,
 )
@@ -125,14 +125,24 @@ def _window(
 
 
 def build_equity_source_binding(
-    spec: SourceSpec,
+    registry: SourceRegistry,
     *,
-    source_registry_hash: str,
+    source_id: str,
 ) -> dict[str, Any]:
-    if not isinstance(spec, SourceSpec):
+    if not isinstance(registry, SourceRegistry):
         raise ValueError(
-            "equity source spec required"
+            "equity source registry required"
         )
+
+    if (
+        not isinstance(source_id, str)
+        or not source_id.strip()
+    ):
+        raise ValueError(
+            "equity source id required"
+        )
+
+    spec = registry.get(source_id.strip())
 
     if spec.input_family != INPUT_FAMILY:
         raise ValueError(
@@ -198,7 +208,7 @@ def build_equity_source_binding(
         )
 
     registry_hash = _hash64(
-        source_registry_hash,
+        registry.hash,
         "source_registry_hash",
     )
 
