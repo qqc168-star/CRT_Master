@@ -10,14 +10,14 @@ from .premarket_live_market_handoff import (
 CONTRACT_VERSION = "CRT_PREMARKET_BATTLE_MAP_CONTRACT_V0.1"
 ASSET_ORDER = ["MSTR", "ASST", "STRC", "SATA"]
 FIRST_SCREEN_FIELDS = [
-    "asset",
     "light",
+    "asset",
     "premarket_price",
-    "attack_line",
     "diluted_mnav",
-    "first_defense",
-    "invalidation_line",
-    "capital_judgment",
+    "entry_condition",
+    "entry_shares_delta",
+    "exit_condition",
+    "exit_shares_delta",
 ]
 ANALYSIS_SECTION_IDS = [
     "ISSUER_REFLEXIVITY",
@@ -31,10 +31,10 @@ ANALYSIS_SECTION_IDS = [
 ]
 ANALYST_FIELDS = {
     "light",
-    "attack_line",
-    "first_defense",
-    "invalidation_line",
-    "capital_judgment",
+    "entry_condition",
+    "entry_shares_delta",
+    "exit_condition",
+    "exit_shares_delta",
 }
 
 
@@ -84,6 +84,54 @@ def validate_premarket_battle_map_contract(
         raise ValueError("issuer reflexivity must remain first")
     if issuer_policy.get("section_must_never_disappear") is not True:
         raise ValueError("issuer reflexivity section must never disappear")
+
+    action_policy = contract.get(
+        "action_surface_policy"
+    )
+
+    if not isinstance(action_policy, dict):
+        raise ValueError(
+            "battle map action surface policy missing"
+        )
+
+    expected_action_policy = {
+        "owner": "GPT",
+        "purpose": (
+            "CONDITIONAL_CAPITAL_EXPOSURE_DECISION_SURFACE"
+        ),
+        "entry_condition": {
+            "asset_price_clause_required": True,
+            "btc_price_clause_required": True,
+            "confirmation_clause_supported": True,
+        },
+        "entry_shares_delta": {
+            "sign": "NONNEGATIVE",
+            "zero_allowed": True,
+        },
+        "exit_condition": {
+            "required_channels": [
+                "STOP_LOSS",
+                "TAKE_PROFIT",
+            ],
+            "asset_price_clause_required": True,
+            "btc_price_clause_required": True,
+            "confirmation_clause_supported": True,
+        },
+        "exit_shares_delta": {
+            "sign": "NONPOSITIVE",
+            "zero_allowed": True,
+        },
+        "price_reaching_is_not_action_trigger": True,
+        "condition_requires_context": True,
+        "machine_execution": "FORBIDDEN",
+        "external_action_authority": "NONE",
+        "capital_decision_authority": "USER_ONLY",
+    }
+
+    if action_policy != expected_action_policy:
+        raise ValueError(
+            "battle map action surface policy mismatch"
+        )
 
     mnav_policy = contract.get("mnav_policy")
     if not isinstance(mnav_policy, dict):
@@ -231,14 +279,31 @@ def build_premarket_battle_map(
 
         first_screen.append(
             {
-                "asset": asset,
                 "light": None,
-                "premarket_price": _display_value(facts.get("premarket_price")),
-                "attack_line": None,
+                "asset": asset,
+                "premarket_price": _display_value(
+                    facts.get("premarket_price")
+                ),
                 "diluted_mnav": diluted_mnav,
-                "first_defense": None,
-                "invalidation_line": None,
-                "capital_judgment": None,
+                "entry_condition": {
+                    "asset_price_clause": None,
+                    "btc_price_clause": None,
+                    "confirmation_clause": None,
+                },
+                "entry_shares_delta": None,
+                "exit_condition": {
+                    "stop_loss": {
+                        "asset_price_clause": None,
+                        "btc_price_clause": None,
+                        "confirmation_clause": None,
+                    },
+                    "take_profit": {
+                        "asset_price_clause": None,
+                        "btc_price_clause": None,
+                        "confirmation_clause": None,
+                    },
+                },
+                "exit_shares_delta": None,
             }
         )
 

@@ -55,16 +55,139 @@ class PremarketBattleMapTests(unittest.TestCase):
         mstr = result["first_screen"][0]
         self.assertEqual(mstr["premarket_price"], 120.0)
         self.assertEqual(mstr["diluted_mnav"], 0.91)
-        for field in (
-            "light",
-            "attack_line",
-            "first_defense",
-            "invalidation_line",
-            "capital_judgment",
-        ):
-            self.assertIsNone(mstr[field])
+        self.assertIsNone(mstr["light"])
+
+        self.assertEqual(
+            mstr["entry_condition"],
+            {
+                "asset_price_clause": None,
+                "btc_price_clause": None,
+                "confirmation_clause": None,
+            },
+        )
+
+        self.assertIsNone(
+            mstr["entry_shares_delta"]
+        )
+
+        self.assertEqual(
+            mstr["exit_condition"],
+            {
+                "stop_loss": {
+                    "asset_price_clause": None,
+                    "btc_price_clause": None,
+                    "confirmation_clause": None,
+                },
+                "take_profit": {
+                    "asset_price_clause": None,
+                    "btc_price_clause": None,
+                    "confirmation_clause": None,
+                },
+            },
+        )
+
+        self.assertIsNone(
+            mstr["exit_shares_delta"]
+        )
         self.assertEqual(result["action_output"], "NONE")
         self.assertEqual(result["capital_decision_authority"], "USER_ONLY")
+
+    def test_closed_loop_first_screen_field_order(self):
+        self.assertEqual(
+            FIRST_SCREEN_FIELDS,
+            [
+                "light",
+                "asset",
+                "premarket_price",
+                "diluted_mnav",
+                "entry_condition",
+                "entry_shares_delta",
+                "exit_condition",
+                "exit_shares_delta",
+            ],
+        )
+
+    def test_action_surface_requires_entry_and_exit_context(self):
+        locked = validate_premarket_battle_map_contract(
+            self.contract
+        )
+
+        policy = locked[
+            "action_surface_policy"
+        ]
+
+        self.assertTrue(
+            policy["entry_condition"][
+                "asset_price_clause_required"
+            ]
+        )
+
+        self.assertTrue(
+            policy["entry_condition"][
+                "btc_price_clause_required"
+            ]
+        )
+
+        self.assertEqual(
+            policy["exit_condition"][
+                "required_channels"
+            ],
+            [
+                "STOP_LOSS",
+                "TAKE_PROFIT",
+            ],
+        )
+
+        self.assertTrue(
+            policy[
+                "price_reaching_is_not_action_trigger"
+            ]
+        )
+
+    def test_action_share_delta_signs_are_locked(self):
+        locked = validate_premarket_battle_map_contract(
+            self.contract
+        )
+
+        policy = locked[
+            "action_surface_policy"
+        ]
+
+        self.assertEqual(
+            policy["entry_shares_delta"]["sign"],
+            "NONNEGATIVE",
+        )
+
+        self.assertTrue(
+            policy["entry_shares_delta"][
+                "zero_allowed"
+            ]
+        )
+
+        self.assertEqual(
+            policy["exit_shares_delta"]["sign"],
+            "NONPOSITIVE",
+        )
+
+        self.assertTrue(
+            policy["exit_shares_delta"][
+                "zero_allowed"
+            ]
+        )
+
+    def test_action_surface_cannot_grant_machine_execution(self):
+        tampered = deepcopy(self.contract)
+
+        tampered[
+            "action_surface_policy"
+        ][
+            "machine_execution"
+        ] = "ALLOWED"
+
+        with self.assertRaises(ValueError):
+            validate_premarket_battle_map_contract(
+                tampered
+            )
 
     def test_blocked_mnav_is_not_exposed_as_a_number(self):
         result = build_premarket_battle_map(
