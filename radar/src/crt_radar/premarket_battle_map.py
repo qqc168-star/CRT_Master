@@ -3,6 +3,10 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from .premarket_live_market_handoff import (
+    validate_premarket_live_market_handoff,
+)
+
 CONTRACT_VERSION = "CRT_PREMARKET_BATTLE_MAP_CONTRACT_V0.1"
 ASSET_ORDER = ["MSTR", "ASST", "STRC", "SATA"]
 FIRST_SCREEN_FIELDS = [
@@ -174,11 +178,26 @@ def build_premarket_battle_map(
     issuer_reflexivity: dict[str, Any] | None,
     as_of: str | None,
     source_mode: str,
+    live_market_handoff: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     locked = validate_premarket_battle_map_contract(contract)
     modes = locked.get("source_modes", {})
     if source_mode not in modes:
         raise ValueError("unsupported battle map source mode")
+
+    live_market = None
+
+    if live_market_handoff is not None:
+        live_market = (
+            validate_premarket_live_market_handoff(
+                live_market_handoff
+            )
+        )
+
+        if live_market["source_mode"] != source_mode:
+            raise ValueError(
+                "battle map / live market source mode mismatch"
+            )
 
     supplied_assets = asset_facts if isinstance(asset_facts, dict) else {}
     required_facts = locked["required_facts"]
@@ -248,11 +267,33 @@ def build_premarket_battle_map(
                 "analyst_judgment": None,
             }
         else:
+            machine_evidence = None
+            section_state = "REQUIRED_FOR_ANALYST"
+
+            if live_market is not None:
+                candidate = (
+                    live_market
+                    .get("analysis_inputs", {})
+                    .get(section_id)
+                )
+
+                if isinstance(candidate, dict):
+                    machine_evidence = deepcopy(
+                        candidate
+                    )
+
+                    section_state = (
+                        "BLOCKED"
+                        if candidate.get("state")
+                        == "BLOCKED"
+                        else "READY_FOR_ANALYST"
+                    )
+
             section = {
                 "index": index,
                 "id": section_id,
-                "state": "REQUIRED_FOR_ANALYST",
-                "machine_evidence": None,
+                "state": section_state,
+                "machine_evidence": machine_evidence,
                 "analyst_judgment": None,
             }
         sections.append(section)
@@ -273,6 +314,11 @@ def build_premarket_battle_map(
         "asset_fact_readiness": readiness,
         "missing_evidence": missing_evidence,
         "analysis_sections": sections,
+        "live_market_handoff": (
+            deepcopy(live_market)
+            if live_market is not None
+            else None
+        ),
         "analyst_owned_fields": sorted(ANALYST_FIELDS),
         "action_output": "NONE",
         "external_action_authority": "NONE",
