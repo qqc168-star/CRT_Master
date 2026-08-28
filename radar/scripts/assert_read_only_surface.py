@@ -11,9 +11,14 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 FORBIDDEN_CALL_NAMES = {
     "place_order",
+    "placeOrder",
     "submit_order",
     "create_order",
     "cancel_order",
+    "cancelOrder",
+    "reqGlobalCancel",
+    "exerciseOptions",
+    "replaceFA",
     "send_email",
     "transfer_funds",
     "withdraw",

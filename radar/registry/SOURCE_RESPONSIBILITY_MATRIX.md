@@ -32,6 +32,10 @@ This matrix is derived from `CONFIG/SOURCE_REGISTRY_V1.2.json`. The filename is 
 
 Presence in this engineering registry does not grant Production, formal scoring, runtime binding, or Season-output authority.
 
+## Candidate runtime source overlay
+
+`CONFIG/IBKR_EQUITY_SOURCE_V0.1.json` adds `CRT-CONN-EQUITY-PREMARKET-IBKR-001` only at runtime, after preserving and recording the base registry hash. This prevents the IBKR experiment from mutating the sealed base registry identity. The overlay binds local TWS API L1 streaming plus 5-second `TRADES` bars for MSTR, ASST, STRC, and SATA. Delayed data, regulatory snapshots, account/order surfaces, machine execution, and capital-decision authority are forbidden.
+
 ## Formal BTC Season source gaps
 
 The formal input envelope remains the binding-status authority. Every required family below is still unbound; engineering context with a similar name does not satisfy the formal source, transform, window, state, or independent-validation contract.

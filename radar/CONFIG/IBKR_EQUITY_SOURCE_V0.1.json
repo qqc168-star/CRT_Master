@@ -1,0 +1,55 @@
+{
+  "overlay_version": "CRT_IBKR_EQUITY_SOURCE_OVERLAY_V0.1",
+  "status": "CANDIDATE_UNMERGED",
+  "base_registry": "CONFIG/SOURCE_REGISTRY_V1.2.json",
+  "base_registry_id": "CRT-RADAR-SOURCE-REGISTRY-V1.4-WIP",
+  "base_registry_mutation": "FORBIDDEN",
+  "external_action_authority": "NONE",
+  "capital_decision_authority": "USER_ONLY",
+  "source": {
+    "api_request_surface": [
+      "reqMarketDataType",
+      "reqMktData",
+      "reqRealTimeBars",
+      "cancelMktData",
+      "cancelRealTimeBars"
+    ],
+    "authentication": "LOCAL_READ_ONLY",
+    "capital_decision_authority": "USER_ONLY",
+    "criticality": "NONCRITICAL_DISCLOSE_MISSING",
+    "documentation": "https://ibkrcampus.com/campus/ibkr-api-page/twsapi-doc/; IBKR_LIVE_MARKET_DATA_RUNBOOK.md",
+    "endpoint": "runtime/equity/premarket/latest.json",
+    "external_action_authority": "NONE",
+    "implementation_state": "LIVE_READ_ONLY_COLLECTOR",
+    "input_family": "EQUITY_PREMARKET_SNAPSHOT",
+    "machine_may_execute_trade": false,
+    "market_data_contract": {
+      "asset_order": [
+        "MSTR",
+        "ASST",
+        "STRC",
+        "SATA"
+      ],
+      "bar_size_seconds": 5,
+      "currency": "USD",
+      "exchange": "SMART",
+      "l1_streaming": true,
+      "market_data_type": "LIVE_ONLY",
+      "regulatory_snapshot": false,
+      "security_type": "STK",
+      "use_rth": false,
+      "what_to_show": "TRADES"
+    },
+    "max_age_seconds": 120,
+    "namespace": "AS-L6",
+    "order_api_surface": "ABSENT",
+    "parser_id": "CRT_EQUITY_PREMARKET_SNAPSHOT_V1",
+    "provider": "Interactive Brokers TWS API",
+    "provider_binding_state": "BOUND",
+    "provider_contract_id": "IBKR-TWS-API-L1-RTBARS-5S-V1",
+    "role": "Read-only US equity premarket L1 streaming and 5-second real-time bars",
+    "source_id": "CRT-CONN-EQUITY-PREMARKET-IBKR-001",
+    "transport": "LOCAL_VERIFIED_JSON_SNAPSHOT",
+    "tws_read_only_api_required": true
+  }
+}

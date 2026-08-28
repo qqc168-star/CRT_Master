@@ -4,6 +4,7 @@ __all__ = [
     "as_evidence_adapter",
     "asl4_e2e_adapter",
     "e2e_bridge",
+    "ibkr_live_market_data_intake",
     "liquidation_aggregator",
     "liquidation_collector",
     "live_shadow_evidence",
