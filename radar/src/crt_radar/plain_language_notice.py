@@ -201,12 +201,39 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
 
     requested = wake.get("state") == "REANALYSIS_REQUESTED"
     wake_reason = str(wake.get("reason", ""))
+    commander_observation = (
+        requested
+        and wake.get("input_family") == "COMMANDER_PLAN_OBSERVATION"
+    )
+    commander_event = wake.get("commander_event")
+    if commander_observation and not isinstance(commander_event, dict):
+        raise ValueError("Commander observation wake event is unavailable")
+    commander_plan_context = "verified Commander Plan"
+    if (
+        isinstance(commander_event, dict)
+        and commander_event.get("level_price_classification")
+        == "SIMULATION_ONLY"
+    ):
+        commander_plan_context = "sealed simulated Commander Plan"
+
     dvol_state = str(dvol.get("state", "BLOCKED"))
     compression_alert = dvol_state == "COMPRESSION_EXTREME"
 
     percent_change = wake.get("percent_change")
 
-    if requested and wake_reason == "DVOL_EXPANSION_ACTIVATED":
+    if commander_observation:
+        assert isinstance(commander_event, dict)
+        asset = str(commander_event.get("asset", "UNKNOWN_ASSET"))
+        line_type = str(commander_event.get("line_type", "UNKNOWN_LINE"))
+        event_type = str(commander_event.get("event_type", "UNKNOWN_EVENT"))
+        level_price = commander_event.get("level_price")
+        observed_price = commander_event.get("observed_price")
+        what_happened = (
+            f"{asset} {line_type} line emitted {event_type}; "
+            f"observed_price={observed_price}, level_price={level_price}. "
+            "This is an observation only; price reaching is not an action trigger."
+        )
+    elif requested and wake_reason == "DVOL_EXPANSION_ACTIVATED":
         current_dvol = dvol.get("current_dvol")
         rebound = dvol.get("rebound_from_30d_low_pct")
         if isinstance(current_dvol, (int, float)) and isinstance(
@@ -259,6 +286,12 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
     top_changes = _top_change_lines(pack)
     why_parts: list[str] = []
 
+    if commander_observation:
+        why_parts.append(
+            f"A {commander_plan_context} observation changed state and requires "
+            "contextual GPT review; it grants no trading authority."
+        )
+
     if top_changes:
         why_parts.append(
             "??????????" + "?".join(top_changes) + "?"
@@ -287,7 +320,15 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(blockers, list):
         blockers = []
 
-    if requested:
+    if commander_observation:
+        title = "CRT Commander observation requires GPT reanalysis"
+        state = "GPT_REANALYSIS_REQUESTED"
+        instruction = (
+            f"Re-read the latest Evidence Pack and {commander_plan_context} context, "
+            "reassess the thesis, and advise the user only. Do not buy, sell, "
+            "submit orders, alter positions, or move funds."
+        )
+    elif requested:
         title = "BTC ????????????"
         state = "GPT_REANALYSIS_REQUESTED"
         instruction = (

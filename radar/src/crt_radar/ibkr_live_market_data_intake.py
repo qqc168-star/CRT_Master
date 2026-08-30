@@ -42,6 +42,7 @@ DEFAULT_DURATION_SECONDS = 12.0
 
 LIVE_MARKET_DATA_TYPE = 1
 RT_VOLUME_TICK_TYPE = 48
+LAST_PRICE_TICK_TYPE = 4
 INFORMATIONAL_ERROR_CODES = {
     2104,
     2106,
@@ -96,6 +97,23 @@ class IbkrIntakeConfig:
 
 class IbkrFeed(Protocol):
     def collect(self, config: IbkrIntakeConfig) -> dict[str, Any]: ...
+
+
+class IbkrObservationSink(Protocol):
+    def on_ibkr_last(self, asset: str, price: float, observed_at_ms: int) -> None: ...
+
+    def on_ibkr_5s_close(
+        self,
+        asset: str,
+        close: float,
+        observed_at_ms: int,
+    ) -> None: ...
+
+
+def _observation_channel_for_tick_type(tick_type: int) -> str | None:
+    """Return an event-engine channel only for IBKR LAST, never BID or ASK."""
+
+    return "LAST" if int(tick_type) == LAST_PRICE_TICK_TYPE else None
 
 
 def build_ibkr_source_registry(
@@ -286,7 +304,9 @@ def _parse_rt_volume(value: str) -> dict[str, Any] | None:
     }
 
 
-def _native_feed_app() -> tuple[type[Any], type[Any]]:
+def _native_feed_app(
+    observation_sink: IbkrObservationSink | None = None,
+) -> tuple[type[Any], type[Any]]:
     try:
         from ibapi.client import EClient
         from ibapi.contract import Contract
@@ -346,6 +366,32 @@ def _native_feed_app() -> tuple[type[Any], type[Any]]:
                 return None
             return bound[0]
 
+        def _notify_observation(
+            self,
+            channel: str,
+            asset: str,
+            price: float,
+            observed_at_ms: int,
+        ) -> None:
+            if observation_sink is None:
+                return
+            try:
+                if channel == "LAST":
+                    observation_sink.on_ibkr_last(asset, price, observed_at_ms)
+                elif channel == "BAR_5S_CLOSE":
+                    observation_sink.on_ibkr_5s_close(asset, price, observed_at_ms)
+                else:
+                    raise ValueError(f"unsupported observation channel: {channel}")
+            except Exception as exc:
+                with self.lock:
+                    self.failures.append(
+                        {
+                            "req_id": -1,
+                            "code": -2,
+                            "message": f"OBSERVATION_SINK_FAILURE:{type(exc).__name__}:{exc}",
+                        }
+                    )
+
         def tickPrice(  # noqa: N802
             self,
             reqId: int,
@@ -366,6 +412,14 @@ def _native_feed_app() -> tuple[type[Any], type[Any]]:
             with self.lock:
                 self.assets[asset]["l1"][field] = number
                 self.assets[asset]["last_received_at_ms"] = received
+            observation_channel = _observation_channel_for_tick_type(tickType)
+            if observation_channel is not None:
+                self._notify_observation(
+                    observation_channel,
+                    asset,
+                    number,
+                    received,
+                )
 
         def tickSize(self, reqId: int, tickType: int, size: Any) -> None:  # noqa: N802
             asset = self._asset(reqId, "L1")
@@ -430,14 +484,23 @@ def _native_feed_app() -> tuple[type[Any], type[Any]]:
             with self.lock:
                 self.assets[asset]["bars_5s"].append(bar)
                 self.assets[asset]["last_received_at_ms"] = bar["received_at_ms"]
+            self._notify_observation(
+                "BAR_5S_CLOSE",
+                asset,
+                bar["close"],
+                bar["received_at_ms"],
+            )
 
     return MarketDataApp, Contract
 
 
 class NativeIbkrFeed:
+    def __init__(self, observation_sink: IbkrObservationSink | None = None) -> None:
+        self.observation_sink = observation_sink
+
     def collect(self, config: IbkrIntakeConfig) -> dict[str, Any]:
         locked = config.validate()
-        MarketDataApp, Contract = _native_feed_app()
+        MarketDataApp, Contract = _native_feed_app(self.observation_sink)
         app = MarketDataApp()
         thread: threading.Thread | None = None
         request_ids: list[tuple[int, int]] = []

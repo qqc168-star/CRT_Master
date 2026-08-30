@@ -233,6 +233,8 @@ def fuse_reanalysis_wake(
             base_source = "DVOL"
         elif result.get("input_family") == "BTC_SPOT_PRICE":
             base_source = "BTC_INTRADAY"
+        elif result.get("input_family") == "COMMANDER_PLAN_OBSERVATION":
+            base_source = "COMMANDER_PLAN_OBSERVATION"
         else:
             base_source = "BASE_WAKE"
 
