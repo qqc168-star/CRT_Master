@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from typing import Any
 
 
@@ -173,6 +174,16 @@ def _position_line(private_context: dict[str, Any] | None) -> str:
     )
 
 
+def _market_health_events(pack: dict[str, Any]) -> list[str]:
+    market_health = pack.get("mstr_asst_market_health")
+    if not isinstance(market_health, dict):
+        return []
+    reasons = market_health.get("wake_reasons")
+    if not isinstance(reasons, list):
+        return []
+    return [str(reason) for reason in reasons]
+
+
 def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
     authority = pack.get("authority", {})
     if (
@@ -201,12 +212,24 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
 
     requested = wake.get("state") == "REANALYSIS_REQUESTED"
     wake_reason = str(wake.get("reason", ""))
+    market_health_events = _market_health_events(pack)
+    market_health_requested = (
+        requested
+        and "MSTR_ASST_MARKET_HEALTH" in wake.get("wake_sources", [])
+        and bool(market_health_events)
+    )
     dvol_state = str(dvol.get("state", "BLOCKED"))
     compression_alert = dvol_state == "COMPRESSION_EXTREME"
 
     percent_change = wake.get("percent_change")
 
-    if requested and wake_reason == "DVOL_EXPANSION_ACTIVATED":
+    if market_health_requested:
+        what_happened = (
+            "MSTR／ASST 市場健康度事件已通過唯讀驗證："
+            + "、".join(market_health_events)
+            + "。這是 GPT 重新分析喚醒，不是使用者通知或交易指令。"
+        )
+    elif requested and wake_reason == "DVOL_EXPANSION_ACTIVATED":
         current_dvol = dvol.get("current_dvol")
         rebound = dvol.get("rebound_from_30d_low_pct")
         if isinstance(current_dvol, (int, float)) and isinstance(
@@ -287,7 +310,17 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(blockers, list):
         blockers = []
 
-    if requested:
+    if market_health_requested:
+        title = "MSTR／ASST 市場健康度觸發 GPT 重新分析"
+        state = "GPT_REANALYSIS_REQUESTED"
+        instruction = (
+            "讀取最新 Evidence Pack、Capital State、未完成三段計畫、"
+            "MSTR／ASST Market Health 與已核准 Three-Army Commander 線。"
+            "依三軍統帥準則重新評估攻擊、第一防線、失效與收割位置；"
+            "Wake 不等於 Notification，只有完成多空、BTC 傳導、衍生品、"
+            "公司反身性與矛盾證據檢查後，才判斷是否值得通知使用者。"
+        )
+    elif requested:
         title = "BTC ????????????"
         state = "GPT_REANALYSIS_REQUESTED"
         instruction = (
@@ -318,8 +351,14 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
         "position_context": _position_line(pack.get("private_context")),
         "data_limits": blockers,
         "dvol_regime_watch": dvol,
+        "mstr_asst_market_health": deepcopy(
+            pack.get("mstr_asst_market_health")
+        ),
         "btc_transition_light": build_btc_transition_light(pack),
         "instruction_for_gpt": instruction,
+        "notification_state": "GPT_JUDGMENT_PENDING" if requested else "NO_NOTIFICATION",
+        "notification_performed": False,
+        "notification_authority": "NONE",
         "source_evidence_pack_hash": pack.get("evidence_pack_hash"),
         "action_output": "NONE",
         "external_action_authority": "NONE",

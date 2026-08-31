@@ -23,6 +23,31 @@
 powershell -ExecutionPolicy Bypass -File .\radar\scripts\windows\run_observation_history_windows.ps1
 ```
 
+### MSTR／ASST Market Health（市場健康度）→ GPT Wake（GPT 喚醒）
+
+值班入口可選擇性讀取一份已驗證、local-only（僅本機）的
+`CRT_MSTR_ASST_MARKET_HEALTH_V0.1` 快照：
+
+```powershell
+python -m crt_radar.daily_evidence_runner `
+  --mstr-asst-market-health "$env:USERPROFILE\CRT_Runtime\market-health\latest.json" `
+  --wake-output "$env:USERPROFILE\CRT_Runtime\wake\latest.json" `
+  --notice-output "$env:USERPROFILE\CRT_Runtime\notifications\latest.json" `
+  --handoff-output "$env:USERPROFILE\CRT_Runtime\gpt-handoff\latest.json" `
+  --handoff-ledger "$env:USERPROFILE\CRT_Runtime\gpt-handoff\ledger.jsonl" `
+  --bridge-outbox-dir "$env:USERPROFILE\CRT_Runtime\gpt-bridge-outbox"
+```
+
+Market Health 快照會先驗證 schema、內容一致性、雜湊與
+External Action Authority（外部行動權限）`NONE`，才寫入 Evidence Pack
+並參與 Wake Fusion。相同資產與相同語義事件由 GPT Handoff Ledger
+（GPT 交接帳本）去重；不同資產的同名事件不會互相吞併。
+
+此入口只形成本機 Evidence Pack、Wake、Notice、GPT Handoff 與 Bridge
+Outbox。它不會 claim（領取）外部傳輸、不會通知使用者、不會修改持倉，
+也不會下單。Wake（喚醒）不等於 Notification（通知）；是否值得通知仍由
+GPT 依 Three-Army Commander Doctrine（三軍統帥準則）重新分析後裁決。
+
 安裝 read-only recurring task（唯讀週期工作）。預設 cadence（執行頻率）為 60 分鐘，只屬於 Operational Default（營運預設值），不是 investment threshold（投資閾值）：
 
 ```powershell

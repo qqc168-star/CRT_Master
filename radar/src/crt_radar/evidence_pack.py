@@ -11,6 +11,7 @@ from .assumption_boundary_watch import evaluate_assumption_watch
 from .asset_strategy_delta import build_asset_strategy_delta
 from .btc_bull_validation import evaluate_btc_bull_validation
 from .change_engine import compute_changes, distill_top_changes
+from .mstr_asst_market_health import validate_mstr_asst_market_health
 from .observation_store import Observation, ObservationStore, extract_observations
 from .plan_drift import evaluate_plan_drift
 from .reanalysis_wake import fuse_reanalysis_wake
@@ -245,6 +246,7 @@ def build_evidence_pack(
     btc_entry_gate: dict[str, Any] | None = None,
     assumption_watch_context: dict[str, Any] | None = None,
     private_context: dict[str, Any] | None = None,
+    mstr_asst_market_health: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
         raise ValueError("source_gate must be an object")
@@ -313,6 +315,12 @@ def build_evidence_pack(
         pack["btc_entry_gate"] = deepcopy(btc_entry_gate)
     if private_context is not None:
         pack["private_context"] = deepcopy(private_context)
+    if mstr_asst_market_health is not None:
+        pack["mstr_asst_market_health"] = (
+            validate_mstr_asst_market_health(
+                mstr_asst_market_health
+            )
+        )
 
     pack["plan_drift"] = evaluate_plan_drift(
         private_context=private_context,
@@ -322,6 +330,9 @@ def build_evidence_pack(
     fused_reanalysis_wake = fuse_reanalysis_wake(
         pack.get("reanalysis_wake"),
         plan_drift=pack["plan_drift"],
+        mstr_asst_market_health=pack.get(
+            "mstr_asst_market_health"
+        ),
     )
 
     if fused_reanalysis_wake is not None:

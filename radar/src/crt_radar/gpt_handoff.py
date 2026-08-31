@@ -77,6 +77,7 @@ BRIDGE_OPTIONAL_MARKET_SECTIONS = (
     "transition_diagnostic",
     "btc_entry_gate",
     "btc_bull_validation",
+    "mstr_asst_market_health",
 )
 
 
@@ -1270,10 +1271,20 @@ def run_gpt_handoff_gate(
             "LATEST_EVIDENCE_PACK",
             "LATEST_CAPITAL_STATE",
             "LATEST_NOTICE",
+            *(
+                [
+                    "LATEST_MSTR_ASST_MARKET_HEALTH",
+                    "LATEST_THREE_ARMY_COMMANDER_LINES",
+                ]
+                if "mstr_asst_market_health" in pack
+                else []
+            ),
         ],
         "required_behavior": [
             "READ_CURRENT_EVIDENCE",
             "REANALYZE",
+            "APPLY_THREE_ARMY_COMMANDER_DOCTRINE",
+            "DECIDE_USER_NOTIFICATION_AFTER_REANALYSIS",
             "ADVISE_USER_ONLY",
             "NO_EXTERNAL_ACTION",
         ],
