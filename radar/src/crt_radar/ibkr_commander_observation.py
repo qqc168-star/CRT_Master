@@ -106,12 +106,14 @@ class IbkrCommanderObservationBridge:
         *,
         current_main_sha: str,
         now: datetime | None = None,
+        gate6a_state: object | None = None,
     ) -> "IbkrCommanderObservationBridge":
         return cls(
             CommanderPlanAdapter.arm_live(
                 plan,
                 current_main_sha=current_main_sha,
                 now=now,
+                gate6a_state=gate6a_state,
             )
         )
 
@@ -122,6 +124,9 @@ class IbkrCommanderObservationBridge:
     @property
     def events(self) -> tuple[dict[str, Any], ...]:
         return self._adapter.events
+
+    def gate6a_state(self) -> dict[str, Any]:
+        return self._adapter.gate6a_state()
 
     def latest_reanalysis_wake(self) -> dict[str, Any] | None:
         if not self.events:

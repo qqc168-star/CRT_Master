@@ -72,11 +72,17 @@ def valid_test_plan() -> dict:
 
 
 class CommanderPlanAdapterTests(TestCase):
-    def arm(self, plan: dict | None = None) -> CommanderPlanAdapter:
+    def arm(
+        self,
+        plan: dict | None = None,
+        *,
+        gate6a_state: object | None = None,
+    ) -> CommanderPlanAdapter:
         return CommanderPlanAdapter.arm_offline(
             plan if plan is not None else valid_test_plan(),
             current_main_sha=CURRENT_MAIN_SHA,
             now=NOW,
+            gate6a_state=gate6a_state,
         )
 
     def feed_last(self, adapter: CommanderPlanAdapter, price: float, seconds: int) -> None:
@@ -106,6 +112,37 @@ class CommanderPlanAdapterTests(TestCase):
             ),
         )
         self.assertEqual(adapter.events, ())
+
+    def test_existing_gate6a_state_continues_acceptance_after_restart(self) -> None:
+        first = self.arm()
+        self.feed_last(first, 99.60, 0)
+        self.feed_last(first, 99.85, 1)
+        self.feed_last(first, 100.01, 2)
+        self.feed_close(first, 100.02, 7)
+        self.feed_close(first, 100.03, 12)
+
+        restored = self.arm(gate6a_state=first.gate6a_state())
+        self.assertEqual(restored.events, ())
+        self.feed_close(restored, 100.04, 17)
+        self.feed_close(restored, 99.99, 22)
+
+        attack_events = [
+            event for event in restored.events if event["line_id"] == "test-attack"
+        ]
+        self.assertEqual(
+            [event["event_type"] for event in attack_events],
+            ["ACCEPTED"],
+        )
+
+    def test_gate6a_state_tamper_fails_closed(self) -> None:
+        adapter = self.arm()
+        self.feed_last(adapter, 99.85, 0)
+        self.feed_last(adapter, 100.01, 1)
+        checkpoint = adapter.gate6a_state()
+        checkpoint["lines"]["test-attack"]["state"] = "FAR"
+
+        with self.assertRaisesRegex(ValueError, "transition flags mismatch"):
+            self.arm(gate6a_state=checkpoint)
 
     def test_existing_gate6a_sequence_preserves_plan_identity_and_governance(self) -> None:
         adapter = self.arm()

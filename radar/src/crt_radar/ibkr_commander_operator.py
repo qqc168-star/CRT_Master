@@ -20,6 +20,7 @@ from typing import Any, Callable, Final
 
 from .commander_plan_adapter import (
     ALLOWED_ASSETS,
+    CommanderPlanBlocked,
     SIMULATION_ONLY,
     seal_commander_plan,
     validate_commander_plan,
@@ -42,8 +43,11 @@ from .plain_language_notice import build_plain_language_notice
 from .reanalysis_wake import fuse_reanalysis_wake
 
 
-SCHEMA_VERSION: Final = "CRT_GATE6C3_OPERATOR_V0.1"
-DEDUPE_SCHEMA_VERSION: Final = "CRT_GATE6C3_EVENT_DEDUPE_V0.1"
+SCHEMA_VERSION: Final = "CRT_GATE6C3_OPERATOR_V0.2"
+DEDUPE_SCHEMA_VERSION: Final = "CRT_GATE6C3_RUNTIME_CHECKPOINT_V0.2"
+LEGACY_DEDUPE_SCHEMA_VERSION: Final = "CRT_GATE6C3_EVENT_DEDUPE_V0.1"
+RESTART_CONTINUITY: Final = "COMPLETED_CYCLE_GATE6A_STATE_AND_EVENT_DEDUPE"
+CHECKPOINT_COMMIT_SCOPE: Final = "LAST_COMPLETED_OPERATOR_CYCLE"
 AUTHORITY: Final = {
     "action_output": "NONE",
     "machine_execution": "FORBIDDEN",
@@ -262,7 +266,9 @@ def _dedupe_payload(plan_sha: str) -> dict[str, Any]:
         "schema_version": DEDUPE_SCHEMA_VERSION,
         "plan_sha": plan_sha,
         "lines": {},
-        "restart_continuity": "EVENT_DEDUPE_ONLY",
+        "gate6a_state": None,
+        "restart_continuity": RESTART_CONTINUITY,
+        "checkpoint_commit_scope": CHECKPOINT_COMMIT_SCOPE,
         **AUTHORITY,
     }
 
@@ -285,8 +291,36 @@ def _load_dedupe_state(path: Path, plan_sha: str) -> dict[str, Any]:
     unsigned.pop("state_hash", None)
     if state_hash != _canonical_hash(unsigned):
         raise ValueError("Gate 6C-3 dedupe state hash mismatch")
-    if payload.get("schema_version") != DEDUPE_SCHEMA_VERSION:
-        raise ValueError("Gate 6C-3 dedupe schema mismatch")
+    schema_version = payload.get("schema_version")
+    if schema_version not in {
+        DEDUPE_SCHEMA_VERSION,
+        LEGACY_DEDUPE_SCHEMA_VERSION,
+    }:
+        raise ValueError("Gate 6C-3 checkpoint schema mismatch")
+    expected_fields = {
+        "schema_version",
+        "plan_sha",
+        "lines",
+        "restart_continuity",
+        "state_hash",
+        *AUTHORITY,
+    }
+    if schema_version == DEDUPE_SCHEMA_VERSION:
+        expected_fields.update({"gate6a_state", "checkpoint_commit_scope"})
+    if set(payload) != expected_fields:
+        raise ValueError("Gate 6C-3 checkpoint fields mismatch")
+    expected_continuity = (
+        RESTART_CONTINUITY
+        if schema_version == DEDUPE_SCHEMA_VERSION
+        else "EVENT_DEDUPE_ONLY"
+    )
+    if payload.get("restart_continuity") != expected_continuity:
+        raise ValueError("Gate 6C-3 checkpoint continuity mismatch")
+    if (
+        schema_version == DEDUPE_SCHEMA_VERSION
+        and payload.get("checkpoint_commit_scope") != CHECKPOINT_COMMIT_SCOPE
+    ):
+        raise ValueError("Gate 6C-3 checkpoint commit scope mismatch")
     for key, expected in AUTHORITY.items():
         if payload.get(key) != expected:
             raise ValueError(f"Gate 6C-3 dedupe authority mismatch:{key}")
@@ -294,16 +328,22 @@ def _load_dedupe_state(path: Path, plan_sha: str) -> dict[str, Any]:
         raise ValueError("Gate 6C-3 dedupe line state unavailable")
     if payload.get("plan_sha") != plan_sha:
         return _dedupe_payload(plan_sha)
+    if schema_version == LEGACY_DEDUPE_SCHEMA_VERSION:
+        migrated = _dedupe_payload(plan_sha)
+        migrated["lines"] = copy.deepcopy(payload["lines"])
+        return migrated
+    gate6a_state = payload.get("gate6a_state")
+    if gate6a_state is not None and not isinstance(gate6a_state, dict):
+        raise ValueError("Gate 6C-3 Gate 6A state unavailable")
     return payload
 
 
 def _dedupe_events(
     events: list[dict[str, Any]],
     *,
-    plan_sha: str,
-    state_path: Path,
+    state: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
-    state = _load_dedupe_state(state_path, plan_sha)
+    state = copy.deepcopy(state)
     line_state = state["lines"]
     new_events: list[dict[str, Any]] = []
     duplicates: list[dict[str, Any]] = []
@@ -416,18 +456,27 @@ def run_gate6c3_operator(
 ) -> dict[str, Any]:
     """Run one bounded, observation-only Gate 6C-3 operator cycle."""
 
-    bridge = IbkrCommanderObservationBridge.arm(
+    valid, blockers = validate_commander_plan(
         plan,
         current_main_sha=current_main_sha,
         now=now,
     )
+    if not valid:
+        raise CommanderPlanBlocked(blockers)
+    dedupe_path = Path(dedupe_state_path)
+    runtime_state = _load_dedupe_state(dedupe_path, plan["plan_sha"])
+    gate6a_state_restored = runtime_state.get("gate6a_state") is not None
+    bridge = IbkrCommanderObservationBridge.arm(
+        plan,
+        current_main_sha=current_main_sha,
+        now=now,
+        gate6a_state=runtime_state.get("gate6a_state"),
+    )
     capture = _assert_capture(feed_factory(bridge).collect(config))
     raw_events = list(bridge.events)
-    dedupe_path = Path(dedupe_state_path)
     new_events, duplicates, dedupe_commit_states = _dedupe_events(
         raw_events,
-        plan_sha=plan["plan_sha"],
-        state_path=dedupe_path,
+        state=runtime_state,
     )
     handoffs: list[dict[str, Any]] = []
     for event, commit_state in zip(new_events, dedupe_commit_states, strict=True):
@@ -436,11 +485,23 @@ def run_gate6c3_operator(
         )
         write_json_atomic(dedupe_path, commit_state)
 
+    completed_state = copy.deepcopy(
+        dedupe_commit_states[-1] if dedupe_commit_states else runtime_state
+    )
+    completed_state.pop("state_hash", None)
+    completed_state["gate6a_state"] = bridge.gate6a_state()
+    completed_state["restart_continuity"] = RESTART_CONTINUITY
+    completed_state["checkpoint_commit_scope"] = CHECKPOINT_COMMIT_SCOPE
+    write_json_atomic(dedupe_path, _seal_dedupe_state(completed_state))
+
     if new_events:
         state = "OBSERVATION_EVENTS_HANDOFF_READY"
     elif duplicates:
         state = "DUPLICATE_EVENTS_SKIPPED"
-    elif bridge.bar_close_observation_count > 0:
+    elif (
+        bridge.last_observation_count > 0
+        or bridge.bar_close_observation_count > 0
+    ):
         state = "MONITORING_NO_EVENT"
     else:
         state = "WAITING_FOR_MARKET_ACTIVITY"
@@ -462,9 +523,12 @@ def run_gate6c3_operator(
         "new_events": new_events,
         "duplicate_events": duplicates,
         "handoffs": handoffs,
-        "restart_continuity": "EVENT_DEDUPE_ONLY",
+        "restart_continuity": RESTART_CONTINUITY,
+        "checkpoint_commit_scope": CHECKPOINT_COMMIT_SCOPE,
+        "gate6a_state_restored": gate6a_state_restored,
+        "checkpoint_schema_version": DEDUPE_SCHEMA_VERSION,
         "unresolved_restart_boundary": (
-            "IN_MEMORY_GATE6A_STATE_IS_NOT_RESTORED_ACROSS_PROCESS_RESTART"
+            "MID_CYCLE_LIVE_OBSERVATIONS_ARE_NOT_JOURNALED"
         ),
         "current_main_verification": "CALLER_SUPPLIED_READ_ONLY_PRECHECK_REQUIRED",
         "plan_source_main_match": plan["source_main_sha"] == current_main_sha,

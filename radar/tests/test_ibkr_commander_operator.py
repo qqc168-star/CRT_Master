@@ -14,6 +14,12 @@ from crt_radar.commander_plan_adapter import (
     validate_commander_plan,
 )
 from crt_radar.ibkr_commander_operator import (
+    AUTHORITY,
+    CHECKPOINT_COMMIT_SCOPE,
+    DEDUPE_SCHEMA_VERSION,
+    LEGACY_DEDUPE_SCHEMA_VERSION,
+    RESTART_CONTINUITY,
+    _seal_dedupe_state,
     build_simulation_plan_from_capture,
     run_gate6c3_operator,
 )
@@ -266,7 +272,7 @@ class Gate6C3OperatorTests(TestCase):
         self.assertTrue(validation.valid)
         self.assertEqual(ledger_record_count, 1)
 
-    def test_exact_restart_event_is_deduplicated_without_second_handoff(self) -> None:
+    def test_exact_restart_observation_resumes_state_without_second_handoff(self) -> None:
         capture = live_capture()
         capture["assets"]["MSTR"]["l1"]["last"] = 99.85
         callbacks = [("LAST", "MSTR", 99.85, NOW_MS)]
@@ -283,12 +289,86 @@ class Gate6C3OperatorTests(TestCase):
             ledger_record_count = len(ledger.records())
 
         self.assertEqual(first["state"], "OBSERVATION_EVENTS_HANDOFF_READY")
-        self.assertEqual(second["state"], "DUPLICATE_EVENTS_SKIPPED")
+        self.assertEqual(second["state"], "MONITORING_NO_EVENT")
         self.assertEqual(second["new_events"], [])
-        self.assertEqual(len(second["duplicate_events"]), 1)
+        self.assertEqual(second["duplicate_events"], [])
         self.assertEqual(second["handoffs"], [])
         self.assertEqual(ledger_record_count, 1)
-        self.assertEqual(second["restart_continuity"], "EVENT_DEDUPE_ONLY")
+        self.assertEqual(
+            second["restart_continuity"],
+            RESTART_CONTINUITY,
+        )
+        self.assertIs(second["gate6a_state_restored"], True)
+        self.assertEqual(
+            second["checkpoint_commit_scope"],
+            CHECKPOINT_COMMIT_SCOPE,
+        )
+        self.assertEqual(
+            second["unresolved_restart_boundary"],
+            "MID_CYCLE_LIVE_OBSERVATIONS_ARE_NOT_JOURNALED",
+        )
+
+    def test_cross_acceptance_continues_across_operator_restart(self) -> None:
+        capture = live_capture()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            first = self.run_operator(
+                temp_dir,
+                factory=FeedFactory(
+                    capture,
+                    [
+                        ("LAST", "MSTR", 99.85, NOW_MS),
+                        ("LAST", "MSTR", 100.02, NOW_MS + 1_000),
+                        ("BAR", "MSTR", 100.02, NOW_MS + 5_000),
+                        ("BAR", "MSTR", 100.03, NOW_MS + 10_000),
+                    ],
+                ),
+            )
+            second = self.run_operator(
+                temp_dir,
+                factory=FeedFactory(
+                    capture,
+                    [
+                        ("BAR", "MSTR", 100.04, NOW_MS + 15_000),
+                        ("BAR", "MSTR", 99.99, NOW_MS + 20_000),
+                    ],
+                ),
+            )
+
+        self.assertEqual(
+            [event["event_type"] for event in first["new_events"]],
+            ["APPROACH", "CROSS_RAW"],
+        )
+        self.assertEqual(
+            [event["event_type"] for event in second["new_events"]],
+            ["ACCEPTED"],
+        )
+        self.assertIs(first["gate6a_state_restored"], False)
+        self.assertIs(second["gate6a_state_restored"], True)
+
+    def test_cross_detection_continues_from_last_price_across_restart(self) -> None:
+        capture = live_capture()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            first = self.run_operator(
+                temp_dir,
+                factory=FeedFactory(
+                    capture,
+                    [("LAST", "MSTR", 99.50, NOW_MS)],
+                ),
+            )
+            second = self.run_operator(
+                temp_dir,
+                factory=FeedFactory(
+                    capture,
+                    [("LAST", "MSTR", 100.01, NOW_MS + 1_000)],
+                ),
+            )
+
+        self.assertEqual(first["state"], "MONITORING_NO_EVENT")
+        self.assertEqual(first["new_events"], [])
+        self.assertEqual(
+            [event["event_type"] for event in second["new_events"]],
+            ["CROSS_RAW"],
+        )
 
     def test_invalid_plan_blocks_before_feed_connects(self) -> None:
         expired = simulation_plan()
@@ -300,6 +380,17 @@ class Gate6C3OperatorTests(TestCase):
                 self.run_operator(temp_dir, factory=factory, plan=expired)
 
         self.assertIn("PLAN_EXPIRED", raised.exception.blockers)
+        self.assertEqual(factory.call_count, 0)
+
+    def test_missing_plan_sha_blocks_before_checkpoint_or_feed(self) -> None:
+        invalid = simulation_plan()
+        invalid.pop("plan_sha")
+        factory = FeedFactory(live_capture(), [])
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(CommanderPlanBlocked) as raised:
+                self.run_operator(temp_dir, factory=factory, plan=invalid)
+
+        self.assertIn("MISSING_TOP_FIELDS:plan_sha", raised.exception.blockers)
         self.assertEqual(factory.call_count, 0)
 
     def test_non_live_market_data_fails_closed_without_handoff(self) -> None:
@@ -363,6 +454,55 @@ class Gate6C3OperatorTests(TestCase):
                     temp_dir,
                     factory=FeedFactory(capture, callbacks),
                 )
+
+    def test_resealed_invalid_gate6a_state_fails_before_feed_connects(self) -> None:
+        capture = live_capture()
+        callbacks = [
+            ("LAST", "MSTR", 99.85, NOW_MS),
+            ("LAST", "MSTR", 100.01, NOW_MS + 1_000),
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.run_operator(
+                temp_dir,
+                factory=FeedFactory(capture, callbacks),
+            )
+            state_path = Path(temp_dir) / "dedupe.json"
+            state = json.loads(state_path.read_text(encoding="utf-8"))
+            state["gate6a_state"]["lines"]["sim-attack"]["state"] = "FAR"
+            state_path.write_text(
+                json.dumps(_seal_dedupe_state(state)),
+                encoding="utf-8",
+            )
+            factory = FeedFactory(capture, [])
+            with self.assertRaisesRegex(ValueError, "transition flags mismatch"):
+                self.run_operator(temp_dir, factory=factory)
+
+        self.assertEqual(factory.call_count, 0)
+
+    def test_legacy_event_dedupe_checkpoint_migrates_after_successful_cycle(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "dedupe.json"
+            legacy = {
+                "schema_version": LEGACY_DEDUPE_SCHEMA_VERSION,
+                "plan_sha": simulation_plan()["plan_sha"],
+                "lines": {},
+                "restart_continuity": "EVENT_DEDUPE_ONLY",
+                **AUTHORITY,
+            }
+            state_path.write_text(
+                json.dumps(_seal_dedupe_state(legacy)),
+                encoding="utf-8",
+            )
+            result = self.run_operator(
+                temp_dir,
+                factory=FeedFactory(live_capture(), []),
+            )
+            migrated = json.loads(state_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(result["state"], "WAITING_FOR_MARKET_ACTIVITY")
+        self.assertIs(result["gate6a_state_restored"], False)
+        self.assertEqual(migrated["schema_version"], DEDUPE_SCHEMA_VERSION)
+        self.assertIsInstance(migrated["gate6a_state"], dict)
 
     def test_handoff_failure_does_not_commit_dedupe_state(self) -> None:
         capture = live_capture()

@@ -10,13 +10,17 @@ from __future__ import annotations
 from collections import deque
 from collections.abc import Callable
 import math
-from typing import Final
+from typing import Any, Final
 
 
 ALLOWED_DIRECTIONS: Final = frozenset({"UP", "DOWN"})
+ALLOWED_STATES: Final = frozenset(
+    {"FAR", "APPROACH", "CROSS_RAW", "ACCEPTED", "REJECTED"}
+)
 EVENT_TYPES: Final = frozenset(
     {"APPROACH", "CROSS_RAW", "ACCEPTED", "REJECTED", "RETEST", "REARMED"}
 )
+STATE_SCHEMA_VERSION: Final = "CRT_GATE6A_LEVEL_EVENT_STATE_V0.1"
 
 EmitCallback = Callable[[str, float, str], None]
 
@@ -84,6 +88,116 @@ class LevelEventEngine:
         self.accepted_departed = False
         self.retest_emitted = False
         self.closes: deque[float] = deque(maxlen=accept_window)
+
+    def snapshot_state(self) -> dict[str, Any]:
+        """Return the complete state of this existing Gate 6A engine."""
+
+        return {
+            "schema_version": STATE_SCHEMA_VERSION,
+            "level": self.level,
+            "direction": self.direction,
+            "approach_band_bps": self.band_bps,
+            "accept_required": self.accept_required,
+            "accept_window": self.accept_window,
+            "last_price": self.last_price,
+            "state": self.state,
+            "cross_active": self.cross_active,
+            "accepted": self.accepted,
+            "accepted_departed": self.accepted_departed,
+            "retest_emitted": self.retest_emitted,
+            "closes": list(self.closes),
+        }
+
+    def restore_state(self, payload: object) -> None:
+        """Fail closed before restoring a sealed Gate 6A checkpoint."""
+
+        if not isinstance(payload, dict):
+            raise ValueError("Gate 6A state must be an object")
+        required = set(self.snapshot_state())
+        if set(payload) != required:
+            raise ValueError("Gate 6A state fields mismatch")
+        if payload.get("schema_version") != STATE_SCHEMA_VERSION:
+            raise ValueError("Gate 6A state schema mismatch")
+
+        identity = {
+            "level": self.level,
+            "direction": self.direction,
+            "approach_band_bps": self.band_bps,
+            "accept_required": self.accept_required,
+            "accept_window": self.accept_window,
+        }
+        _positive_price(payload.get("level"), "checkpoint_level")
+        checkpoint_band = payload.get("approach_band_bps")
+        if (
+            isinstance(checkpoint_band, bool)
+            or not isinstance(checkpoint_band, (int, float))
+            or not math.isfinite(checkpoint_band)
+            or checkpoint_band < 0
+        ):
+            raise ValueError("Gate 6A approach band mismatch")
+        if any(
+            isinstance(payload.get(field), bool)
+            or not isinstance(payload.get(field), int)
+            or payload[field] <= 0
+            for field in ("accept_required", "accept_window")
+        ):
+            raise ValueError("Gate 6A acceptance window mismatch")
+        for key, expected in identity.items():
+            if payload.get(key) != expected:
+                raise ValueError(f"Gate 6A state identity mismatch:{key}")
+
+        last_price = payload.get("last_price")
+        if last_price is not None:
+            last_price = _positive_price(last_price, "last_price")
+        state = payload.get("state")
+        if state not in ALLOWED_STATES:
+            raise ValueError("Gate 6A state value mismatch")
+        if last_price is None and state != "FAR":
+            raise ValueError("Gate 6A state requires last price")
+
+        bool_fields = (
+            "cross_active",
+            "accepted",
+            "accepted_departed",
+            "retest_emitted",
+        )
+        if any(type(payload.get(field)) is not bool for field in bool_fields):
+            raise ValueError("Gate 6A state boolean mismatch")
+        cross_active = payload["cross_active"]
+        accepted = payload["accepted"]
+        accepted_departed = payload["accepted_departed"]
+        retest_emitted = payload["retest_emitted"]
+
+        expected_flags = {
+            "FAR": (False, False),
+            "APPROACH": (False, False),
+            "CROSS_RAW": (True, False),
+            "ACCEPTED": (True, True),
+            "REJECTED": (False, False),
+        }
+        if (cross_active, accepted) != expected_flags[state]:
+            raise ValueError("Gate 6A state transition flags mismatch")
+        if accepted_departed and not accepted:
+            raise ValueError("Gate 6A accepted departure mismatch")
+        if retest_emitted and not accepted_departed:
+            raise ValueError("Gate 6A retest state mismatch")
+
+        closes = payload.get("closes")
+        if not isinstance(closes, list) or len(closes) > self.accept_window:
+            raise ValueError("Gate 6A close window mismatch")
+        restored_closes = [
+            _positive_price(close, "checkpoint_close") for close in closes
+        ]
+        if state == "CROSS_RAW" and len(restored_closes) >= self.accept_window:
+            raise ValueError("Gate 6A unresolved close window mismatch")
+
+        self.last_price = last_price
+        self.state = state
+        self.cross_active = cross_active
+        self.accepted = accepted
+        self.accepted_departed = accepted_departed
+        self.retest_emitted = retest_emitted
+        self.closes = deque(restored_closes, maxlen=self.accept_window)
 
     def beyond(self, price: float) -> bool:
         if self.direction == "UP":

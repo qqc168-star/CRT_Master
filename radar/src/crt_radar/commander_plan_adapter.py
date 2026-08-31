@@ -50,6 +50,7 @@ TEST_ONLY: Final = "TEST_ONLY"
 SIMULATION_ONLY: Final = "SIMULATION_ONLY"
 IBKR_LIVE: Final = "IBKR_LIVE"
 VERIFIED_COMMANDER_PLAN: Final = "VERIFIED_COMMANDER_PLAN"
+GATE6A_CHECKPOINT_SCHEMA_VERSION: Final = "CRT_COMMANDER_GATE6A_STATE_V0.1"
 
 
 class CommanderPlanBlocked(RuntimeError):
@@ -217,6 +218,7 @@ class CommanderPlanAdapter:
         current_main_sha: str,
         now: datetime | None = None,
         observation_mode: str = TEST_ONLY,
+        gate6a_state: object | None = None,
     ) -> None:
         valid, blockers = validate_commander_plan(
             plan,
@@ -252,6 +254,8 @@ class CommanderPlanAdapter:
                     emit_callback=self._emitter_for(line),
                 )
             )
+        if gate6a_state is not None:
+            self.restore_gate6a_state(gate6a_state)
 
     @classmethod
     def arm_offline(
@@ -260,12 +264,14 @@ class CommanderPlanAdapter:
         *,
         current_main_sha: str,
         now: datetime | None = None,
+        gate6a_state: object | None = None,
     ) -> "CommanderPlanAdapter":
         return cls(
             plan,
             current_main_sha=current_main_sha,
             now=now,
             observation_mode=TEST_ONLY,
+            gate6a_state=gate6a_state,
         )
 
     @classmethod
@@ -275,12 +281,14 @@ class CommanderPlanAdapter:
         *,
         current_main_sha: str,
         now: datetime | None = None,
+        gate6a_state: object | None = None,
     ) -> "CommanderPlanAdapter":
         return cls(
             plan,
             current_main_sha=current_main_sha,
             now=now,
             observation_mode=IBKR_LIVE,
+            gate6a_state=gate6a_state,
         )
 
     @property
@@ -302,6 +310,43 @@ class CommanderPlanAdapter:
     @property
     def events(self) -> tuple[dict[str, Any], ...]:
         return tuple(copy.deepcopy(self._events))
+
+    def gate6a_state(self) -> dict[str, Any]:
+        """Snapshot the existing Gate 6A engines without persisting events."""
+
+        return {
+            "schema_version": GATE6A_CHECKPOINT_SCHEMA_VERSION,
+            "plan_sha": self._plan["plan_sha"],
+            "asset": self._plan["asset"],
+            "lines": {
+                line["line_id"]: engine.snapshot_state()
+                for line, engine in zip(
+                    self._plan["lines"], self._engines, strict=True
+                )
+            },
+        }
+
+    def restore_gate6a_state(self, payload: object) -> None:
+        """Restore only state sealed for this exact verified plan."""
+
+        if not isinstance(payload, dict):
+            raise ValueError("Commander Gate 6A state must be an object")
+        if set(payload) != {"schema_version", "plan_sha", "asset", "lines"}:
+            raise ValueError("Commander Gate 6A state fields mismatch")
+        if payload.get("schema_version") != GATE6A_CHECKPOINT_SCHEMA_VERSION:
+            raise ValueError("Commander Gate 6A state schema mismatch")
+        if payload.get("plan_sha") != self._plan["plan_sha"]:
+            raise ValueError("Commander Gate 6A state plan mismatch")
+        if payload.get("asset") != self._plan["asset"]:
+            raise ValueError("Commander Gate 6A state asset mismatch")
+        lines = payload.get("lines")
+        if not isinstance(lines, dict):
+            raise ValueError("Commander Gate 6A line state unavailable")
+        expected_line_ids = {line["line_id"] for line in self._plan["lines"]}
+        if set(lines) != expected_line_ids:
+            raise ValueError("Commander Gate 6A line identity mismatch")
+        for line, engine in zip(self._plan["lines"], self._engines, strict=True):
+            engine.restore_state(lines[line["line_id"]])
 
     def _emitter_for(self, line: dict[str, Any]):
         def emit(event_type: str, observed_price: float, timestamp: str) -> None:
