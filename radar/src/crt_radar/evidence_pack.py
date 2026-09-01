@@ -14,6 +14,12 @@ from .change_engine import compute_changes, distill_top_changes
 from .mstr_asst_market_health import validate_mstr_asst_market_health
 from .observation_store import Observation, ObservationStore, extract_observations
 from .plan_drift import evaluate_plan_drift
+from .premarket_battle_map import (
+    ANALYSIS_SECTION_IDS as PREMARKET_ANALYSIS_SECTION_IDS,
+    ASSET_ORDER as PREMARKET_ASSET_ORDER,
+    CONTRACT_VERSION as PREMARKET_CONTRACT_VERSION,
+)
+from .premarket_live_market_handoff import validate_premarket_live_market_handoff
 from .reanalysis_wake import fuse_reanalysis_wake
 from .reflexivity_overlay import build_reflexivity_overlay
 from .v110_candidate import evaluate_v110_candidate
@@ -234,6 +240,116 @@ def _contract_surface(
     )
 
 
+def _assert_analyst_fields_unfilled(battle_map: dict[str, Any]) -> None:
+    rows = battle_map.get("first_screen")
+    if not isinstance(rows, list):
+        raise ValueError("premarket battle map first screen missing")
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError("premarket battle map first-screen row invalid")
+        if row.get("light") is not None:
+            raise ValueError("premarket battle map machine-filled analyst light")
+        if row.get("entry_shares_delta") is not None:
+            raise ValueError("premarket battle map machine-filled entry shares")
+        entry = row.get("entry_condition")
+        if not isinstance(entry, dict) or any(value is not None for value in entry.values()):
+            raise ValueError("premarket battle map machine-filled entry condition")
+        exits = row.get("exit_condition")
+        if not isinstance(exits, dict):
+            raise ValueError("premarket battle map exit condition invalid")
+        for channel in ("stop_loss", "take_profit"):
+            condition = exits.get(channel)
+            if not isinstance(condition, dict) or any(
+                value is not None for value in condition.values()
+            ):
+                raise ValueError("premarket battle map machine-filled exit condition")
+        deltas = row.get("exit_shares_delta")
+        if deltas != {"stop_loss": None, "take_profit": None}:
+            raise ValueError("premarket battle map machine-filled exit shares")
+
+
+def _premarket_market_data_surface(
+    *,
+    live_market_handoff: dict[str, Any],
+    battle_map: dict[str, Any],
+) -> dict[str, Any]:
+    handoff = validate_premarket_live_market_handoff(live_market_handoff)
+    if not isinstance(battle_map, dict):
+        raise ValueError("premarket battle map must be an object")
+    if battle_map.get("contract_version") != PREMARKET_CONTRACT_VERSION:
+        raise ValueError("premarket battle map contract version mismatch")
+    expected = {
+        "action_output": "NONE",
+        "external_action_authority": "NONE",
+        "external_action_performed": False,
+        "machine_may_execute_trade": False,
+        "capital_decision_authority": "USER_ONLY",
+        "analyst_judgment_required": True,
+    }
+    for key, value in expected.items():
+        if battle_map.get(key) != value:
+            raise ValueError(f"premarket battle map authority mismatch: {key}")
+    if battle_map.get("source_mode") != handoff["source_mode"]:
+        raise ValueError("premarket battle map source mode mismatch")
+    if battle_map.get("live_market_handoff") != handoff:
+        raise ValueError("premarket battle map handoff mismatch")
+    rows = battle_map.get("first_screen")
+    if not isinstance(rows, list) or [row.get("asset") for row in rows] != PREMARKET_ASSET_ORDER:
+        raise ValueError("premarket battle map asset order mismatch")
+    sections = battle_map.get("analysis_sections")
+    if not isinstance(sections, list) or [row.get("id") for row in sections] != PREMARKET_ANALYSIS_SECTION_IDS:
+        raise ValueError("premarket battle map analysis section order mismatch")
+    _assert_analyst_fields_unfilled(battle_map)
+    return {
+        "state": battle_map.get("state"),
+        "live_market_handoff": deepcopy(handoff),
+        "battle_map": deepcopy(battle_map),
+        "action_output": "NONE",
+        "external_action_authority": "NONE",
+        "external_action_performed": False,
+        "machine_may_execute_trade": False,
+        "capital_decision_authority": "USER_ONLY",
+        "analyst_judgment_required": True,
+    }
+
+
+def attach_premarket_market_data(
+    evidence_pack: dict[str, Any],
+    *,
+    live_market_handoff: dict[str, Any],
+    battle_map: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(evidence_pack, dict):
+        raise ValueError("evidence pack must be an object")
+    if evidence_pack.get("action_output") != "NONE":
+        raise ValueError("evidence pack action_output must remain NONE")
+    authority = evidence_pack.get("authority")
+    if not isinstance(authority, dict):
+        raise ValueError("evidence pack authority missing")
+    if authority.get("external_action_authority") != "NONE":
+        raise ValueError("evidence pack external action authority must remain NONE")
+    if authority.get("external_action_performed") is not False:
+        raise ValueError("evidence pack external action performed must remain false")
+    capital_authority = authority.get("capital_decision_authority")
+    if capital_authority not in {None, "USER_ONLY"}:
+        raise ValueError("evidence pack capital decision authority must remain USER_ONLY")
+
+    supplied_hash = evidence_pack.get("evidence_pack_hash")
+    material = deepcopy(evidence_pack)
+    material.pop("evidence_pack_hash", None)
+    if supplied_hash is not None and supplied_hash != _sha256(material):
+        raise ValueError("evidence pack hash mismatch before premarket attachment")
+
+    result = deepcopy(material)
+    result["authority"]["capital_decision_authority"] = "USER_ONLY"
+    result["premarket_market_data"] = _premarket_market_data_surface(
+        live_market_handoff=live_market_handoff,
+        battle_map=battle_map,
+    )
+    result["evidence_pack_hash"] = _sha256(result)
+    return result
+
+
 def build_evidence_pack(
     source_gate: dict[str, Any],
     *,
@@ -247,6 +363,8 @@ def build_evidence_pack(
     assumption_watch_context: dict[str, Any] | None = None,
     private_context: dict[str, Any] | None = None,
     mstr_asst_market_health: dict[str, Any] | None = None,
+    premarket_live_market_handoff: dict[str, Any] | None = None,
+    premarket_battle_map: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
         raise ValueError("source_gate must be an object")
@@ -283,6 +401,7 @@ def build_evidence_pack(
             "external_action_authority": EXTERNAL_ACTION_AUTHORITY,
             "external_action_performed": False,
             "analyst_judgment_required": True,
+            "capital_decision_authority": "USER_ONLY",
         },
         "data_health": _data_health(source_gate),
         "layers": layers,
@@ -320,6 +439,13 @@ def build_evidence_pack(
             validate_mstr_asst_market_health(
                 mstr_asst_market_health
             )
+        )
+    if (premarket_live_market_handoff is None) != (premarket_battle_map is None):
+        raise ValueError("premarket handoff and battle map must be supplied together")
+    if premarket_live_market_handoff is not None and premarket_battle_map is not None:
+        pack["premarket_market_data"] = _premarket_market_data_surface(
+            live_market_handoff=premarket_live_market_handoff,
+            battle_map=premarket_battle_map,
         )
 
     pack["plan_drift"] = evaluate_plan_drift(

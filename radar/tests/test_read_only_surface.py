@@ -30,6 +30,16 @@ class ReadOnlySurfaceTests(unittest.TestCase):
             errors = module.scan_python(path)
             self.assertTrue(any("place_order" in item for item in errors))
 
+    def test_ibkr_order_call_is_detected(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "bad_ibkr.py"
+            path.write_text(
+                "def x(client):\n    client.placeOrder(1, None, None)\n",
+                encoding="utf-8",
+            )
+            errors = module.scan_python(path)
+            self.assertTrue(any("placeOrder" in item for item in errors))
+
     def test_non_none_authority_is_detected(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "bad.json"

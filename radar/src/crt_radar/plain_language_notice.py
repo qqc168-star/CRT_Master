@@ -218,6 +218,21 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
         and "MSTR_ASST_MARKET_HEALTH" in wake.get("wake_sources", [])
         and bool(market_health_events)
     )
+    commander_observation = (
+        requested
+        and wake.get("input_family") == "COMMANDER_PLAN_OBSERVATION"
+    )
+    commander_event = wake.get("commander_event")
+    if commander_observation and not isinstance(commander_event, dict):
+        raise ValueError("Commander observation wake event is unavailable")
+    commander_plan_context = "verified Commander Plan"
+    if (
+        isinstance(commander_event, dict)
+        and commander_event.get("level_price_classification")
+        == "SIMULATION_ONLY"
+    ):
+        commander_plan_context = "sealed simulated Commander Plan"
+
     dvol_state = str(dvol.get("state", "BLOCKED"))
     compression_alert = dvol_state == "COMPRESSION_EXTREME"
 
@@ -228,6 +243,30 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
             "MSTR／ASST 市場健康度事件已通過唯讀驗證："
             + "、".join(market_health_events)
             + "。這是 GPT 重新分析喚醒，不是使用者通知或交易指令。"
+        )
+        if commander_observation:
+            assert isinstance(commander_event, dict)
+            asset = str(commander_event.get("asset", "UNKNOWN_ASSET"))
+            line_type = str(commander_event.get("line_type", "UNKNOWN_LINE"))
+            event_type = str(commander_event.get("event_type", "UNKNOWN_EVENT"))
+            level_price = commander_event.get("level_price")
+            observed_price = commander_event.get("observed_price")
+            what_happened += (
+                f" {asset} {line_type} line also emitted {event_type}; "
+                f"observed_price={observed_price}, level_price={level_price}. "
+                "This remains an observation only."
+            )
+    elif commander_observation:
+        assert isinstance(commander_event, dict)
+        asset = str(commander_event.get("asset", "UNKNOWN_ASSET"))
+        line_type = str(commander_event.get("line_type", "UNKNOWN_LINE"))
+        event_type = str(commander_event.get("event_type", "UNKNOWN_EVENT"))
+        level_price = commander_event.get("level_price")
+        observed_price = commander_event.get("observed_price")
+        what_happened = (
+            f"{asset} {line_type} line emitted {event_type}; "
+            f"observed_price={observed_price}, level_price={level_price}. "
+            "This is an observation only; price reaching is not an action trigger."
         )
     elif requested and wake_reason == "DVOL_EXPANSION_ACTIVATED":
         current_dvol = dvol.get("current_dvol")
@@ -282,6 +321,12 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
     top_changes = _top_change_lines(pack)
     why_parts: list[str] = []
 
+    if commander_observation:
+        why_parts.append(
+            f"A {commander_plan_context} observation changed state and requires "
+            "contextual GPT review; it grants no trading authority."
+        )
+
     if top_changes:
         why_parts.append(
             "??????????" + "?".join(top_changes) + "?"
@@ -319,6 +364,14 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
             "依三軍統帥準則重新評估攻擊、第一防線、失效與收割位置；"
             "Wake 不等於 Notification，只有完成多空、BTC 傳導、衍生品、"
             "公司反身性與矛盾證據檢查後，才判斷是否值得通知使用者。"
+        )
+    elif commander_observation:
+        title = "CRT Commander observation requires GPT reanalysis"
+        state = "GPT_REANALYSIS_REQUESTED"
+        instruction = (
+            f"Re-read the latest Evidence Pack and {commander_plan_context} context, "
+            "reassess the thesis, and advise the user only. Do not buy, sell, "
+            "submit orders, alter positions, or move funds."
         )
     elif requested:
         title = "BTC ????????????"

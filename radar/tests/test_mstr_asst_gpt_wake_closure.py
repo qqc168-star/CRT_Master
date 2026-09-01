@@ -262,6 +262,100 @@ class MstrAsstGptWakeClosureTests(unittest.TestCase):
                 mstr_asst_market_health=health,
             )
 
+    def test_ibkr_premarket_and_market_health_share_evidence_pack(self):
+        import json
+
+        from crt_radar.ibkr_live_market_data_intake import (
+            build_ibkr_crt_outputs,
+            collect_ibkr_live_snapshot,
+        )
+        from tests import test_ibkr_live_market_data_intake as ibkr_fixture
+
+        harness = ibkr_fixture.IbkrLiveMarketDataIntakeTests(methodName="runTest")
+        harness.setUp()
+        snapshot = collect_ibkr_live_snapshot(
+            harness.registry,
+            config=harness.config,
+            feed=ibkr_fixture._FakeFeed(ibkr_fixture._capture()),
+            retrieved_at_ms=harness.retrieved_at_ms,
+        )
+        contract = json.loads(
+            ibkr_fixture.CONTRACT_PATH.read_text(encoding="utf-8")
+        )
+        ibkr_outputs = build_ibkr_crt_outputs(
+            snapshot,
+            registry=harness.registry,
+            battle_map_contract=contract,
+            evidence_pack=ibkr_fixture._minimal_evidence_pack(),
+            as_of="2026-08-28T20:15:01+08:00",
+        )
+
+        health = market_health()
+        with tempfile.TemporaryDirectory() as td:
+            result = build_evidence_pack(
+                minimal_source_gate(),
+                observation_db=Path(td) / "observations.sqlite3",
+                generated_at_ms=1_777_777_777_000,
+                private_context=private_context("NOT_YET_VALIDATED"),
+                mstr_asst_market_health=health,
+                premarket_live_market_handoff=ibkr_outputs["live_market_handoff"],
+                premarket_battle_map=ibkr_outputs["battle_map"],
+            )
+
+        self.assertEqual(
+            result["mstr_asst_market_health"]["market_health_hash"],
+            health["market_health_hash"],
+        )
+        self.assertEqual(
+            result["premarket_market_data"]["external_action_authority"],
+            "NONE",
+        )
+        self.assertEqual(
+            result["reanalysis_wake"]["wake_sources"],
+            ["MSTR_ASST_MARKET_HEALTH"],
+        )
+        self.assertEqual(len(result["evidence_pack_hash"]), 64)
+
+    def test_commander_observation_and_market_health_share_notice(self):
+        from tests import test_ibkr_commander_observation as commander_fixture
+
+        harness = commander_fixture.IbkrCommanderObservationTests(
+            methodName="test_commander_event_uses_existing_gpt_reanalysis_handoff"
+        )
+        bridge = harness.arm()
+        bridge.on_ibkr_last("MSTR", 99.85, commander_fixture.NOW_MS)
+        bridge.on_ibkr_last("MSTR", 100.02, commander_fixture.NOW_MS + 1_000)
+        commander_wake = bridge.latest_reanalysis_wake()
+        self.assertIsNotNone(commander_wake)
+        assert commander_wake is not None
+
+        health = market_health()
+        fused = fuse_reanalysis_wake(
+            commander_wake,
+            plan_drift=stable_plan(),
+            mstr_asst_market_health=health,
+        )
+        self.assertIsNotNone(fused)
+        assert fused is not None
+        notice = build_plain_language_notice(
+            {
+                "evidence_pack_hash": "c" * 64,
+                "authority": AUTHORITY,
+                "reanalysis_wake": fused,
+                "mstr_asst_market_health": health,
+                "plan_drift": stable_plan(),
+                "data_health": {"critical_blockers": []},
+            }
+        )
+
+        self.assertEqual(
+            fused["wake_sources"],
+            ["COMMANDER_PLAN_OBSERVATION", "MSTR_ASST_MARKET_HEALTH"],
+        )
+        self.assertIn("市場健康度", notice["what_happened"])
+        self.assertIn("CROSS_RAW", notice["what_happened"])
+        self.assertEqual(notice["external_action_authority"], "NONE")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
