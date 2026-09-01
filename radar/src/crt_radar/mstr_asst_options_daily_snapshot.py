@@ -63,17 +63,27 @@ def _asset_snapshot(asset: str, raw: Any) -> dict[str, Any]:
         if right not in {"CALL", "PUT"}:
             raise ValueError(f"{asset} contract right must be CALL or PUT")
         oi = _numeric(row.get("open_interest"), "open_interest")
+        volume_state = str(row.get("volume_state", "UNKNOWN"))
+        volume_raw = row.get("volume")
+        if volume_raw is None:
+            if not volume_state.startswith("BLOCKED"):
+                raise ValueError(
+                    f"{asset} missing contract volume must be explicitly BLOCKED"
+                )
+            volume = None
+        else:
+            volume = _numeric(volume_raw, "volume")
         normalized = {
             "expiry": str(row.get("expiry")),
             "strike": _numeric(row.get("strike"), "strike"),
             "right": right,
-            "volume": _numeric(row.get("volume"), "volume"),
+            "volume": volume,
             "open_interest": oi,
             "implied_volatility": _numeric(
                 row.get("implied_volatility"),
                 "implied_volatility",
             ),
-            "volume_state": str(row.get("volume_state", "UNKNOWN")),
+            "volume_state": volume_state,
             "open_interest_state": str(
                 row.get("open_interest_state", "UNKNOWN")
             ),

@@ -86,6 +86,19 @@ class OptionsDailySnapshotTests(unittest.TestCase):
         self.assertEqual(row["aggregate_volume"]["source_state"], "REALTIME")
         self.assertEqual(row["contracts"][0]["open_interest_state"], "DELAYED")
 
+    def test_allows_explicitly_blocked_contract_volume(self):
+        inputs = {
+            "MSTR": asset_input("MSTR"),
+            "ASST": asset_input("ASST"),
+        }
+        inputs["MSTR"]["contracts"][0]["volume"] = None
+        inputs["MSTR"]["contracts"][0]["volume_state"] = "BLOCKED_NOT_AVAILABLE"
+        result = build_mstr_asst_options_daily_snapshot(
+            asset_inputs=inputs,
+            generated_at_ms=1_787_950_900_001,
+        )
+        self.assertIsNone(result["assets"]["MSTR"]["contracts"][0]["volume"])
+
     def test_limited_coverage_never_claims_full_chain(self):
         row = build()["assets"]["MSTR"]
         self.assertEqual(

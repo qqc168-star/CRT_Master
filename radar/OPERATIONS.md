@@ -46,7 +46,7 @@ python -m crt_radar.ibkr_market_health_sources `
   --equity-output "$env:USERPROFILE\CRT_Runtime\market-health\equity-daily-proof.json"
 ```
 
-同一 collector 可探測 limited options coverage。若 TWS 回覆 354 或 2188，代表 option volume 所需 API 訂閱不可用；OI／IV 不得取代 volume，缺值也不得補零或升格為 `VALID`。
+同一 collector 可產生 limited options coverage：underlying generic tick 100 提供 aggregate call／put volume；最近到期、近價合約只提供 covered OI／IV。單一合約 volume 若不可用，必須明示 `BLOCKED_NOT_AVAILABLE`，不得補零；coverage 也不得宣稱 full chain。
 
 值班入口可選擇性讀取一份已驗證、local-only（僅本機）的
 `CRT_MSTR_ASST_MARKET_HEALTH_V0.1` 快照：

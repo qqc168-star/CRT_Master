@@ -276,8 +276,6 @@ def _native_options_app() -> tuple[type[Any], type[Any]]:
             self.chain_done: dict[int, threading.Event] = {}
             self.option_requests: dict[int, dict[str, Any]] = {}
             self.snapshot_done: dict[int, threading.Event] = {}
-            self.history_request_map: dict[int, int] = {}
-            self.history_done: dict[int, threading.Event] = {}
             self.failures: list[dict[str, Any]] = []
 
         def nextValidId(self, orderId: int) -> None:  # noqa: N802
@@ -305,7 +303,6 @@ def _native_options_app() -> tuple[type[Any], type[Any]]:
                 self.contract_done,
                 self.chain_done,
                 self.snapshot_done,
-                self.history_done,
             ):
                 event = mapping.get(reqId)
                 if event is not None:
@@ -357,12 +354,19 @@ def _native_options_app() -> tuple[type[Any], type[Any]]:
             event = self.snapshot_done.get(reqId)
             if row is None or event is None:
                 return
-            if (
-                row.get("market_data_type") in {3, 4}
-                and row.get("volume") is not None
-                and row.get("open_interest") is not None
-                and row.get("implied_volatility") is not None
-            ):
+            if row.get("kind") == "UNDERLYING_AGGREGATE":
+                complete = (
+                    row.get("market_data_type") in {1, 2, 3, 4}
+                    and row.get("call_volume") is not None
+                    and row.get("put_volume") is not None
+                )
+            else:
+                complete = (
+                    row.get("market_data_type") in {3, 4}
+                    and row.get("open_interest") is not None
+                    and row.get("implied_volatility") is not None
+                )
+            if complete:
                 event.set()
 
         def tickSize(self, reqId: int, tickType: int, size: Any) -> None:  # noqa: N802
@@ -372,6 +376,18 @@ def _native_options_app() -> tuple[type[Any], type[Any]]:
             try:
                 number = float(size)
             except (TypeError, ValueError):
+                return
+            if row.get("kind") == "UNDERLYING_AGGREGATE":
+                fields = {
+                    27: "call_open_interest",
+                    28: "put_open_interest",
+                    29: "call_volume",
+                    30: "put_volume",
+                }
+                field = fields.get(int(tickType))
+                if field is not None:
+                    row[field] = number
+                self._maybe_option_done(reqId)
                 return
             right = row["right"]
             if int(tickType) in ({27} if right == "CALL" else {28}):
@@ -425,27 +441,6 @@ def _native_options_app() -> tuple[type[Any], type[Any]]:
             if event is not None:
                 event.set()
 
-        def historicalData(self, reqId: int, bar: Any) -> None:  # noqa: N802
-            market_req_id = self.history_request_map.get(reqId)
-            row = self.option_requests.get(market_req_id) if market_req_id else None
-            if row is None:
-                return
-            try:
-                bar_session = _session_date(bar.date)
-                volume = float(bar.volume)
-            except (IbkrMarketHealthSourceError, TypeError, ValueError):
-                return
-            if volume >= 0 and bar_session == row["session_date"]:
-                row["volume"] = float(row.get("volume") or 0.0) + volume
-                row["volume_source"] = "IBKR_HISTORICAL_TRADES_RTH"
-            self._maybe_option_done(market_req_id)
-
-        def historicalDataEnd(self, reqId: int, start: str, end: str) -> None:  # noqa: N802
-            del start, end
-            event = self.history_done.get(reqId)
-            if event is not None:
-                event.set()
-
     return OptionsApp, Contract
 
 
@@ -477,6 +472,7 @@ def collect_ibkr_options_daily_proof(
     app = App()
     thread: threading.Thread | None = None
     option_req_ids: list[int] = []
+    underlying_contracts: dict[str, Any] = {}
     try:
         app.connect(host, port, client_id)
         thread = threading.Thread(
@@ -511,6 +507,7 @@ def collect_ibkr_options_daily_proof(
                     f"IBKR did not resolve {asset} underlying contract"
                 )
             underlying = details[0].contract
+            underlying_contracts[asset] = underlying
             req_id = 3000 + index
             app.chain_done[req_id] = threading.Event()
             app.reqSecDefOptParams(
@@ -576,6 +573,7 @@ def collect_ibkr_options_daily_proof(
                     contract.multiplier = chain["multiplier"] or "100"
                     contract.tradingClass = chain["trading_class"]
                     app.option_requests[next_id] = {
+                        "kind": "OPTION_CONTRACT",
                         "asset": asset,
                         "expiry": expiry,
                         "strike": strike,
@@ -595,33 +593,36 @@ def collect_ibkr_options_daily_proof(
                         False,
                         [],
                     )
-                    history_req_id = next_id + 10000
-                    app.history_request_map[history_req_id] = next_id
-                    app.history_done[history_req_id] = threading.Event()
-                    app.reqHistoricalData(
-                        history_req_id,
-                        contract,
-                        "",
-                        "2 D",
-                        "1 hour",
-                        "TRADES",
-                        1,
-                        1,
-                        False,
-                        [],
-                    )
                     option_req_ids.append(next_id)
                     next_id += 1
+
+        for index, asset in enumerate(ASSETS):
+            req_id = 5000 + index
+            app.option_requests[req_id] = {
+                "kind": "UNDERLYING_AGGREGATE",
+                "asset": asset,
+                "call_volume": None,
+                "put_volume": None,
+                "call_open_interest": None,
+                "put_open_interest": None,
+                "market_data_type": None,
+            }
+            app.snapshot_done[req_id] = threading.Event()
+            app.reqMktData(
+                req_id,
+                underlying_contracts[asset],
+                "100,101",
+                False,
+                False,
+                [],
+            )
+            option_req_ids.append(req_id)
 
         deadline = time.monotonic() + timeout_seconds
         for req_id in option_req_ids:
             remaining = deadline - time.monotonic()
             if remaining > 0:
                 app.snapshot_done[req_id].wait(remaining)
-        for req_id, event in app.history_done.items():
-            remaining = deadline - time.monotonic()
-            if remaining > 0:
-                event.wait(remaining)
     finally:
         for req_id in option_req_ids:
             try:
@@ -645,12 +646,24 @@ def collect_ibkr_options_daily_proof(
     observed = int(time.time() * 1000) if observed_at_ms is None else observed_at_ms
     asset_inputs: dict[str, dict[str, Any]] = {}
     for asset in ASSETS:
-        selected = [row for row in rows.values() if row["asset"] == asset]
+        selected = [
+            row
+            for row in rows.values()
+            if row["asset"] == asset and row["kind"] == "OPTION_CONTRACT"
+        ]
+        aggregate = next(
+            (
+                row
+                for row in rows.values()
+                if row["asset"] == asset
+                and row["kind"] == "UNDERLYING_AGGREGATE"
+            ),
+            None,
+        )
         incomplete = [
             row
             for row in selected
-            if row["volume"] is None
-            or row["open_interest"] is None
+            if row["open_interest"] is None
             or row["implied_volatility"] is None
             or row["market_data_type"] not in {3, 4}
         ]
@@ -658,6 +671,16 @@ def collect_ibkr_options_daily_proof(
             raise IbkrMarketHealthSourceError(
                 f"{asset} option coverage incomplete or not delayed-available: "
                 + json.dumps(incomplete, ensure_ascii=False, sort_keys=True)
+            )
+        if (
+            aggregate is None
+            or aggregate["call_volume"] is None
+            or aggregate["put_volume"] is None
+            or aggregate["market_data_type"] not in {1, 2, 3, 4}
+        ):
+            raise IbkrMarketHealthSourceError(
+                f"{asset} underlying aggregate option volume unavailable: "
+                + json.dumps(aggregate, ensure_ascii=False, sort_keys=True)
             )
         contracts = [
             {
@@ -667,9 +690,10 @@ def collect_ibkr_options_daily_proof(
                 "volume": row["volume"],
                 "open_interest": row["open_interest"],
                 "implied_volatility": row["implied_volatility"],
-                "volume_state": row.get(
-                    "volume_source",
-                    "IBKR_DELAYED_COVERED_CONTRACT",
+                "volume_state": (
+                    "IBKR_DELAYED_COVERED_CONTRACT"
+                    if row["volume"] is not None
+                    else "BLOCKED_NOT_AVAILABLE"
                 ),
                 "open_interest_state": "IBKR_DELAYED_COVERED_CONTRACT",
                 "implied_volatility_state": "IBKR_DELAYED_COVERED_CONTRACT",
@@ -678,15 +702,19 @@ def collect_ibkr_options_daily_proof(
             }
             for row in selected
         ]
-        calls = sum(row["volume"] for row in selected if row["right"] == "CALL")
-        puts = sum(row["volume"] for row in selected if row["right"] == "PUT")
+        calls = aggregate["call_volume"]
+        puts = aggregate["put_volume"]
         strikes = sorted({row["strike"] for row in selected})
         asset_inputs[asset] = {
             "session_date": session_date,
             "aggregate_volume": {
                 "call_volume": calls,
                 "put_volume": puts,
-                "source_state": "IBKR_DELAYED_COVERED_CONTRACT_SUM",
+                "source_state": (
+                    "IBKR_LIVE_UNDERLYING_OPTION_VOLUME"
+                    if aggregate["market_data_type"] == 1
+                    else "IBKR_NONLIVE_UNDERLYING_OPTION_VOLUME"
+                ),
                 "observed_at_ms": observed,
             },
             "contracts": contracts,
@@ -715,7 +743,6 @@ def collect_ibkr_options_daily_proof(
             "reqSecDefOptParams",
             "reqMktData",
             "cancelMktData",
-            "reqHistoricalData",
         ],
         "generic_ticks": [100, 101, 106],
         "snapshot": False,

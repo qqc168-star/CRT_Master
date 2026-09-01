@@ -32,11 +32,10 @@
         "reqSecDefOptParams",
         "reqMarketDataType",
         "reqMktData",
-        "cancelMktData",
-        "reqHistoricalData"
+        "cancelMktData"
       ],
       "coverage": "LIMITED_COVERED_CONTRACTS_ONLY",
-      "implementation_state": "LIVE_COLLECTOR_PASS_API_SUBSCRIPTION_BLOCKED"
+      "implementation_state": "LIVE_READ_ONLY_LIMITED_PROOF_PASS"
     },
     "issuer_btc_per_diluted_share": {
       "source_id": "CRT-CONN-MSTR-ASST-OFFICIAL-ISSUER-RATIO-001",
