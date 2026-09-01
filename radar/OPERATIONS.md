@@ -38,6 +38,16 @@ python -m crt_radar.mstr_asst_market_health_runtime `
 
 輸入必須完全符合 `CONFIG/MSTR_ASST_MARKET_HEALTH_SOURCE_V0.1.json`，且包含五個 `VALID`、hash 對齊、External Action Authority `NONE` 的來源證明。Commander lines 必須明示 `THREE_ARMY_COMMANDER` 與 `APPROVED`；`SIMULATION_ONLY` 或任何機器推測線一律 fail closed。所有計算先在記憶體內完成並驗證，之後才逐檔 atomic replace（原子置換）。
 
+IBKR equity daily proof 可由唯讀 collector 產生：
+
+```powershell
+python -m crt_radar.ibkr_market_health_sources `
+  --host 127.0.0.1 --port 7496 --client-id 761 `
+  --equity-output "$env:USERPROFILE\CRT_Runtime\market-health\equity-daily-proof.json"
+```
+
+同一 collector 可探測 limited options coverage。若 TWS 回覆 354 或 2188，代表 option volume 所需 API 訂閱不可用；OI／IV 不得取代 volume，缺值也不得補零或升格為 `VALID`。
+
 值班入口可選擇性讀取一份已驗證、local-only（僅本機）的
 `CRT_MSTR_ASST_MARKET_HEALTH_V0.1` 快照：
 

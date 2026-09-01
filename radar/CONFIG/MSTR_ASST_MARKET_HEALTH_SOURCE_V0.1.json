@@ -12,28 +12,37 @@
       "source_id": "CRT-CONN-MSTR-ASST-IBKR-EQUITY-DAILY-001",
       "provider": "Interactive Brokers TWS API",
       "transport": "REQ_HISTORICAL_DATA_READ_ONLY",
+      "api_request_surface": ["reqHistoricalData"],
       "assets": ["MSTR", "ASST"],
-      "implementation_state": "RUNTIME_INPUT_CONTRACT_READY_LIVE_COLLECTOR_PENDING"
+      "implementation_state": "LIVE_READ_ONLY_COLLECTOR_PASS"
     },
     "btc_exact_close": {
       "source_id": "CRT-CONN-BTC-BINANCE-EXACT-CLOSE-001",
       "provider": "Binance Spot public market data",
       "transport": "HTTPS_JSON_READ_ONLY",
       "alignment": "EXACT_EQUITY_SESSION_CLOSE",
-      "implementation_state": "RUNTIME_INPUT_CONTRACT_READY_LIVE_COLLECTOR_PENDING"
+      "implementation_state": "LIVE_PUBLIC_READ_ONLY_COLLECTION_PASS"
     },
     "options_daily": {
       "source_id": "CRT-CONN-MSTR-ASST-IBKR-OPTIONS-LIMITED-001",
       "provider": "Interactive Brokers TWS API",
       "transport": "REQ_SEC_DEF_OPT_PARAMS_AND_REQ_MKT_DATA_READ_ONLY",
+      "api_request_surface": [
+        "reqContractDetails",
+        "reqSecDefOptParams",
+        "reqMarketDataType",
+        "reqMktData",
+        "cancelMktData",
+        "reqHistoricalData"
+      ],
       "coverage": "LIMITED_COVERED_CONTRACTS_ONLY",
-      "implementation_state": "RUNTIME_INPUT_CONTRACT_READY_LIVE_COLLECTOR_PENDING"
+      "implementation_state": "LIVE_COLLECTOR_PASS_API_SUBSCRIPTION_BLOCKED"
     },
     "issuer_btc_per_diluted_share": {
       "source_id": "CRT-CONN-MSTR-ASST-OFFICIAL-ISSUER-RATIO-001",
       "provider": "SEC EDGAR and issuer official disclosures",
       "transport": "LOCAL_VERIFIED_FACT_BUNDLE",
-      "implementation_state": "RUNTIME_INPUT_CONTRACT_READY_FACT_BUNDLE_PENDING"
+      "implementation_state": "OFFICIAL_FACT_BUNDLE_PASS"
     },
     "commander_lines": {
       "source_id": "CRT-CONN-MSTR-ASST-COMMANDER-LINES-001",
