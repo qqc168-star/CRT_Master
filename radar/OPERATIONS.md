@@ -25,6 +25,19 @@ powershell -ExecutionPolicy Bypass -File .\radar\scripts\windows\run_observation
 
 ### MSTR／ASST Market Health（市場健康度）→ GPT Wake（GPT 喚醒）
 
+先以五份帶雜湊的來源證明產生 Market Health runtime artifacts（執行期施工件）：
+
+```powershell
+python -m crt_radar.mstr_asst_market_health_runtime `
+  --input "$env:USERPROFILE\CRT_Runtime\market-health\runtime-input.json" `
+  --full-day-output "$env:USERPROFILE\CRT_Runtime\market-health\full-day-market-intake.json" `
+  --options-output "$env:USERPROFILE\CRT_Runtime\market-health\options-daily-snapshot.json" `
+  --market-health-output "$env:USERPROFILE\CRT_Runtime\market-health\latest.json" `
+  --manifest-output "$env:USERPROFILE\CRT_Runtime\market-health\manifest.json"
+```
+
+輸入必須完全符合 `CONFIG/MSTR_ASST_MARKET_HEALTH_SOURCE_V0.1.json`，且包含五個 `VALID`、hash 對齊、External Action Authority `NONE` 的來源證明。Commander lines 必須明示 `THREE_ARMY_COMMANDER` 與 `APPROVED`；`SIMULATION_ONLY` 或任何機器推測線一律 fail closed。所有計算先在記憶體內完成並驗證，之後才逐檔 atomic replace（原子置換）。
+
 值班入口可選擇性讀取一份已驗證、local-only（僅本機）的
 `CRT_MSTR_ASST_MARKET_HEALTH_V0.1` 快照：
 

@@ -36,6 +36,8 @@ Presence in this engineering registry does not grant Production, formal scoring,
 
 `CONFIG/IBKR_EQUITY_SOURCE_V0.1.json` adds `CRT-CONN-EQUITY-PREMARKET-IBKR-001` only at runtime, after preserving and recording the base registry hash. This prevents the IBKR experiment from mutating the sealed base registry identity. The overlay binds local TWS API L1 streaming plus 5-second `TRADES` bars for MSTR, ASST, STRC, and SATA. Delayed data, regulatory snapshots, account/order surfaces, machine execution, and capital-decision authority are forbidden.
 
+`CONFIG/MSTR_ASST_MARKET_HEALTH_SOURCE_V0.1.json` separately declares five fail-closed Market Health inputs: IBKR daily equity bars, Binance exact-equity-close BTC marks, IBKR limited-covered-contract options observations, official issuer BTC-per-diluted-share facts, and explicitly approved Three-Army Commander lines. The overlay is a runtime input contract only. Live collectors, issuer fact bundles, and approved line bundles remain pending, and their absence must block `latest.json`. Simulation lines must never be promoted to approved lines.
+
 ## Formal BTC Season source gaps
 
 The formal input envelope remains the binding-status authority. Every required family below is still unbound; engineering context with a similar name does not satisfy the formal source, transform, window, state, or independent-validation contract.
