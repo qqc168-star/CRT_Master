@@ -9,12 +9,27 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .commander_plan_adapter import CommanderPlanAdapter
+from .ibkr_live_market_data_intake import ASSET_ORDER, LIVE_MARKET_DATA_TYPE
 
 
 def _utc_from_ms(value: object) -> datetime:
     if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
         raise ValueError("observed_at_ms must be a positive integer")
     return datetime.fromtimestamp(value / 1000, tz=timezone.utc)
+
+
+def _assert_live_market_data_types(market_data_types: object | None) -> None:
+    if market_data_types is None:
+        return
+    if not isinstance(market_data_types, dict):
+        raise ValueError("IBKR market data type proof must be an object")
+    if list(market_data_types) != list(ASSET_ORDER):
+        raise ValueError("IBKR market data type proof asset order mismatch")
+    if any(
+        market_data_types[asset] != LIVE_MARKET_DATA_TYPE
+        for asset in ASSET_ORDER
+    ):
+        raise ValueError("IBKR observation market data is not fully live")
 
 
 def _commander_event_id(event: dict[str, Any]) -> str:
@@ -133,7 +148,15 @@ class IbkrCommanderObservationBridge:
             return None
         return build_commander_reanalysis_wake(self.events[-1])
 
-    def on_ibkr_last(self, asset: str, price: float, observed_at_ms: int) -> None:
+    def on_ibkr_last(
+        self,
+        asset: str,
+        price: float,
+        observed_at_ms: int,
+        *,
+        market_data_types: dict[str, int | None] | None = None,
+    ) -> None:
+        _assert_live_market_data_types(market_data_types)
         if asset != self.asset:
             self.ignored_asset_observation_count += 1
             return
@@ -145,7 +168,10 @@ class IbkrCommanderObservationBridge:
         asset: str,
         close: float,
         observed_at_ms: int,
+        *,
+        market_data_types: dict[str, int | None] | None = None,
     ) -> None:
+        _assert_live_market_data_types(market_data_types)
         if asset != self.asset:
             self.ignored_asset_observation_count += 1
             return

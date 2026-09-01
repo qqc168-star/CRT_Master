@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from crt_radar.ibkr_live_market_data_intake import (
     ALLOWED_IBKR_REQUEST_METHODS,
+    ASSET_ORDER,
     SOURCE_ID,
     IbkrIntakeConfig,
     IbkrIntakeError,
@@ -19,6 +20,7 @@ from crt_radar.ibkr_live_market_data_intake import (
     collect_ibkr_live_snapshot,
     inspect_ibkr_environment,
     load_ibkr_source_registry,
+    _native_feed_app,
 )
 from crt_radar.premarket_equity_live_snapshot import build_equity_source_binding
 from crt_radar.source_registry import SourceRegistry, canonical_json_bytes
@@ -100,6 +102,35 @@ class _FakeFeed:
         return deepcopy(self.capture)
 
 
+class _ProofSink:
+    def __init__(self) -> None:
+        self.observations = []
+
+    def on_ibkr_last(
+        self,
+        asset,
+        price,
+        observed_at_ms,
+        *,
+        market_data_types=None,
+    ) -> None:
+        self.observations.append(
+            ("LAST", asset, price, observed_at_ms, market_data_types)
+        )
+
+    def on_ibkr_5s_close(
+        self,
+        asset,
+        close,
+        observed_at_ms,
+        *,
+        market_data_types=None,
+    ) -> None:
+        self.observations.append(
+            ("BAR_5S_CLOSE", asset, close, observed_at_ms, market_data_types)
+        )
+
+
 def _minimal_evidence_pack() -> dict:
     pack = {
         "schema_version": "CRT_EVIDENCE_PACK_V0.2",
@@ -135,6 +166,27 @@ def _minimal_evidence_pack() -> dict:
 
 
 class IbkrLiveMarketDataIntakeTests(unittest.TestCase):
+    def test_observation_sink_waits_for_four_asset_live_type_proof(self) -> None:
+        sink = _ProofSink()
+        MarketDataApp, _ = _native_feed_app(sink)
+        app = MarketDataApp()
+        for index, asset in enumerate(ASSET_ORDER):
+            app.request_map[1000 + index] = (asset, "L1")
+
+        app.tickPrice(1000, 4, 125.0, None)
+        self.assertEqual(sink.observations, [])
+
+        for index, _asset in enumerate(ASSET_ORDER):
+            app.marketDataType(1000 + index, 1)
+        app.tickPrice(1000, 4, 125.1, None)
+
+        self.assertEqual(len(sink.observations), 1)
+        self.assertEqual(sink.observations[0][0:3], ("LAST", "MSTR", 125.1))
+        self.assertEqual(
+            sink.observations[0][4],
+            {asset: 1 for asset in ASSET_ORDER},
+        )
+
     def setUp(self) -> None:
         self.registry = load_ibkr_source_registry(REGISTRY_PATH, OVERLAY_PATH)
         self.binding = build_equity_source_binding(self.registry, source_id=SOURCE_ID)

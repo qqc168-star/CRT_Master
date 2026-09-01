@@ -15,6 +15,7 @@ from crt_radar.commander_plan_adapter import (
 )
 from crt_radar.ibkr_commander_observation import IbkrCommanderObservationBridge
 from crt_radar.ibkr_live_market_data_intake import (
+    ASSET_ORDER,
     NativeIbkrFeed,
     _observation_channel_for_tick_type,
 )
@@ -170,6 +171,20 @@ class IbkrCommanderObservationTests(TestCase):
     def test_bid_and_ask_tick_types_never_route_to_the_observation_engine(self) -> None:
         self.assertIsNone(_observation_channel_for_tick_type(1))
         self.assertIsNone(_observation_channel_for_tick_type(2))
+
+    def test_non_live_market_data_type_proof_is_rejected(self) -> None:
+        bridge = self.arm()
+        proof = {asset: 1 for asset in ASSET_ORDER}
+        proof["STRC"] = 2
+
+        with self.assertRaisesRegex(ValueError, "not fully live"):
+            bridge.on_ibkr_last(
+                "MSTR",
+                99.85,
+                NOW_MS,
+                market_data_types=proof,
+            )
+        self.assertEqual(bridge.events, ())
         self.assertEqual(_observation_channel_for_tick_type(4), "LAST")
 
     def test_invalid_plan_blocks_before_live_bridge_arms(self) -> None:

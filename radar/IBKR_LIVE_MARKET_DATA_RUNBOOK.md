@@ -75,6 +75,30 @@ The runtime registry is built additively from `CONFIG/SOURCE_REGISTRY_V1.2.json`
 - Outside US premarket, use `--preflight-only`; the evidence collector will not relabel regular-hours or stale trades as premarket evidence.
 - If one asset is unavailable, the machine-verified four-asset snapshot is not emitted. Resolve the subscription/contract issue or leave the affected claim blocked.
 
+## Gate 6C-3 observation journal
+
+The Commander observation operator durably journals each plan-asset `LAST` or
+5-second close before it reaches the existing Gate 6A state machine. Every
+journal record is bound to the exact `plan_sha`, hash-chained, and carries proof
+that all four assets were on IBKR live market-data type `1` at observation time.
+
+```powershell
+python -m crt_radar.ibkr_commander_operator `
+  --plan runtime/commander/plan.json `
+  --current-main-sha <CURRENT_MAIN_SHA> `
+  --ledger runtime/commander/handoff.jsonl `
+  --dedupe-state runtime/commander/checkpoint.json `
+  --observation-journal runtime/commander/observations.sqlite3 `
+  --report runtime/commander/report.json `
+  --port 7496
+```
+
+Restart recovery must reuse the exact sealed plan, checkpoint, journal, and
+ledger. Unapplied journal records are replayed before new live observations.
+A plan mismatch, journal/checkpoint mismatch, non-live proof, or hash-chain
+failure blocks before the feed connects. Replay only requests GPT reanalysis;
+it never creates an order or grants capital authority.
+
 Official references:
 
 - [IBKR TWS API documentation](https://ibkrcampus.com/campus/ibkr-api-page/twsapi-doc/)

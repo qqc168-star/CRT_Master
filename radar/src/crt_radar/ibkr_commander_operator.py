@@ -39,15 +39,24 @@ from .ibkr_live_market_data_intake import (
     IbkrObservationSink,
     NativeIbkrFeed,
 )
+from .ibkr_observation_journal import (
+    ZERO_HASH,
+    IbkrObservationJournal,
+    JournaledIbkrObservationSink,
+    replay_observations,
+)
 from .plain_language_notice import build_plain_language_notice
 from .reanalysis_wake import fuse_reanalysis_wake
 
 
-SCHEMA_VERSION: Final = "CRT_GATE6C3_OPERATOR_V0.2"
-DEDUPE_SCHEMA_VERSION: Final = "CRT_GATE6C3_RUNTIME_CHECKPOINT_V0.2"
+SCHEMA_VERSION: Final = "CRT_GATE6C3_OPERATOR_V0.3"
+DEDUPE_SCHEMA_VERSION: Final = "CRT_GATE6C3_RUNTIME_CHECKPOINT_V0.3"
+PREVIOUS_DEDUPE_SCHEMA_VERSION: Final = "CRT_GATE6C3_RUNTIME_CHECKPOINT_V0.2"
 LEGACY_DEDUPE_SCHEMA_VERSION: Final = "CRT_GATE6C3_EVENT_DEDUPE_V0.1"
-RESTART_CONTINUITY: Final = "COMPLETED_CYCLE_GATE6A_STATE_AND_EVENT_DEDUPE"
-CHECKPOINT_COMMIT_SCOPE: Final = "LAST_COMPLETED_OPERATOR_CYCLE"
+RESTART_CONTINUITY: Final = (
+    "DURABLE_OBSERVATION_JOURNAL_GATE6A_STATE_AND_EVENT_DEDUPE"
+)
+CHECKPOINT_COMMIT_SCOPE: Final = "JOURNALED_OBSERVATION_PREFIX"
 AUTHORITY: Final = {
     "action_output": "NONE",
     "machine_execution": "FORBIDDEN",
@@ -269,6 +278,8 @@ def _dedupe_payload(plan_sha: str) -> dict[str, Any]:
         "gate6a_state": None,
         "restart_continuity": RESTART_CONTINUITY,
         "checkpoint_commit_scope": CHECKPOINT_COMMIT_SCOPE,
+        "journal_applied_through": 0,
+        "journal_applied_hash": ZERO_HASH,
         **AUTHORITY,
     }
 
@@ -294,6 +305,7 @@ def _load_dedupe_state(path: Path, plan_sha: str) -> dict[str, Any]:
     schema_version = payload.get("schema_version")
     if schema_version not in {
         DEDUPE_SCHEMA_VERSION,
+        PREVIOUS_DEDUPE_SCHEMA_VERSION,
         LEGACY_DEDUPE_SCHEMA_VERSION,
     }:
         raise ValueError("Gate 6C-3 checkpoint schema mismatch")
@@ -306,19 +318,38 @@ def _load_dedupe_state(path: Path, plan_sha: str) -> dict[str, Any]:
         *AUTHORITY,
     }
     if schema_version == DEDUPE_SCHEMA_VERSION:
+        expected_fields.update(
+            {
+                "gate6a_state",
+                "checkpoint_commit_scope",
+                "journal_applied_through",
+                "journal_applied_hash",
+            }
+        )
+    elif schema_version == PREVIOUS_DEDUPE_SCHEMA_VERSION:
         expected_fields.update({"gate6a_state", "checkpoint_commit_scope"})
     if set(payload) != expected_fields:
         raise ValueError("Gate 6C-3 checkpoint fields mismatch")
-    expected_continuity = (
-        RESTART_CONTINUITY
-        if schema_version == DEDUPE_SCHEMA_VERSION
-        else "EVENT_DEDUPE_ONLY"
-    )
+    expected_continuity = {
+        DEDUPE_SCHEMA_VERSION: RESTART_CONTINUITY,
+        PREVIOUS_DEDUPE_SCHEMA_VERSION: (
+            "COMPLETED_CYCLE_GATE6A_STATE_AND_EVENT_DEDUPE"
+        ),
+        LEGACY_DEDUPE_SCHEMA_VERSION: "EVENT_DEDUPE_ONLY",
+    }[schema_version]
     if payload.get("restart_continuity") != expected_continuity:
         raise ValueError("Gate 6C-3 checkpoint continuity mismatch")
     if (
-        schema_version == DEDUPE_SCHEMA_VERSION
-        and payload.get("checkpoint_commit_scope") != CHECKPOINT_COMMIT_SCOPE
+        schema_version in {
+            DEDUPE_SCHEMA_VERSION,
+            PREVIOUS_DEDUPE_SCHEMA_VERSION,
+        }
+        and payload.get("checkpoint_commit_scope")
+        != (
+            CHECKPOINT_COMMIT_SCOPE
+            if schema_version == DEDUPE_SCHEMA_VERSION
+            else "LAST_COMPLETED_OPERATOR_CYCLE"
+        )
     ):
         raise ValueError("Gate 6C-3 checkpoint commit scope mismatch")
     for key, expected in AUTHORITY.items():
@@ -328,14 +359,46 @@ def _load_dedupe_state(path: Path, plan_sha: str) -> dict[str, Any]:
         raise ValueError("Gate 6C-3 dedupe line state unavailable")
     if payload.get("plan_sha") != plan_sha:
         return _dedupe_payload(plan_sha)
-    if schema_version == LEGACY_DEDUPE_SCHEMA_VERSION:
+    if schema_version in {
+        LEGACY_DEDUPE_SCHEMA_VERSION,
+        PREVIOUS_DEDUPE_SCHEMA_VERSION,
+    }:
         migrated = _dedupe_payload(plan_sha)
         migrated["lines"] = copy.deepcopy(payload["lines"])
+        if schema_version == PREVIOUS_DEDUPE_SCHEMA_VERSION:
+            migrated["gate6a_state"] = copy.deepcopy(payload["gate6a_state"])
         return migrated
     gate6a_state = payload.get("gate6a_state")
     if gate6a_state is not None and not isinstance(gate6a_state, dict):
         raise ValueError("Gate 6C-3 Gate 6A state unavailable")
+    journal_applied_through = payload.get("journal_applied_through")
+    if (
+        isinstance(journal_applied_through, bool)
+        or not isinstance(journal_applied_through, int)
+        or journal_applied_through < 0
+    ):
+        raise ValueError("Gate 6C-3 journal cursor invalid")
+    journal_applied_hash = payload.get("journal_applied_hash")
+    if not isinstance(journal_applied_hash, str) or len(journal_applied_hash) != 64:
+        raise ValueError("Gate 6C-3 journal cursor hash invalid")
+    try:
+        int(journal_applied_hash, 16)
+    except ValueError as exc:
+        raise ValueError("Gate 6C-3 journal cursor hash invalid") from exc
     return payload
+
+
+def _validate_checkpoint_journal_alignment(
+    state: dict[str, Any],
+    journal: IbkrObservationJournal,
+) -> None:
+    journal.validate()
+    applied_through = state["journal_applied_through"]
+    head_sequence, _ = journal.head()
+    if applied_through > head_sequence:
+        raise ValueError("Gate 6C-3 journal is behind checkpoint")
+    if journal.hash_at(applied_through) != state["journal_applied_hash"]:
+        raise ValueError("Gate 6C-3 journal checkpoint hash mismatch")
 
 
 def _dedupe_events(
@@ -450,6 +513,7 @@ def run_gate6c3_operator(
     config: IbkrIntakeConfig,
     ledger_path: str | Path,
     dedupe_state_path: str | Path,
+    observation_journal_path: str | Path | None = None,
     report_path: str | Path | None = None,
     now: datetime | None = None,
     feed_factory: FeedFactory = NativeIbkrFeed,
@@ -466,78 +530,113 @@ def run_gate6c3_operator(
     dedupe_path = Path(dedupe_state_path)
     runtime_state = _load_dedupe_state(dedupe_path, plan["plan_sha"])
     gate6a_state_restored = runtime_state.get("gate6a_state") is not None
-    bridge = IbkrCommanderObservationBridge.arm(
-        plan,
-        current_main_sha=current_main_sha,
-        now=now,
-        gate6a_state=runtime_state.get("gate6a_state"),
+    journal_path = (
+        Path(observation_journal_path)
+        if observation_journal_path is not None
+        else dedupe_path.with_name(dedupe_path.stem + ".observations.sqlite3")
     )
-    capture = _assert_capture(feed_factory(bridge).collect(config))
-    raw_events = list(bridge.events)
-    new_events, duplicates, dedupe_commit_states = _dedupe_events(
-        raw_events,
-        state=runtime_state,
-    )
-    handoffs: list[dict[str, Any]] = []
-    for event, commit_state in zip(new_events, dedupe_commit_states, strict=True):
-        handoffs.append(
-            _handoff_for_event(event, plan=plan, ledger_path=Path(ledger_path))
+    with IbkrObservationJournal(
+        journal_path,
+        plan_sha=plan["plan_sha"],
+        asset=plan["asset"],
+    ) as journal:
+        _validate_checkpoint_journal_alignment(runtime_state, journal)
+        bridge = IbkrCommanderObservationBridge.arm(
+            plan,
+            current_main_sha=current_main_sha,
+            now=now,
+            gate6a_state=runtime_state.get("gate6a_state"),
         )
-        write_json_atomic(dedupe_path, commit_state)
+        replayed_observation_count = replay_observations(
+            journal,
+            bridge,
+            after_sequence=runtime_state["journal_applied_through"],
+        )
+        journaled_sink = JournaledIbkrObservationSink(journal, bridge)
+        capture = _assert_capture(feed_factory(journaled_sink).collect(config))
+        journal_head_sequence, journal_head_hash = journal.head()
+        raw_events = list(bridge.events)
+        new_events, duplicates, dedupe_commit_states = _dedupe_events(
+            raw_events,
+            state=runtime_state,
+        )
+        handoffs: list[dict[str, Any]] = []
+        for event, commit_state in zip(
+            new_events,
+            dedupe_commit_states,
+            strict=True,
+        ):
+            handoffs.append(
+                _handoff_for_event(event, plan=plan, ledger_path=Path(ledger_path))
+            )
+            write_json_atomic(dedupe_path, commit_state)
 
-    completed_state = copy.deepcopy(
-        dedupe_commit_states[-1] if dedupe_commit_states else runtime_state
-    )
-    completed_state.pop("state_hash", None)
-    completed_state["gate6a_state"] = bridge.gate6a_state()
-    completed_state["restart_continuity"] = RESTART_CONTINUITY
-    completed_state["checkpoint_commit_scope"] = CHECKPOINT_COMMIT_SCOPE
-    write_json_atomic(dedupe_path, _seal_dedupe_state(completed_state))
+        completed_state = copy.deepcopy(
+            dedupe_commit_states[-1] if dedupe_commit_states else runtime_state
+        )
+        completed_state.pop("state_hash", None)
+        completed_state["gate6a_state"] = bridge.gate6a_state()
+        completed_state["restart_continuity"] = RESTART_CONTINUITY
+        completed_state["checkpoint_commit_scope"] = CHECKPOINT_COMMIT_SCOPE
+        completed_state["journal_applied_through"] = journal_head_sequence
+        completed_state["journal_applied_hash"] = journal_head_hash
+        write_json_atomic(dedupe_path, _seal_dedupe_state(completed_state))
 
-    if new_events:
-        state = "OBSERVATION_EVENTS_HANDOFF_READY"
-    elif duplicates:
-        state = "DUPLICATE_EVENTS_SKIPPED"
-    elif (
-        bridge.last_observation_count > 0
-        or bridge.bar_close_observation_count > 0
-    ):
-        state = "MONITORING_NO_EVENT"
-    else:
-        state = "WAITING_FOR_MARKET_ACTIVITY"
+        if new_events:
+            state = "OBSERVATION_EVENTS_HANDOFF_READY"
+        elif duplicates:
+            state = "DUPLICATE_EVENTS_SKIPPED"
+        elif (
+            bridge.last_observation_count > 0
+            or bridge.bar_close_observation_count > 0
+        ):
+            state = "MONITORING_NO_EVENT"
+        else:
+            state = "WAITING_FOR_MARKET_ACTIVITY"
 
-    result: dict[str, Any] = {
-        "schema_version": SCHEMA_VERSION,
-        "state": state,
-        "plan": {
-            "plan_id": plan["plan_id"],
-            "plan_sha": plan["plan_sha"],
-            "asset": plan["asset"],
-            "valid_until": plan["valid_until"],
-            "source_main_sha": plan["source_main_sha"],
-            "price_classification": plan.get("price_classification"),
-        },
-        "capture": _capture_summary(capture),
-        "gate_summary": bridge.gate_summary(),
-        "raw_events": raw_events,
-        "new_events": new_events,
-        "duplicate_events": duplicates,
-        "handoffs": handoffs,
-        "restart_continuity": RESTART_CONTINUITY,
-        "checkpoint_commit_scope": CHECKPOINT_COMMIT_SCOPE,
-        "gate6a_state_restored": gate6a_state_restored,
-        "checkpoint_schema_version": DEDUPE_SCHEMA_VERSION,
-        "unresolved_restart_boundary": (
-            "MID_CYCLE_LIVE_OBSERVATIONS_ARE_NOT_JOURNALED"
-        ),
-        "current_main_verification": "CALLER_SUPPLIED_READ_ONLY_PRECHECK_REQUIRED",
-        "plan_source_main_match": plan["source_main_sha"] == current_main_sha,
-        **AUTHORITY,
-    }
-    result["report_hash"] = _canonical_hash(result)
-    if report_path is not None:
-        write_json_atomic(report_path, result)
-    return result
+        result: dict[str, Any] = {
+            "schema_version": SCHEMA_VERSION,
+            "state": state,
+            "plan": {
+                "plan_id": plan["plan_id"],
+                "plan_sha": plan["plan_sha"],
+                "asset": plan["asset"],
+                "valid_until": plan["valid_until"],
+                "source_main_sha": plan["source_main_sha"],
+                "price_classification": plan.get("price_classification"),
+            },
+            "capture": _capture_summary(capture),
+            "gate_summary": bridge.gate_summary(),
+            "observation_journal": {
+                "state": "DURABLE_REPLAY_READY",
+                "replayed_observation_count": replayed_observation_count,
+                "appended_observation_count": journaled_sink.appended_count,
+                "applied_through": journal_head_sequence,
+                "applied_hash": journal_head_hash,
+                **AUTHORITY,
+            },
+            "raw_events": raw_events,
+            "new_events": new_events,
+            "duplicate_events": duplicates,
+            "handoffs": handoffs,
+            "restart_continuity": RESTART_CONTINUITY,
+            "checkpoint_commit_scope": CHECKPOINT_COMMIT_SCOPE,
+            "delivery_semantics": (
+                "DURABLE_AT_LEAST_ONCE_OBSERVATION_REPLAY_WITH_EVENT_DEDUPE"
+            ),
+            "gate6a_state_restored": gate6a_state_restored,
+            "checkpoint_schema_version": DEDUPE_SCHEMA_VERSION,
+            "unresolved_restart_boundary": None,
+            "current_main_verification": (
+                "CALLER_SUPPLIED_READ_ONLY_PRECHECK_REQUIRED"
+            ),
+            "plan_source_main_match": plan["source_main_sha"] == current_main_sha,
+            **AUTHORITY,
+        }
+        result["report_hash"] = _canonical_hash(result)
+        if report_path is not None:
+            write_json_atomic(report_path, result)
+        return result
 
 
 def _load_json(path: str | Path) -> dict[str, Any]:
@@ -560,6 +659,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--current-main-sha", required=True)
     parser.add_argument("--ledger", required=True)
     parser.add_argument("--dedupe-state", required=True)
+    parser.add_argument("--observation-journal")
     parser.add_argument("--report", required=True)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=7497)
@@ -614,6 +714,7 @@ def main(argv: list[str] | None = None) -> int:
         config=config,
         ledger_path=args.ledger,
         dedupe_state_path=args.dedupe_state,
+        observation_journal_path=args.observation_journal,
         report_path=args.report,
     )
     sys.stdout.reconfigure(encoding="utf-8")

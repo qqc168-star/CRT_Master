@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import sqlite3
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ from crt_radar.ibkr_commander_operator import (
     CHECKPOINT_COMMIT_SCOPE,
     DEDUPE_SCHEMA_VERSION,
     LEGACY_DEDUPE_SCHEMA_VERSION,
+    PREVIOUS_DEDUPE_SCHEMA_VERSION,
     RESTART_CONTINUITY,
     _seal_dedupe_state,
     build_simulation_plan_from_capture,
@@ -30,6 +32,7 @@ from crt_radar.run_ledger import RunLedger
 CURRENT_MAIN_SHA = "4fe185887044abf1f378354414cbe417fa7247cb"
 NOW = datetime(2026, 8, 30, 0, 0, tzinfo=timezone.utc)
 NOW_MS = int(NOW.timestamp() * 1000)
+LIVE_TYPES = {asset: 1 for asset in ASSET_ORDER}
 
 
 def iso_z(value: datetime) -> str:
@@ -102,9 +105,16 @@ def live_capture() -> dict:
 
 
 class FeedFactory:
-    def __init__(self, capture: dict, callbacks: list[tuple]) -> None:
+    def __init__(
+        self,
+        capture: dict,
+        callbacks: list[tuple],
+        *,
+        failure_after_callbacks: Exception | None = None,
+    ) -> None:
         self.capture = capture
         self.callbacks = callbacks
+        self.failure_after_callbacks = failure_after_callbacks
         self.call_count = 0
 
     def __call__(self, sink):
@@ -116,11 +126,21 @@ class FeedFactory:
                 parent.call_count += 1
                 for callback in parent.callbacks:
                     if callback[0] == "LAST":
-                        sink.on_ibkr_last(callback[1], callback[2], callback[3])
+                        sink.on_ibkr_last(
+                            callback[1],
+                            callback[2],
+                            callback[3],
+                            market_data_types=copy.deepcopy(LIVE_TYPES),
+                        )
                     else:
                         sink.on_ibkr_5s_close(
-                            callback[1], callback[2], callback[3]
+                            callback[1],
+                            callback[2],
+                            callback[3],
+                            market_data_types=copy.deepcopy(LIVE_TYPES),
                         )
+                if parent.failure_after_callbacks is not None:
+                    raise parent.failure_after_callbacks
                 return copy.deepcopy(parent.capture)
 
         return Feed()
@@ -303,9 +323,10 @@ class Gate6C3OperatorTests(TestCase):
             second["checkpoint_commit_scope"],
             CHECKPOINT_COMMIT_SCOPE,
         )
+        self.assertIsNone(second["unresolved_restart_boundary"])
         self.assertEqual(
-            second["unresolved_restart_boundary"],
-            "MID_CYCLE_LIVE_OBSERVATIONS_ARE_NOT_JOURNALED",
+            second["delivery_semantics"],
+            "DURABLE_AT_LEAST_ONCE_OBSERVATION_REPLAY_WITH_EVENT_DEDUPE",
         )
 
     def test_cross_acceptance_continues_across_operator_restart(self) -> None:
@@ -369,6 +390,43 @@ class Gate6C3OperatorTests(TestCase):
             [event["event_type"] for event in second["new_events"]],
             ["CROSS_RAW"],
         )
+
+    def test_mid_cycle_crash_replays_committed_observation(self) -> None:
+        capture = live_capture()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "dedupe.json"
+            with self.assertRaisesRegex(RuntimeError, "injected mid-cycle crash"):
+                self.run_operator(
+                    temp_dir,
+                    factory=FeedFactory(
+                        capture,
+                        [("LAST", "MSTR", 99.85, NOW_MS)],
+                        failure_after_callbacks=RuntimeError(
+                            "injected mid-cycle crash"
+                        ),
+                    ),
+                )
+            self.assertFalse(state_path.exists())
+
+            recovered = self.run_operator(
+                temp_dir,
+                factory=FeedFactory(capture, []),
+            )
+            checkpoint = json.loads(state_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            [event["event_type"] for event in recovered["new_events"]],
+            ["APPROACH"],
+        )
+        self.assertEqual(
+            recovered["observation_journal"]["replayed_observation_count"],
+            1,
+        )
+        self.assertEqual(
+            recovered["observation_journal"]["appended_observation_count"],
+            0,
+        )
+        self.assertEqual(checkpoint["journal_applied_through"], 1)
 
     def test_invalid_plan_blocks_before_feed_connects(self) -> None:
         expired = simulation_plan()
@@ -503,6 +561,57 @@ class Gate6C3OperatorTests(TestCase):
         self.assertIs(result["gate6a_state_restored"], False)
         self.assertEqual(migrated["schema_version"], DEDUPE_SCHEMA_VERSION)
         self.assertIsInstance(migrated["gate6a_state"], dict)
+
+    def test_v02_gate6a_checkpoint_migrates_to_journal_cursor(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state_path = Path(temp_dir) / "dedupe.json"
+            previous = {
+                "schema_version": PREVIOUS_DEDUPE_SCHEMA_VERSION,
+                "plan_sha": simulation_plan()["plan_sha"],
+                "lines": {},
+                "gate6a_state": None,
+                "restart_continuity": (
+                    "COMPLETED_CYCLE_GATE6A_STATE_AND_EVENT_DEDUPE"
+                ),
+                "checkpoint_commit_scope": "LAST_COMPLETED_OPERATOR_CYCLE",
+                **AUTHORITY,
+            }
+            state_path.write_text(
+                json.dumps(_seal_dedupe_state(previous)),
+                encoding="utf-8",
+            )
+            self.run_operator(
+                temp_dir,
+                factory=FeedFactory(live_capture(), []),
+            )
+            migrated = json.loads(state_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(migrated["schema_version"], DEDUPE_SCHEMA_VERSION)
+        self.assertEqual(migrated["journal_applied_through"], 0)
+        self.assertEqual(migrated["journal_applied_hash"], "0" * 64)
+
+    def test_journal_behind_checkpoint_fails_before_feed_connects(self) -> None:
+        capture = live_capture()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            self.run_operator(
+                temp_dir,
+                factory=FeedFactory(
+                    capture,
+                    [("LAST", "MSTR", 99.85, NOW_MS)],
+                ),
+            )
+            journal_path = Path(temp_dir) / "dedupe.observations.sqlite3"
+            connection = sqlite3.connect(journal_path)
+            try:
+                connection.execute("DELETE FROM observations")
+                connection.commit()
+            finally:
+                connection.close()
+            factory = FeedFactory(capture, [])
+            with self.assertRaisesRegex(ValueError, "behind checkpoint"):
+                self.run_operator(temp_dir, factory=factory)
+
+        self.assertEqual(factory.call_count, 0)
 
     def test_handoff_failure_does_not_commit_dedupe_state(self) -> None:
         capture = live_capture()

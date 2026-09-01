@@ -100,13 +100,22 @@ class IbkrFeed(Protocol):
 
 
 class IbkrObservationSink(Protocol):
-    def on_ibkr_last(self, asset: str, price: float, observed_at_ms: int) -> None: ...
+    def on_ibkr_last(
+        self,
+        asset: str,
+        price: float,
+        observed_at_ms: int,
+        *,
+        market_data_types: dict[str, int | None] | None = None,
+    ) -> None: ...
 
     def on_ibkr_5s_close(
         self,
         asset: str,
         close: float,
         observed_at_ms: int,
+        *,
+        market_data_types: dict[str, int | None] | None = None,
     ) -> None: ...
 
 
@@ -375,11 +384,31 @@ def _native_feed_app(
         ) -> None:
             if observation_sink is None:
                 return
+            with self.lock:
+                market_data_types = {
+                    item: self.assets[item]["market_data_type"]
+                    for item in ASSET_ORDER
+                }
+            if any(
+                market_data_types[item] != LIVE_MARKET_DATA_TYPE
+                for item in ASSET_ORDER
+            ):
+                return
             try:
                 if channel == "LAST":
-                    observation_sink.on_ibkr_last(asset, price, observed_at_ms)
+                    observation_sink.on_ibkr_last(
+                        asset,
+                        price,
+                        observed_at_ms,
+                        market_data_types=market_data_types,
+                    )
                 elif channel == "BAR_5S_CLOSE":
-                    observation_sink.on_ibkr_5s_close(asset, price, observed_at_ms)
+                    observation_sink.on_ibkr_5s_close(
+                        asset,
+                        price,
+                        observed_at_ms,
+                        market_data_types=market_data_types,
+                    )
                 else:
                     raise ValueError(f"unsupported observation channel: {channel}")
             except Exception as exc:

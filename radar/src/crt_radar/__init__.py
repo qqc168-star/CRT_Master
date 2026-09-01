@@ -8,6 +8,7 @@ __all__ = [
     "ibkr_commander_observation",
     "ibkr_commander_operator",
     "ibkr_live_market_data_intake",
+    "ibkr_observation_journal",
     "level_event_state_machine",
     "liquidation_aggregator",
     "liquidation_collector",
