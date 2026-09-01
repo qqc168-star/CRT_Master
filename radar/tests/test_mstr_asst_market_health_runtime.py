@@ -11,6 +11,7 @@ from crt_radar.mstr_asst_market_health_runtime import (
     AUTHORITY,
     SCHEMA_VERSION,
     build_market_health_runtime_outputs,
+    build_runtime_input_from_source_proofs,
     seal_runtime_source,
     write_market_health_runtime_outputs,
 )
@@ -163,6 +164,15 @@ def runtime_bundle() -> dict:
 
 
 class MarketHealthRuntimeTests(unittest.TestCase):
+
+    def test_builds_runtime_input_from_five_proofs(self):
+        original = runtime_bundle()
+        rebuilt = build_runtime_input_from_source_proofs(
+            original["source_proofs"],
+            generated_at_ms=original["generated_at_ms"],
+        )
+        self.assertEqual(rebuilt["schema_version"], SCHEMA_VERSION)
+        self.assertEqual(set(rebuilt["source_proofs"]), set(original["source_proofs"]))
 
     def test_builds_all_validated_outputs(self):
         outputs = build_market_health_runtime_outputs(runtime_bundle())

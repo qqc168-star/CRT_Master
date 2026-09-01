@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import time
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -164,6 +165,22 @@ def build_market_health_runtime_outputs(bundle: Any) -> dict[str, dict[str, Any]
     }
 
 
+def build_runtime_input_from_source_proofs(
+    source_proofs: dict[str, Any],
+    *,
+    generated_at_ms: int,
+) -> dict[str, Any]:
+    bundle = {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at_ms": generated_at_ms,
+        "source_proofs": deepcopy(source_proofs),
+        **AUTHORITY,
+    }
+    # Reuse the complete evaluator as the contract validation boundary.
+    build_market_health_runtime_outputs(bundle)
+    return bundle
+
+
 def write_market_health_runtime_outputs(
     outputs: dict[str, dict[str, Any]],
     *,
@@ -184,7 +201,13 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Build the read-only MSTR/ASST Market Health runtime artifacts."
     )
-    parser.add_argument("--input", required=True)
+    parser.add_argument("--input")
+    parser.add_argument("--equity-proof")
+    parser.add_argument("--btc-proof")
+    parser.add_argument("--options-proof")
+    parser.add_argument("--issuer-proof")
+    parser.add_argument("--commander-proof")
+    parser.add_argument("--runtime-input-output")
     parser.add_argument("--full-day-output", required=True)
     parser.add_argument("--options-output", required=True)
     parser.add_argument("--market-health-output", required=True)
@@ -194,8 +217,33 @@ def _parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _parser().parse_args()
-    bundle = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    if args.input:
+        bundle = json.loads(Path(args.input).read_text(encoding="utf-8"))
+    else:
+        proof_paths = {
+            "equity_daily": args.equity_proof,
+            "btc_exact_close": args.btc_proof,
+            "options_daily": args.options_proof,
+            "issuer_btc_per_diluted_share": args.issuer_proof,
+            "commander_lines": args.commander_proof,
+        }
+        missing = [key for key, path in proof_paths.items() if not path]
+        if missing:
+            raise ValueError(
+                "--input or all five source proof paths are required: "
+                + ", ".join(missing)
+            )
+        source_proofs = {
+            key: json.loads(Path(path).read_text(encoding="utf-8"))
+            for key, path in proof_paths.items()
+        }
+        bundle = build_runtime_input_from_source_proofs(
+            source_proofs,
+            generated_at_ms=int(time.time() * 1000),
+        )
     outputs = build_market_health_runtime_outputs(bundle)
+    if args.runtime_input_output:
+        write_json_atomic(args.runtime_input_output, bundle)
     write_market_health_runtime_outputs(
         outputs,
         full_day_output=args.full_day_output,
