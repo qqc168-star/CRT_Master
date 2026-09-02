@@ -4,6 +4,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from .mstr_asst_market_health import validate_mstr_asst_market_health
 from .observation_store import Observation
 
 
@@ -170,14 +171,21 @@ def fuse_reanalysis_wake(
     base_wake: dict[str, Any] | None,
     *,
     plan_drift: dict[str, Any] | None,
+    mstr_asst_market_health: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Fuse read-only reanalysis sources into one wake surface."""
+    """Fuse read-only BTC, plan-drift, and equity-health wake sources."""
 
     if base_wake is not None and not isinstance(base_wake, dict):
         raise ValueError("base_wake must be an object or None")
 
     if plan_drift is not None and not isinstance(plan_drift, dict):
         raise ValueError("plan_drift must be an object or None")
+
+    market_health = None
+    if mstr_asst_market_health is not None:
+        market_health = validate_mstr_asst_market_health(
+            mstr_asst_market_health
+        )
 
     if isinstance(base_wake, dict):
         _assert_optional_authority(
@@ -196,7 +204,12 @@ def fuse_reanalysis_wake(
         and plan_drift.get("reanalysis_required") is True
     )
 
-    if base_wake is None and not plan_requested:
+    market_requested = bool(
+        isinstance(market_health, dict)
+        and market_health.get("reanalysis_required") is True
+    )
+
+    if base_wake is None and not plan_requested and not market_requested:
         return None
 
     if base_wake is None:
@@ -233,11 +246,33 @@ def fuse_reanalysis_wake(
             base_source = "DVOL"
         elif result.get("input_family") == "BTC_SPOT_PRICE":
             base_source = "BTC_INTRADAY"
+        elif result.get("input_family") == "COMMANDER_PLAN_OBSERVATION":
+            base_source = "COMMANDER_PLAN_OBSERVATION"
         else:
             base_source = "BASE_WAKE"
 
         wake_sources.append(base_source)
         wake_reasons.append(base_reason)
+
+    if market_requested:
+        market_reasons = market_health.get("wake_reasons", [])
+        wake_sources.append("MSTR_ASST_MARKET_HEALTH")
+        wake_reasons.extend(str(reason) for reason in market_reasons)
+
+        if not base_requested:
+            result.update(
+                {
+                    "state": "REANALYSIS_REQUESTED",
+                    "reason": str(market_health.get("reason")),
+                    "metric": "mstr_asst_market_health",
+                    "input_family": "MSTR_ASST_MARKET_HEALTH",
+                    "current_value": None,
+                    "previous_value": None,
+                    "percent_change": None,
+                    "historical_percentile": None,
+                    "baseline_count": 0,
+                }
+            )
 
     if plan_requested:
         plan_reason = str(
@@ -250,7 +285,7 @@ def fuse_reanalysis_wake(
         wake_sources.append("PLAN_DRIFT")
         wake_reasons.append(plan_reason)
 
-        if not base_requested:
+        if not base_requested and not market_requested:
             result.update(
                 {
                     "state": "REANALYSIS_REQUESTED",
@@ -282,6 +317,18 @@ def fuse_reanalysis_wake(
     result["plan_drift_reanalysis_required"] = (
         plan_drift.get("reanalysis_required")
         if isinstance(plan_drift, dict)
+        else None
+    )
+
+    result["mstr_asst_market_health_state"] = (
+        market_health.get("state")
+        if isinstance(market_health, dict)
+        else None
+    )
+
+    result["mstr_asst_market_health_reanalysis_required"] = (
+        market_health.get("reanalysis_required")
+        if isinstance(market_health, dict)
         else None
     )
 

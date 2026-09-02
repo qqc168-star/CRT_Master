@@ -23,6 +23,54 @@
 powershell -ExecutionPolicy Bypass -File .\radar\scripts\windows\run_observation_history_windows.ps1
 ```
 
+### MSTR／ASST Market Health（市場健康度）→ GPT Wake（GPT 喚醒）
+
+先以五份帶雜湊的來源證明產生 Market Health runtime artifacts（執行期施工件）：
+
+```powershell
+python -m crt_radar.mstr_asst_market_health_runtime `
+  --input "$env:USERPROFILE\CRT_Runtime\market-health\runtime-input.json" `
+  --full-day-output "$env:USERPROFILE\CRT_Runtime\market-health\full-day-market-intake.json" `
+  --options-output "$env:USERPROFILE\CRT_Runtime\market-health\options-daily-snapshot.json" `
+  --market-health-output "$env:USERPROFILE\CRT_Runtime\market-health\latest.json" `
+  --manifest-output "$env:USERPROFILE\CRT_Runtime\market-health\manifest.json"
+```
+
+輸入必須完全符合 `CONFIG/MSTR_ASST_MARKET_HEALTH_SOURCE_V0.1.json`，且包含五個 `VALID`、hash 對齊、External Action Authority `NONE` 的來源證明。Commander lines 必須明示 `THREE_ARMY_COMMANDER` 與 `APPROVED`；`SIMULATION_ONLY` 或任何機器推測線一律 fail closed。所有計算先在記憶體內完成並驗證，之後才逐檔 atomic replace（原子置換）。
+
+IBKR equity daily proof 可由唯讀 collector 產生：
+
+```powershell
+python -m crt_radar.ibkr_market_health_sources `
+  --host 127.0.0.1 --port 7496 --client-id 761 `
+  --equity-output "$env:USERPROFILE\CRT_Runtime\market-health\equity-daily-proof.json"
+```
+
+同一 collector 可產生 limited options coverage：underlying generic tick 100 提供 aggregate call／put volume；最近到期、近價合約只提供 covered OI／IV。單一合約 volume 若不可用，必須明示 `BLOCKED_NOT_AVAILABLE`，不得補零；coverage 也不得宣稱 full chain。
+
+值班入口可選擇性讀取一份已驗證、local-only（僅本機）的
+`CRT_MSTR_ASST_MARKET_HEALTH_V0.1` 快照：
+
+```powershell
+python -m crt_radar.daily_evidence_runner `
+  --mstr-asst-market-health "$env:USERPROFILE\CRT_Runtime\market-health\latest.json" `
+  --wake-output "$env:USERPROFILE\CRT_Runtime\wake\latest.json" `
+  --notice-output "$env:USERPROFILE\CRT_Runtime\notifications\latest.json" `
+  --handoff-output "$env:USERPROFILE\CRT_Runtime\gpt-handoff\latest.json" `
+  --handoff-ledger "$env:USERPROFILE\CRT_Runtime\gpt-handoff\ledger.jsonl" `
+  --bridge-outbox-dir "$env:USERPROFILE\CRT_Runtime\gpt-bridge-outbox"
+```
+
+Market Health 快照會先驗證 schema、內容一致性、雜湊與
+External Action Authority（外部行動權限）`NONE`，才寫入 Evidence Pack
+並參與 Wake Fusion。相同資產與相同語義事件由 GPT Handoff Ledger
+（GPT 交接帳本）去重；不同資產的同名事件不會互相吞併。
+
+此入口只形成本機 Evidence Pack、Wake、Notice、GPT Handoff 與 Bridge
+Outbox。它不會 claim（領取）外部傳輸、不會通知使用者、不會修改持倉，
+也不會下單。Wake（喚醒）不等於 Notification（通知）；是否值得通知仍由
+GPT 依 Three-Army Commander Doctrine（三軍統帥準則）重新分析後裁決。
+
 安裝 read-only recurring task（唯讀週期工作）。預設 cadence（執行頻率）為 60 分鐘，只屬於 Operational Default（營運預設值），不是 investment threshold（投資閾值）：
 
 ```powershell

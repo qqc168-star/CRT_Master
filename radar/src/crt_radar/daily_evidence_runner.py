@@ -88,6 +88,7 @@ def run_daily_evidence(
     btc_entry_gate_context: dict[str, Any] | None = None,
     btc_entry_gate_runner: Callable[..., dict[str, Any]] | None = None,
     assumption_watch_context: dict[str, Any] | None = None,
+    mstr_asst_market_health: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_gate = run_source_gate(
         registry,
@@ -223,6 +224,7 @@ def run_daily_evidence(
         btc_entry_gate=btc_entry_gate,
         assumption_watch_context=assumption_watch_context,
         private_context=private_context,
+        mstr_asst_market_health=mstr_asst_market_health,
     )
 
 
@@ -233,6 +235,16 @@ def _load_liquidation_snapshot(path: Path) -> dict[str, Any] | None:
         return load_verified_snapshot(path)
     except SnapshotCorruption:
         return None
+
+
+def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} cannot be loaded: {type(exc).__name__}:{exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(f"{label} must contain a JSON object")
+    return payload
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -259,6 +271,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--handoff-output", type=Path, default=None)
     parser.add_argument("--handoff-ledger", type=Path, default=None)
     parser.add_argument("--bridge-outbox-dir", type=Path, default=None)
+    parser.add_argument(
+        "--mstr-asst-market-health",
+        type=Path,
+        default=None,
+        help=(
+            "Optional local-only validated MSTR/ASST Market Health V0.1 "
+            "snapshot to fuse into Evidence Pack and GPT Wake."
+        ),
+    )
     parser.add_argument("--maturity-ledger", type=Path, default=None)
     parser.add_argument("--maturity-status", type=Path, default=None)
     parser.add_argument(
@@ -308,6 +329,14 @@ def main(argv: list[str] | None = None) -> int:
     private_context = load_private_profile(args.private_profile)
     btc_entry_gate_context = load_btc_entry_gate_context(args.btc_entry_context)
     assumption_watch_context = load_assumption_watch_context(args.assumption_context)
+    mstr_asst_market_health = (
+        _load_json_object(
+            args.mstr_asst_market_health,
+            label="MSTR/ASST Market Health",
+        )
+        if args.mstr_asst_market_health is not None
+        else None
+    )
     pack = run_daily_evidence(
         registry,
         observation_db=args.observation_db,
@@ -320,6 +349,7 @@ def main(argv: list[str] | None = None) -> int:
         btc_entry_gate_context=btc_entry_gate_context,
         btc_entry_gate_runner=run_live_btc_entry_gate,
         assumption_watch_context=assumption_watch_context,
+        mstr_asst_market_health=mstr_asst_market_health,
     )
     write_json_atomic(args.output, pack)
     if args.wake_output is not None:
