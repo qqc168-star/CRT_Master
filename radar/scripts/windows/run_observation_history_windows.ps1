@@ -27,6 +27,7 @@ $IssuerAnnouncementRegistry = Join-Path $RadarRoot "CONFIG\ISSUER_ANNOUNCEMENT_R
 $IssuerAnnouncementState = Join-Path $RuntimeRoot "issuer_announcements\state.json"
 $IssuerAnnouncementLedger = Join-Path $RuntimeRoot "issuer_announcements\events.jsonl"
 $IssuerAnnouncementOutput = Join-Path $RuntimeRoot "issuer_announcements\latest.json"
+$MstrAsstMarketHealth = Join-Path $RuntimeRoot "market-health\latest.json"
 
 if (-not (Test-Path $RadarRoot)) {
     throw "CRT Radar repo not found: $RadarRoot"
@@ -108,6 +109,17 @@ $RunnerArgs = @(
     "--phone-l4-freshness-path", $PhoneL4,
     "--phone-l4-max-age-seconds", "$PhoneL4MaxAgeSeconds"
 )
+
+if (Test-Path -LiteralPath $MstrAsstMarketHealth) {
+    $RunnerArgs += @(
+        "--mstr-asst-market-health",
+        $MstrAsstMarketHealth
+    )
+    Write-Host "MSTR_ASST_MARKET_HEALTH_RUNTIME_INPUT_READY" -ForegroundColor Green
+}
+else {
+    Write-Host "MSTR_ASST_MARKET_HEALTH_WAITING_FOR_VALIDATED_SNAPSHOT" -ForegroundColor Yellow
+}
 
 & $Python @RunnerArgs
 $EvidenceExit = $LASTEXITCODE
