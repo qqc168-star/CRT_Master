@@ -160,7 +160,7 @@ def build_sealed_simulation_plan(
                 "reference_received_at": _iso_z(reference_at),
                 "line_generation_rule_bps": offsets,
                 "commander_judgment": "SIMULATED_NOT_FORMAL",
-                "capital_decision_authority": "NONE",
+                "capital_decision_authority": "USER_ONLY",
             },
             "lines": [
                 {
