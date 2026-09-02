@@ -73,23 +73,35 @@ def _asset_snapshot(asset: str, raw: Any) -> dict[str, Any]:
             volume = None
         else:
             volume = _numeric(volume_raw, "volume")
+
+        iv_state = str(
+            row.get("implied_volatility_state", "UNKNOWN")
+        )
+        iv_raw = row.get("implied_volatility")
+        if iv_raw is None:
+            if not iv_state.startswith("BLOCKED"):
+                raise ValueError(
+                    f"{asset} missing implied_volatility must be explicitly BLOCKED"
+                )
+            implied_volatility = None
+        else:
+            implied_volatility = _numeric(
+                iv_raw,
+                "implied_volatility",
+            )
+
         normalized = {
             "expiry": str(row.get("expiry")),
             "strike": _numeric(row.get("strike"), "strike"),
             "right": right,
             "volume": volume,
             "open_interest": oi,
-            "implied_volatility": _numeric(
-                row.get("implied_volatility"),
-                "implied_volatility",
-            ),
+            "implied_volatility": implied_volatility,
             "volume_state": volume_state,
             "open_interest_state": str(
                 row.get("open_interest_state", "UNKNOWN")
             ),
-            "implied_volatility_state": str(
-                row.get("implied_volatility_state", "UNKNOWN")
-            ),
+            "implied_volatility_state": iv_state,
             "observed_at_ms": row.get("observed_at_ms"),
             "oi_effective_at": row.get("oi_effective_at"),
         }

@@ -664,7 +664,6 @@ def collect_ibkr_options_daily_proof(
             row
             for row in selected
             if row["open_interest"] is None
-            or row["implied_volatility"] is None
             or row["market_data_type"] not in {3, 4}
         ]
         if incomplete:
@@ -696,7 +695,11 @@ def collect_ibkr_options_daily_proof(
                     else "BLOCKED_NOT_AVAILABLE"
                 ),
                 "open_interest_state": "IBKR_DELAYED_COVERED_CONTRACT",
-                "implied_volatility_state": "IBKR_DELAYED_COVERED_CONTRACT",
+                "implied_volatility_state": (
+                    "IBKR_DELAYED_COVERED_CONTRACT"
+                    if row["implied_volatility"] is not None
+                    else "BLOCKED_NOT_AVAILABLE"
+                ),
                 "observed_at_ms": observed,
                 "oi_effective_at": session_date,
             }

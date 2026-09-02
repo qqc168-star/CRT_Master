@@ -99,6 +99,61 @@ class OptionsDailySnapshotTests(unittest.TestCase):
         )
         self.assertIsNone(result["assets"]["MSTR"]["contracts"][0]["volume"])
 
+    def test_allows_explicitly_blocked_implied_volatility(self):
+        inputs = {
+            "MSTR": asset_input("MSTR"),
+            "ASST": asset_input("ASST"),
+        }
+        contract = inputs["MSTR"]["contracts"][0]
+        contract["implied_volatility"] = None
+        contract["implied_volatility_state"] = "BLOCKED_NOT_AVAILABLE"
+
+        result = build_mstr_asst_options_daily_snapshot(
+            asset_inputs=inputs,
+            generated_at_ms=1_787_950_900_001,
+        )
+
+        output = result["assets"]["MSTR"]["contracts"][0]
+        self.assertIsNone(output["implied_volatility"])
+        self.assertEqual(
+            output["implied_volatility_state"],
+            "BLOCKED_NOT_AVAILABLE",
+        )
+
+    def test_rejects_unlabelled_missing_implied_volatility(self):
+        inputs = {
+            "MSTR": asset_input("MSTR"),
+            "ASST": asset_input("ASST"),
+        }
+        contract = inputs["MSTR"]["contracts"][0]
+        contract["implied_volatility"] = None
+        contract["implied_volatility_state"] = "DELAYED"
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "implied_volatility must be explicitly BLOCKED",
+        ):
+            build_mstr_asst_options_daily_snapshot(
+                asset_inputs=inputs,
+                generated_at_ms=1_787_950_900_001,
+            )
+
+    def test_still_rejects_missing_open_interest(self):
+        inputs = {
+            "MSTR": asset_input("MSTR"),
+            "ASST": asset_input("ASST"),
+        }
+        inputs["MSTR"]["contracts"][0]["open_interest"] = None
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "open_interest must be numeric",
+        ):
+            build_mstr_asst_options_daily_snapshot(
+                asset_inputs=inputs,
+                generated_at_ms=1_787_950_900_001,
+            )
+
     def test_limited_coverage_never_claims_full_chain(self):
         row = build()["assets"]["MSTR"]
         self.assertEqual(
