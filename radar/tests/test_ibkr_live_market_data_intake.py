@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import unittest
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+from types import ModuleType
+from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from crt_radar.ibkr_live_market_data_intake import (
@@ -168,7 +171,37 @@ def _minimal_evidence_pack() -> dict:
 class IbkrLiveMarketDataIntakeTests(unittest.TestCase):
     def test_observation_sink_waits_for_four_asset_live_type_proof(self) -> None:
         sink = _ProofSink()
-        MarketDataApp, _ = _native_feed_app(sink)
+
+        class StubEWrapper:
+            pass
+
+        class StubEClient:
+            def __init__(self, wrapper) -> None:
+                self.wrapper = wrapper
+
+        class StubContract:
+            pass
+
+        ibapi_module = ModuleType("ibapi")
+        client_module = ModuleType("ibapi.client")
+        wrapper_module = ModuleType("ibapi.wrapper")
+        contract_module = ModuleType("ibapi.contract")
+
+        client_module.EClient = StubEClient
+        wrapper_module.EWrapper = StubEWrapper
+        contract_module.Contract = StubContract
+
+        with patch.dict(
+            sys.modules,
+            {
+                "ibapi": ibapi_module,
+                "ibapi.client": client_module,
+                "ibapi.wrapper": wrapper_module,
+                "ibapi.contract": contract_module,
+            },
+        ):
+            MarketDataApp, _ = _native_feed_app(sink)
+
         app = MarketDataApp()
         for index, asset in enumerate(ASSET_ORDER):
             app.request_map[1000 + index] = (asset, "L1")
