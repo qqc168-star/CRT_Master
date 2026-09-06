@@ -33,11 +33,11 @@
     "working_body_sha256": "5ba963b51bcf49839299c3ce4e7649728d3d8caa05d8ca442691689e667f0064"
   },
   "protected_file_hashes_at_recovery": {
-    "formal_input_envelope_sha256": "5370f94abec5c4f1fadd74d6c041644eb46a1bdea9c80c6981dc45d2de826049",
-    "semantic_mapping_file_sha256": "9c0c143e34a3cf34cf1fe94a6baddc87cc5b56d55375ed7bed0e39fbc0e2b5ce",
+    "formal_input_envelope_sha256": "ddb9798cea87f4136b2641862a279a5230114ee676c329ec42739862af9256aa",
+    "semantic_mapping_file_sha256": "6a45ebe127c208d9b959a1ea61d44cbc9736ef82ebdd7c0de62d3f81e7e91e15",
     "semantic_mapping_canonical_sha256": "afe99dfaf4a2023d39c1589252b840b27daab106932b33783316fec71ab05e3a",
-    "approval_seal_sha256": "691b9d6064c5ac6ccfbbca516ba5f82ea3ef86e9136919f92ee931320effd71f",
-    "source_responsibility_matrix_sha256": "f585fae21ad206a631a7660e185c849dab0d17c2e9785427d22daad79043aa61"
+    "approval_seal_sha256": "a90bb712ac1f1d07f9b097bd829ca854efe29ad590e6bf45250d8e7be15258fb",
+    "source_responsibility_matrix_sha256": "07105b73f00f93a6c33dc9dbd947fae915480ed0a8d405dec291eabf999f2593"
   },
   "chapters": [
     {
@@ -902,5 +902,12 @@
     "may_change_formal_input_binding": false,
     "may_change_season_output_authority": false,
     "next_gate": "HUMAN_REVIEW_EXACT_CH02_CH06_CLAUSES_THEN_UPDATE_CURRENT_MAIN SOURCE_RESPONSIBILITY_MATRIX_CANDIDATE"
+  },
+  "portability_note": {
+    "status": "RAW_TEXT_HASH_CHECKOUT_NORMALIZED_TO_LF",
+    "reason": "PR83_CI_EXPOSED_WINDOWS_CRLF_VS_LINUX_LF_RAW_BYTE_HASH_MISMATCH",
+    "semantic_change": false,
+    "formal_authority_change": false,
+    "runtime_authority_change": false
   }
 }
