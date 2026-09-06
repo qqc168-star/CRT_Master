@@ -1,0 +1,209 @@
+{
+  "schema_version": "CRT_BTC_CONTROL_TRANSFER_VALIDATION_CASES_V0.1",
+  "status": "RESEARCH_ONLY_NOT_APPROVED",
+  "source_contract": {
+    "path": "radar/research/CRT_CONTROL_TRANSFER_VALIDATION_CONTRACT_V0.1.md",
+    "sha256": "32e640991984bcfe876cc438669173f745a3be3c33d2d52e5baef4782ec5dbb1"
+  },
+  "cases": [
+    {
+      "case_id": "2015_SUCCESSFUL_RECLAIM",
+      "eligible_for_acceptance": true,
+      "evidence": {
+        "schema_version": "CRT_BTC_CONTROL_TRANSFER_VALIDATION_EVIDENCE_V0.1",
+        "candidate": {
+          "state": "CONTROL_TRANSFER_CANDIDATE",
+          "event_id": "2015-C",
+          "timestamp": "2015-C",
+          "old_control_zone_ref": "2015_FROZEN_CONTROL_ZONE",
+          "candidate_invalidation_anchor_ref": "2015_C_INVALIDATION_ANCHOR",
+          "reference_provenance": "POINT_IN_TIME_RESEARCH_REPLAY"
+        },
+        "post_c_test": {
+          "event_id": "2015-D1",
+          "timestamp": "2015-D1",
+          "event_order": "AFTER_CANDIDATE",
+          "distinct_event": true,
+          "old_control_zone_result": "BREACHED_AND_RECLAIMED",
+          "candidate_structure_result": "PRESERVED",
+          "renewed_expansion": "CONFIRMED",
+          "new_local_control_high_break": "NOT_CONFIRMED"
+        },
+        "post_validation_review": {
+          "state": "NONE"
+        },
+        "authority": {
+          "formal_model_authority": "NONE",
+          "formal_weight_authority": "NONE",
+          "formal_threshold_authority": "NONE",
+          "season_transition_authority": "NONE",
+          "external_action_authority": "NONE",
+          "external_action_performed": false
+        }
+      },
+      "expected_research_state": "CONTROL_TRANSFER_VALIDATED",
+      "expected_current_validation_status": "ACTIVE"
+    },
+    {
+      "case_id": "2020_Q4_SUCCESSFUL",
+      "eligible_for_acceptance": true,
+      "evidence": {
+        "schema_version": "CRT_BTC_CONTROL_TRANSFER_VALIDATION_EVIDENCE_V0.1",
+        "candidate": {
+          "state": "CONTROL_TRANSFER_CANDIDATE",
+          "event_id": "2020Q4-C",
+          "timestamp": "2020Q4-C",
+          "old_control_zone_ref": "2020Q4_FROZEN_CONTROL_ZONE",
+          "candidate_invalidation_anchor_ref": "2020Q4_C_INVALIDATION_ANCHOR",
+          "reference_provenance": "POINT_IN_TIME_RESEARCH_REPLAY"
+        },
+        "post_c_test": {
+          "event_id": "2020Q4-D1",
+          "timestamp": "2020Q4-D1",
+          "event_order": "AFTER_CANDIDATE",
+          "distinct_event": true,
+          "old_control_zone_result": "HELD",
+          "candidate_structure_result": "PRESERVED",
+          "renewed_expansion": "CONFIRMED",
+          "new_local_control_high_break": "CONFIRMED"
+        },
+        "post_validation_review": {
+          "state": "NONE"
+        },
+        "authority": {
+          "formal_model_authority": "NONE",
+          "formal_weight_authority": "NONE",
+          "formal_threshold_authority": "NONE",
+          "season_transition_authority": "NONE",
+          "external_action_authority": "NONE",
+          "external_action_performed": false
+        }
+      },
+      "expected_research_state": "CONTROL_TRANSFER_VALIDATED",
+      "expected_current_validation_status": "ACTIVE"
+    },
+    {
+      "case_id": "2022_MAR_FAILED",
+      "eligible_for_acceptance": true,
+      "evidence": {
+        "schema_version": "CRT_BTC_CONTROL_TRANSFER_VALIDATION_EVIDENCE_V0.1",
+        "candidate": {
+          "state": "CONTROL_TRANSFER_CANDIDATE",
+          "event_id": "2022MAR-C",
+          "timestamp": "2022MAR-C",
+          "old_control_zone_ref": "2022MAR_FROZEN_CONTROL_ZONE",
+          "candidate_invalidation_anchor_ref": "2022MAR_C_INVALIDATION_ANCHOR",
+          "reference_provenance": "POINT_IN_TIME_RESEARCH_REPLAY"
+        },
+        "post_c_test": {
+          "event_id": "2022MAR-D1",
+          "timestamp": "2022MAR-D1",
+          "event_order": "AFTER_CANDIDATE",
+          "distinct_event": true,
+          "old_control_zone_result": "LOST_NOT_RECLAIMED",
+          "candidate_structure_result": "INVALIDATED",
+          "renewed_expansion": "NOT_CONFIRMED",
+          "new_local_control_high_break": "NOT_CONFIRMED"
+        },
+        "post_validation_review": {
+          "state": "NONE"
+        },
+        "authority": {
+          "formal_model_authority": "NONE",
+          "formal_weight_authority": "NONE",
+          "formal_threshold_authority": "NONE",
+          "season_transition_authority": "NONE",
+          "external_action_authority": "NONE",
+          "external_action_performed": false
+        }
+      },
+      "expected_research_state": "CONTROL_TRANSFER_CANDIDATE_FAILED",
+      "expected_current_validation_status": null
+    },
+    {
+      "case_id": "2023_MAR_SUCCESSFUL",
+      "eligible_for_acceptance": true,
+      "evidence": {
+        "schema_version": "CRT_BTC_CONTROL_TRANSFER_VALIDATION_EVIDENCE_V0.1",
+        "candidate": {
+          "state": "CONTROL_TRANSFER_CANDIDATE",
+          "event_id": "2023MAR-C",
+          "timestamp": "2023MAR-C",
+          "old_control_zone_ref": "2023MAR_FROZEN_CONTROL_ZONE",
+          "candidate_invalidation_anchor_ref": "2023MAR_C_INVALIDATION_ANCHOR",
+          "reference_provenance": "POINT_IN_TIME_RESEARCH_REPLAY"
+        },
+        "post_c_test": {
+          "event_id": "2023MAR-D1",
+          "timestamp": "2023MAR-D1",
+          "event_order": "AFTER_CANDIDATE",
+          "distinct_event": true,
+          "old_control_zone_result": "HELD",
+          "candidate_structure_result": "PRESERVED",
+          "renewed_expansion": "CONFIRMED",
+          "new_local_control_high_break": "CONFIRMED"
+        },
+        "post_validation_review": {
+          "state": "NONE"
+        },
+        "authority": {
+          "formal_model_authority": "NONE",
+          "formal_weight_authority": "NONE",
+          "formal_threshold_authority": "NONE",
+          "season_transition_authority": "NONE",
+          "external_action_authority": "NONE",
+          "external_action_performed": false
+        }
+      },
+      "expected_research_state": "CONTROL_TRANSFER_VALIDATED",
+      "expected_current_validation_status": "ACTIVE"
+    },
+    {
+      "case_id": "2021_Q4_VALIDATED_THEN_REVERSED",
+      "eligible_for_acceptance": true,
+      "evidence": {
+        "schema_version": "CRT_BTC_CONTROL_TRANSFER_VALIDATION_EVIDENCE_V0.1",
+        "candidate": {
+          "state": "CONTROL_TRANSFER_CANDIDATE",
+          "event_id": "2021Q4-C",
+          "timestamp": "2021Q4-C",
+          "old_control_zone_ref": "2021Q4_FROZEN_CONTROL_ZONE",
+          "candidate_invalidation_anchor_ref": "2021Q4_C_INVALIDATION_ANCHOR",
+          "reference_provenance": "POINT_IN_TIME_RESEARCH_REPLAY"
+        },
+        "post_c_test": {
+          "event_id": "2021Q4-D1",
+          "timestamp": "2021Q4-D1",
+          "event_order": "AFTER_CANDIDATE",
+          "distinct_event": true,
+          "old_control_zone_result": "HELD",
+          "candidate_structure_result": "PRESERVED",
+          "renewed_expansion": "CONFIRMED",
+          "new_local_control_high_break": "CONFIRMED"
+        },
+        "post_validation_review": {
+          "state": "REVERSAL_CONFIRMED",
+          "event_id": "2021Q4-R1",
+          "timestamp": "2021Q4-R1",
+          "event_order": "AFTER_VALIDATION",
+          "distinct_event": true
+        },
+        "authority": {
+          "formal_model_authority": "NONE",
+          "formal_weight_authority": "NONE",
+          "formal_threshold_authority": "NONE",
+          "season_transition_authority": "NONE",
+          "external_action_authority": "NONE",
+          "external_action_performed": false
+        }
+      },
+      "expected_research_state": "CONTROL_TRANSFER_VALIDATED",
+      "expected_current_validation_status": "REVERSED"
+    },
+    {
+      "case_id": "2020_FEB_PROVISIONAL",
+      "eligible_for_acceptance": false,
+      "reason": "C_PIVOT_NOT_FORMALLY_ESTABLISHED_IN_CURRENT_RESEARCH_SET"
+    }
+  ]
+}
