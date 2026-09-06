@@ -130,9 +130,9 @@ class SecondKnifeContractGuardTests(unittest.TestCase):
         readme = (ROOT.parent / "README.md").read_text(encoding="utf-8")
         self.assertIn("User-facing Language Rule（對使用者語言規則）", readme)
         self.assertIn("新聊天室必須從 current `main`（目前主分支）恢復此規則", readme)
-        self.assertIn("`Branch / Commit / PR`（分支／提交／合併請求）", readme)
+        self.assertIn("Branch / Commit / File write（分支／提交／檔案寫入）", readme)
         self.assertIn("`Simplicity first`（簡單優先）", readme)
-        self.assertIn("`HTTP 403`（拒絕寫入）", readme)
+        self.assertIn("`HTTP 403`，不得反覆重試", readme)
 
 
 
