@@ -3,3 +3,7 @@ radar/research/issuer_adapters.py text eol=lf
 radar/research/prospective_capture.py text eol=lf
 radar/research/CRT_SEASON_ROUTER_RESEARCH_DELTA_20260822.md text eol=lf
 radar/research/CRT_CONTROL_TRANSFER_VALIDATION_CONTRACT_V0.1.md text eol=lf
+radar/CONFIG/BTC_SEASON_FORMAL_INPUT_ENVELOPE_CANDIDATE_V0.1.json text eol=lf
+radar/CONFIG/BTC_SEASON_SEMANTIC_MAPPING_CANDIDATE_V0.1.1.json text eol=lf
+radar/CONFIG/BTC_SEASON_SEMANTIC_MAPPING_HASH_APPROVAL_SEAL_V0.1.json text eol=lf
+radar/registry/SOURCE_RESPONSIBILITY_MATRIX.md text eol=lf
