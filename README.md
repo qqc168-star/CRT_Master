@@ -64,13 +64,67 @@ Never reconstruct missing formal implementation from old chats or memory. If the
 - 當 Work（工作模式）或 Codex（程式施工代理）額度耗盡、不可用，或不值得消耗代理型額度時，工程不得因此停擺。
 - 回到一般 GPT Chat（一般 GPT 聊天室），由 GPT 負責理解、推理、產生或修改 Code（程式碼）、產生 PowerShell（命令列）與 Git（版本控制）施工指令，並設計 Test（測試）與驗收方法。
 - 使用者審視後人工貼入 PowerShell（命令列），實際施工路徑固定為：
-  `Local Git -> isolated worktree -> modify -> test -> Commit -> Push -> PR`
+  `Local Git -> isolated worktree -> modify -> test -> Commit -> Push -> PR -> Merge -> post-merge verification`
 - 不得 apply / pop / drop / rewrite（套用／彈出／刪除／改寫）既有 stash（暫存修改）。
 - ChatGPT GitHub App（ChatGPT GitHub 應用程式）只用於 read / search / verify（讀取／搜尋／驗證）current `main`；不得用它進行 Branch / Commit / File write（分支／提交／檔案寫入）。
 - ChatGPT GitHub App 若遇 `HTTP 403`，不得反覆重試，也不得視為 CRT（前行者研究院）程式故障。
 - Patch（補丁）只在實際 Git 寫入路徑失敗時作備援，不作正常施工流程。
 - `Review Pack / ZIP / Test Report`（檢核包／壓縮檔／測試報告）不得成為每刀固定產物。
 - `Formal Release`（正式發布）、`Migration`（遷移）或 special isolated integration（特殊隔離整合）時，才依實際需要增加打包。
+### 4. 一次授權、自主閉環｜One-Go Autonomous Closure（一次授權自主閉環）
+
+- 當 objective（目標）與 construction boundary（施工邊界）已清楚，使用者的 `GO / 開工 / 做完 / 繼續 / 現在來搞` 即視為該任務邊界內的完整 engineering authorization（工程授權）。
+- 完整工程鏈預設包含：
+  `inspect -> diagnose -> modify -> test -> debug -> regression -> Commit -> Push -> PR -> Merge -> post-merge verification`
+- 不得把正常工程鏈拆成逐步 permission requests（權限請求）；不得再要求使用者逐次批准檢查、修正、測試、Commit（提交）、Push（推送）、PR（合併請求）或 Merge（合併）。
+- Agent（代理）必須自行完成：
+  `detect -> diagnose -> repair -> validate -> retest -> close`
+  一般 bug（錯誤）、test failure（測試失敗）、environment difference（環境差異）、CI failure（持續整合失敗）與普通 Git conflict（版本控制衝突）必須先自行排障，不得把使用者當成逐步主管。
+- 只有以下四類情況允許停止並要求使用者介入：
+  1. 必須由真人完成的 GUI（圖形介面）、UAC（使用者帳戶控制）或實體操作。
+  2. 必須越過既定 construction boundary（施工邊界）。
+  3. 將修改 formal locks（正式鎖）或涉及 External Action（外部行動）、交易、資金移動或帳戶權限。
+  4. 已合理自行排障但仍客觀無法解除的真實 `BLOCKED`。
+- 除上述四類之外，`READY_FOR_COMMIT`、中間測試完成、一般排障進度或「下一步是否繼續」不得成為打斷使用者的理由。
+
+#### Agent division（代理分工）
+
+- ChatGPT（一般對話）負責 research（研究）、evidence intake（證據輸入）、reasoning（推理）、problem definition（問題定義）、specification（規格）、necessity check（必要性檢核）、construction boundary（施工邊界）與 acceptance criteria（驗收條件）。
+- Codex（程式施工代理）負責 repository work（版本庫工程）、程式修改、測試、除錯、regression（回歸）、Commit（提交）、Push（推送）、PR（合併請求）、Merge（合併）與 post-merge verification（合併後驗證）。
+- Work（工作模式）負責 Windows 實機、PowerShell（命令列）、administrator elevation（系統管理員提升）、TWS（交易工作站）、Task Scheduler（工作排程器）、package / environment（套件／環境）、local files（本機檔案）、deployment（部署）與 actual-machine validation（實機驗證）。
+- 能由 Work（工作模式）直接操作本機完成的 Windows 實機工程，不得退化成人工逐步貼 PowerShell（命令列），除非 Work（工作模式）不可用、額度耗盡或平台客觀阻塞。
+- Manual Engineering Fallback（人工工程備援）只在 Work（工作模式）或 Codex（程式施工代理）真正不可用時啟用；啟用時應盡量提供一次性完整施工，而非把流程切成多輪人工搬運。
+
+#### 禁止 Human Courier Mode（人肉快遞模式）
+
+- 不得形成 `Work -> User -> ChatGPT -> User -> Work` 或 `Codex -> User -> ChatGPT -> User -> Codex` 的例行資訊搬運鏈。
+- 只要代理有能力自行讀取、搜尋、執行、驗證或比較，就必須自己完成。
+- 使用者不是 Agent（代理）的 Project Manager（專案經理）、秘書或人工 API（人工介面）。
+
+#### Gate Necessity Rule（關卡必要性規則）
+
+- 新增任何 gate（關卡）、attestation（證明）、manifest refresh（清單更新）、package rebuild（套件重建）或重複驗證前，必須先回答：
+  「如果不做，會造成哪一個具體 correctness（正確性）、safety（安全）、evidence integrity（證據完整性）或 formal governance（正式治理）風險？」
+- 若無法指出具體風險，該事項不得成為 blocking gate（阻塞關卡）；最多標記為 `WARNING` 或 `KNOWN_LIMITATION`。
+- 「比較完整」、「比較好看」、「方便稽核」、「以防萬一」本身不是阻塞理由。
+
+#### Verified Work Reuse（已驗證成果承接）
+
+- 已取得 `PASS` 的驗證不得無理由重跑。
+- 只有 code（程式碼）、relevant input（相關輸入）、environment（環境）或直接影響該能力的 dependency（相依項）發生實質變化，才重跑對應驗證。
+- 不得因切換聊天室、代理、分支或施工階段而自動把既有有效 `PASS` 歸零。
+
+#### Release-only Work（僅正式發布才做的工作）
+
+- provenance refresh（來源追溯更新）、formal package reissue（正式套件重發）、manifest rebuild（清單重建）、額外 Review Pack（檢核包）與 Test Report（測試報告）只在 Formal Release（正式發布）、Migration（遷移）或確有必要的特殊隔離整合時執行。
+- 一般 feature integration（功能整合）不得被上述 release ceremony（發布儀式）阻塞。
+
+#### Human Lifetime Cost（人類生命時間成本）
+
+- Human attention（人類注意力）與 user lifetime（使用者生命時間）是工程成本，不是免費資源。
+- 能由機器自行多花運算時間而減少使用者操作、等待、搬運與重複確認時，預設讓機器承擔。
+- process overhead（流程負擔）若不能降低實際風險或提升 North Star decision quality（北極星決策品質），即應刪除。
+
 ## Authority boundary
 
 - Production: `NOT_APPROVED`
