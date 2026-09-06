@@ -1,0 +1,124 @@
+{
+  "attestation_sha256": "6f06617576cf7aac7a8b02b50f3e9e51aaf3e28acfd273177fcd549df057125c",
+  "authority": {
+    "action_output": "NONE",
+    "capital_decision_authority": "USER_ONLY",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "machine_may_execute_trade": false
+  },
+  "blockers": [],
+  "checks": [
+    {
+      "detail": "C:\\Users\\maxwe\\Downloads",
+      "name": "PACKAGE_ROOT",
+      "state": "PASS"
+    },
+    {
+      "detail": "C:\\Users\\maxwe\\Downloads\\DEPLOYMENT_COMMISSIONING_MANIFEST_V0.3.2.json",
+      "name": "PACKAGE_MANIFEST",
+      "state": "PASS"
+    },
+    {
+      "detail": "All deployment-critical hashes match",
+      "name": "PACKAGE_MANIFEST_FILE_HASHES",
+      "state": "PASS"
+    },
+    {
+      "detail": "All required runtime files present",
+      "name": "PACKAGE_REQUIRED_FILES",
+      "state": "PASS"
+    },
+    {
+      "detail": "127.0.0.1",
+      "name": "IBKR_LOOPBACK_ONLY",
+      "state": "PASS"
+    },
+    {
+      "detail": "169",
+      "name": "IBKR_DEDICATED_CLIENT_ID",
+      "state": "PASS"
+    },
+    {
+      "detail": "Operator explicitly confirmed TWS Read-Only API",
+      "name": "TWS_READ_ONLY_OPERATOR_CONFIRMATION",
+      "state": "PASS"
+    },
+    {
+      "detail": "Operator confirmed localhost/trusted-IP API connections auto-accept without modal prompt",
+      "name": "TWS_LOCAL_API_AUTO_ACCEPT_CONFIRMATION",
+      "state": "PASS"
+    },
+    {
+      "detail": "ScheduledTasks",
+      "name": "SCHEDULED_TASKS_CMDLETS",
+      "state": "PASS"
+    },
+    {
+      "detail": "Running",
+      "name": "TASK_SCHEDULER_SERVICE",
+      "state": "PASS"
+    },
+    {
+      "detail": "2026-09-08T19:54:00.0000000Z",
+      "name": "WINDOWS_ET_TIMEZONE_CONVERSION",
+      "state": "PASS"
+    },
+    {
+      "detail": "3.13.14",
+      "name": "PYTHON_RUNTIME",
+      "state": "PASS"
+    },
+    {
+      "detail": "ibapi import succeeded",
+      "name": "IBAPI_PACKAGE",
+      "state": "PASS"
+    },
+    {
+      "detail": "127.0.0.1:7496 listening",
+      "name": "TWS_API_PORT",
+      "state": "PASS"
+    },
+    {
+      "detail": "client 169 connect/disconnect only",
+      "name": "IBKR_CLIENT_ID_HANDSHAKE",
+      "state": "PASS"
+    },
+    {
+      "detail": "No conflicting task",
+      "name": "EXISTING_PRODUCTION_TASK",
+      "state": "PASS"
+    },
+    {
+      "detail": "AC online",
+      "name": "POWER_LINE",
+      "state": "PASS"
+    },
+    {
+      "detail": "powercfg /a succeeded; actual wake proof delegated to smoke task",
+      "name": "POWERCFG_CAPABILITY",
+      "state": "PASS"
+    },
+    {
+      "detail": "w32tm status unavailable; verify Windows automatic time before campaign",
+      "name": "WINDOWS_TIME_SERVICE",
+      "state": "WARN"
+    },
+    {
+      "detail": "At least one campaign launch remains",
+      "name": "CAMPAIGN_NOT_EXPIRED",
+      "state": "PASS"
+    }
+  ],
+  "engineering_ssot_sha": "0f7b5e179483ed2de65727aa792f29a2538443b3",
+  "generated_at_utc": "2026-09-06T00:50:20.219014Z",
+  "ibkr_client_id": 169,
+  "local_api_auto_accept_confirmed_by_operator": true,
+  "package_manifest_sha256": "f0f83d09091c005323039170b5c758059b6cd68eaf6357c447ce195bd77531cb",
+  "schema_version": "CRT_DUAL_HAIRPIN_DEPLOYMENT_PREFLIGHT_ATTESTATION_V0.3.2",
+  "state": "PASS",
+  "tws_read_only_confirmed_by_operator": true,
+  "warnings": [
+    "WINDOWS_TIME_SERVICE"
+  ]
+}
