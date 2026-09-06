@@ -335,6 +335,62 @@ def bridge_pack(
         }
     )
 
+
+    result["asset_strategy_delta"] = {
+        "schema_version": "CRT_ASSET_STRATEGY_DELTA_V0.2",
+        "state": "READY_FOR_ANALYST",
+        "assets": {
+            "BTC": {
+                "role": "CAPITAL_CORE_DIRECTION",
+                "strategy_delta": "KEEP_WAIT",
+                "decision_support": "WATCH",
+            }
+        },
+        "action_output": "NONE",
+        "external_action_authority": "NONE",
+        "external_action_performed": False,
+        "machine_may_execute_trade": False,
+        "capital_decision_authority": "USER_ONLY",
+        "analyst_judgment_required": True,
+    }
+
+    result["premarket_market_data"] = {
+        "state": "READY_FOR_ANALYST",
+        "battle_map": {
+            "first_screen": [
+                {
+                    "asset": "MSTR",
+                    "light": None,
+                    "entry_shares_delta": None,
+                    "entry_condition": {
+                        "asset_price": None,
+                        "btc_price": None,
+                    },
+                    "exit_condition": {
+                        "stop_loss": {
+                            "price": None,
+                            "confirmation_clause": None,
+                        },
+                        "take_profit": {
+                            "price": None,
+                            "confirmation_clause": None,
+                        },
+                    },
+                    "exit_shares_delta": {
+                        "stop_loss": None,
+                        "take_profit": None,
+                    },
+                }
+            ],
+        },
+        "action_output": "NONE",
+        "external_action_authority": "NONE",
+        "external_action_performed": False,
+        "machine_may_execute_trade": False,
+        "capital_decision_authority": "USER_ONLY",
+        "analyst_judgment_required": True,
+    }
+
     return result
 
 
@@ -925,6 +981,217 @@ class GptHandoffGateTests(unittest.TestCase):
                 ),
                 64,
             )
+
+
+    def test_minimized_bridge_carries_strategy_and_premarket_sections(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            active_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+
+            handoff = run_gpt_handoff_gate(
+                active_pack,
+                build_plain_language_notice(
+                    active_pack
+                ),
+                ledger_path=(
+                    Path(td)
+                    / "handoff.jsonl"
+                ),
+            )
+
+            bridge = build_minimized_bridge_payload(
+                active_pack,
+                handoff,
+            )
+
+            self.assertEqual(
+                bridge["market_context"][
+                    "asset_strategy_delta"
+                ],
+                active_pack["asset_strategy_delta"],
+            )
+            self.assertEqual(
+                bridge["market_context"][
+                    "premarket_market_data"
+                ],
+                active_pack["premarket_market_data"],
+            )
+
+    def test_season_three_army_role_separation_is_hash_bound_and_anti_promotes_candidate(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            active_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+
+            active_pack["model_status"][
+                "btc_season_router"
+            ] = {
+                "state": "CANDIDATE_BLOCKED",
+                "season": "SPRING",
+                "candidate_weather_bucket": (
+                    "SPRING_LIKE"
+                ),
+                "formal_model": "NOT_APPROVED",
+            }
+
+            handoff = run_gpt_handoff_gate(
+                active_pack,
+                build_plain_language_notice(
+                    active_pack
+                ),
+                ledger_path=(
+                    Path(td)
+                    / "handoff.jsonl"
+                ),
+            )
+
+            bridge = build_minimized_bridge_payload(
+                active_pack,
+                handoff,
+            )
+            contract = bridge["analysis_contract"][
+                "season_three_army_role_separation"
+            ]
+
+            self.assertEqual(
+                contract["season"]["scope"],
+                "STRATEGIC_RISK_POSTURE_ONLY",
+            )
+            self.assertEqual(
+                contract["bull_foundation"]["scope"],
+                "TRANSITION_CREDIBILITY_ONLY",
+            )
+            self.assertEqual(
+                contract["commander"]["scope"],
+                (
+                    "TACTICAL_LINES_AND_"
+                    "CAPITAL_DEPLOYMENT"
+                ),
+            )
+            self.assertIsNone(
+                contract["season"]["formal_season"]
+            )
+            self.assertEqual(
+                contract["season"]["output_mode"],
+                (
+                    "LABELED_ANALYST_HYPOTHESIS_"
+                    "OR_WEATHER_ONLY"
+                ),
+            )
+            self.assertFalse(
+                contract["season"][
+                    "candidate_may_promote_formal_season"
+                ]
+            )
+            self.assertFalse(
+                contract["commander"][
+                    "tactical_feedback_may_modify_formal_season"
+                ]
+            )
+            self.assertEqual(
+                contract["source_evidence_pack_hash"],
+                active_pack["evidence_pack_hash"],
+            )
+            self.assertEqual(
+                len(
+                    contract[
+                        "role_separation_contract_hash"
+                    ]
+                ),
+                64,
+            )
+            self.assertEqual(
+                bridge["authority"][
+                    "capital_decision_authority"
+                ],
+                "USER_ONLY",
+            )
+            self.assertFalse(
+                bridge["authority"][
+                    "machine_may_execute_trade"
+                ]
+            )
+
+    def test_tactical_sections_cannot_override_formal_season(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            active_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+            active_pack[
+                "asset_strategy_delta"
+            ][
+                "formal_season"
+            ] = "SUMMER"
+
+            handoff = run_gpt_handoff_gate(
+                active_pack,
+                build_plain_language_notice(
+                    active_pack
+                ),
+                ledger_path=(
+                    Path(td)
+                    / "handoff.jsonl"
+                ),
+            )
+
+            with self.assertRaises(ValueError):
+                build_minimized_bridge_payload(
+                    active_pack,
+                    handoff,
+                )
+
+    def test_premarket_analyst_owned_fields_must_remain_unfilled(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            active_pack = bridge_pack(
+                pack(
+                    evidence_hash="a" * 64,
+                    requested=True,
+                )
+            )
+            active_pack[
+                "premarket_market_data"
+            ][
+                "battle_map"
+            ][
+                "first_screen"
+            ][0][
+                "light"
+            ] = "GREEN"
+
+            handoff = run_gpt_handoff_gate(
+                active_pack,
+                build_plain_language_notice(
+                    active_pack
+                ),
+                ledger_path=(
+                    Path(td)
+                    / "handoff.jsonl"
+                ),
+            )
+
+            with self.assertRaises(ValueError):
+                build_minimized_bridge_payload(
+                    active_pack,
+                    handoff,
+                )
 
     def test_minimized_bridge_payload_requires_current_capital_state(
         self,

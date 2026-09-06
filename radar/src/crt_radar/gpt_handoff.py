@@ -54,6 +54,27 @@ BRIDGE_PRIVACY_CONTRACT_VERSION = (
     "CRT_BRIDGE_PAYLOAD_PRIVACY_CONTRACT_V0.1"
 )
 
+SEASON_THREE_ARMY_ANALYSIS_CONTRACT_SCHEMA_VERSION = (
+    "CRT_SEASON_THREE_ARMY_GPT_BRIDGE_V0.1"
+)
+
+SEASON_THREE_ARMY_ROLE_CONTRACT = {
+    "season_scope": "STRATEGIC_RISK_POSTURE_ONLY",
+    "bull_foundation_scope": "TRANSITION_CREDIBILITY_ONLY",
+    "commander_map_scope": "TACTICAL_LINES_AND_CAPITAL_DEPLOYMENT",
+    "candidate_may_promote_formal_season": False,
+    "tactical_feedback_may_modify_formal_season": False,
+    "formal_season_blocked_output_mode": (
+        "LABELED_ANALYST_HYPOTHESIS_OR_WEATHER_ONLY"
+    ),
+}
+
+TACTICAL_FORMAL_SEASON_OVERRIDE_KEYS = {
+    "formal_season",
+    "formal_season_authority",
+    "season_transition_authority",
+}
+
 BRIDGE_FORBIDDEN_EXACT_KEYS = {
     "private_context",
     "profile",
@@ -78,6 +99,8 @@ BRIDGE_OPTIONAL_MARKET_SECTIONS = (
     "btc_entry_gate",
     "btc_bull_validation",
     "mstr_asst_market_health",
+    "asset_strategy_delta",
+    "premarket_market_data",
 )
 
 
@@ -203,6 +226,223 @@ def _bridge_data_health(
     }
 
 
+
+def _assert_no_tactical_formal_season_override(
+    value: Any,
+    *,
+    location: str,
+) -> None:
+    if isinstance(value, dict):
+        for raw_key, child in value.items():
+            key = str(raw_key)
+            normalized = key.strip().lower()
+
+            if normalized in TACTICAL_FORMAL_SEASON_OVERRIDE_KEYS:
+                raise ValueError(
+                    "Tactical bridge section may not override Formal Season "
+                    f"{location}.{key}"
+                )
+
+            _assert_no_tactical_formal_season_override(
+                child,
+                location=f"{location}.{key}",
+            )
+
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            _assert_no_tactical_formal_season_override(
+                child,
+                location=f"{location}[{index}]",
+            )
+
+
+def _assert_bridge_analyst_owned_fields_unfilled(
+    payload: Any,
+) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError(
+            "premarket_market_data must be an object"
+        )
+
+    battle_map = payload.get("battle_map")
+    if not isinstance(battle_map, dict):
+        raise ValueError(
+            "premarket battle map must be an object"
+        )
+
+    rows = battle_map.get("first_screen")
+    if not isinstance(rows, list):
+        raise ValueError(
+            "premarket battle map first screen missing"
+        )
+
+    for row in rows:
+        if not isinstance(row, dict):
+            raise ValueError(
+                "premarket battle map first-screen row invalid"
+            )
+
+        if row.get("light") is not None:
+            raise ValueError(
+                "premarket battle map machine-filled analyst light"
+            )
+
+        if row.get("entry_shares_delta") is not None:
+            raise ValueError(
+                "premarket battle map machine-filled entry shares"
+            )
+
+        entry = row.get("entry_condition")
+        if (
+            not isinstance(entry, dict)
+            or any(value is not None for value in entry.values())
+        ):
+            raise ValueError(
+                "premarket battle map machine-filled entry condition"
+            )
+
+        exits = row.get("exit_condition")
+        if not isinstance(exits, dict):
+            raise ValueError(
+                "premarket battle map exit condition invalid"
+            )
+
+        for channel in ("stop_loss", "take_profit"):
+            condition = exits.get(channel)
+            if (
+                not isinstance(condition, dict)
+                or any(
+                    value is not None
+                    for value in condition.values()
+                )
+            ):
+                raise ValueError(
+                    "premarket battle map machine-filled exit condition"
+                )
+
+        if row.get("exit_shares_delta") != {
+            "stop_loss": None,
+            "take_profit": None,
+        }:
+            raise ValueError(
+                "premarket battle map machine-filled exit shares"
+            )
+
+
+def _season_three_army_analysis_contract(
+    pack: dict[str, Any],
+    *,
+    pack_hash: str,
+) -> dict[str, Any]:
+    model_status = pack.get("model_status")
+    if not isinstance(model_status, dict):
+        model_status = {}
+
+    router = model_status.get("btc_season_router")
+    if not isinstance(router, dict):
+        router = {}
+
+    bull_foundation = pack.get("btc_bull_validation")
+    if not isinstance(bull_foundation, dict):
+        bull_foundation = {}
+
+    router_state = router.get("state")
+    formal_model = router.get("formal_model")
+    raw_season = router.get("season")
+
+    formal_season = None
+    if (
+        formal_model == "APPROVED"
+        and router_state not in {
+            "BLOCKED",
+            "CANDIDATE_BLOCKED",
+        }
+    ):
+        formal_season = raw_season
+
+    contract = {
+        "schema_version": (
+            SEASON_THREE_ARMY_ANALYSIS_CONTRACT_SCHEMA_VERSION
+        ),
+        "doctrine_artifact": (
+            "CRT_SEASON_THREE_ARMY_COMMANDER_DEPLOYMENT_DOCTRINE_V0.1.md"
+        ),
+        "season": {
+            "scope": SEASON_THREE_ARMY_ROLE_CONTRACT[
+                "season_scope"
+            ],
+            "source_state": router_state,
+            "formal_model": formal_model,
+            "formal_season": formal_season,
+            "candidate_weather_bucket": router.get(
+                "candidate_weather_bucket"
+            ),
+            "output_mode": (
+                "FORMAL_SEASON"
+                if formal_season is not None
+                else SEASON_THREE_ARMY_ROLE_CONTRACT[
+                    "formal_season_blocked_output_mode"
+                ]
+            ),
+            "allowed_non_formal_outputs": [
+                "LABELED_ANALYST_HYPOTHESIS",
+                "WEATHER",
+            ],
+            "candidate_may_promote_formal_season": False,
+        },
+        "bull_foundation": {
+            "scope": SEASON_THREE_ARMY_ROLE_CONTRACT[
+                "bull_foundation_scope"
+            ],
+            "source_section": "btc_bull_validation",
+            "state": bull_foundation.get("state"),
+            "may_modify_formal_season": False,
+        },
+        "capital_state": {
+            "source_section": "capital_state",
+            "capital_decision_authority": "USER_ONLY",
+            "required_for_tactical_deployment": True,
+        },
+        "commander": {
+            "scope": SEASON_THREE_ARMY_ROLE_CONTRACT[
+                "commander_map_scope"
+            ],
+            "source_sections": [
+                "asset_strategy_delta",
+                "premarket_market_data",
+            ],
+            "asset_strategy_delta_available": isinstance(
+                pack.get("asset_strategy_delta"),
+                dict,
+            ),
+            "premarket_market_data_available": isinstance(
+                pack.get("premarket_market_data"),
+                dict,
+            ),
+            "tactical_feedback_may_modify_formal_season": False,
+        },
+        "authority": {
+            "action_output": "NONE",
+            "capital_decision_authority": "USER_ONLY",
+            "external_action_authority": "NONE",
+            "machine_may_execute_trade": False,
+        },
+    }
+
+    binding_material = {
+        "source_evidence_pack_hash": pack_hash,
+        "contract": contract,
+    }
+
+    return {
+        **contract,
+        "source_evidence_pack_hash": pack_hash,
+        "role_separation_contract_hash": _canonical_hash(
+            binding_material
+        ),
+    }
+
+
 def _bridge_market_context(
     pack: dict[str, Any],
 ) -> dict[str, Any]:
@@ -244,6 +484,20 @@ def _bridge_market_context(
 
     for key in BRIDGE_OPTIONAL_MARKET_SECTIONS:
         if key in pack:
+            if key in {
+                "asset_strategy_delta",
+                "premarket_market_data",
+            }:
+                _assert_no_tactical_formal_season_override(
+                    pack[key],
+                    location=f"$.{key}",
+                )
+
+            if key == "premarket_market_data":
+                _assert_bridge_analyst_owned_fields_unfilled(
+                    pack[key]
+                )
+
             result[key] = deepcopy(
                 pack[key]
             )
@@ -658,6 +912,20 @@ def build_minimized_bridge_payload(
             "Evidence Pack EAA must remain NONE"
         )
 
+    if (
+        pack_authority.get(
+            "capital_decision_authority"
+        )
+        not in {
+            None,
+            "USER_ONLY",
+        }
+    ):
+        raise ValueError(
+            "Evidence Pack capital decision authority "
+            "must remain USER_ONLY"
+        )
+
     required_handoff_authority = {
         "action_output": "NONE",
         "external_action_authority": "NONE",
@@ -797,6 +1065,12 @@ def build_minimized_bridge_payload(
                     )
                 )
             ),
+            "season_three_army_role_separation": (
+                _season_three_army_analysis_contract(
+                    pack,
+                    pack_hash=pack_hash,
+                )
+            ),
         },
         "privacy": {
             "mode": (
@@ -825,6 +1099,10 @@ def build_minimized_bridge_payload(
         "authority": {
             "production": "NOT_APPROVED",
             "trading_authority": "NONE",
+            "capital_decision_authority": (
+                "USER_ONLY"
+            ),
+            "machine_may_execute_trade": False,
             "external_action_authority": (
                 "NONE"
             ),
