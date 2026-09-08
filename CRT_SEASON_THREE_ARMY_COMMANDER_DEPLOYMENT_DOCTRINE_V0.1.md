@@ -93,6 +93,23 @@ Season（季節）只能改變統帥使用這張地圖時的預設證據負擔�
 
 任何價格觸及都只是重新判讀條件，不是 machine trigger（機器觸發器）。GPT（分析主廚）負責條件式建議，使用者才有 Capital Decision Authority（資本決策權限）；機器不得自行成交、修改持倉、改寫既有批次狀態或移動資金。
 
+### 5.1 Structure-Aware Capital Deployment（結構感知資本部署）
+
+Three-Army Commander Map（三軍統帥地圖）的 Capital Deployment（資本部署）必須把「機會變便宜」與「結構仍值得承擔更多風險」分開判斷，避免把下跌本身誤當成安全。
+
+1. **Cheap / Fear is not enough（便宜／恐懼本身不足）**：價格大跌、Sentiment（情緒）進入 Fear（恐懼）、估值下降或任何低 Risk（風險）讀數，都不得單獨形成 Reinforcement（增援）理由；「跌很多」不等於風險報酬已改善。
+2. **Structural Integrity Required（需要結構完整性）**：提高攻擊資本部署意願前，GPT（分析主廚）必須檢查最新有效的 BTC（比特幣）價格結構、Acceptance（市場接受）、Higher Low（更高低點）、Control Transfer（控制權轉移）及其失效狀態。`PRESERVED`（結構保留）、`HELD`（守住）或 `BREACHED_AND_RECLAIMED`（跌破後收復）可支持「低風險／恐懼」成為額外正面條件；`UNRESOLVED`（未決）時不得自行放大部署；`INVALIDATED`（失效）、`LOST_NOT_RECLAIMED`（失守未收復）或其他明確失效證據，不得被低 Sentiment（低情緒）或低 Risk（低風險）覆蓋。
+3. **Capital Deployment, not Season（資本部署，不是季節判定）**：本原則只影響三軍統帥地圖的部署判斷，不改 Formal Season（正式季節）、不擴張 Bull Foundation（牛市地基）權限，也不形成新的 Season Router（季節路由器）。
+4. **No Mechanical DCA Multiplier（不建立機械式定投倍數）**：本準則不得新增機械式 DCA（動態定投）倍數、固定 Sentiment threshold（情緒門檻）、Risk threshold（風險門檻）或固定價格門檻；倍率若要升格，必須另經獨立研究與驗證。
+5. **Decision Asymmetry Still Rules（決策不對稱仍優先）**：即使結構健康且低風險條件成立，GPT（分析主廚）仍必須比較 remaining upside（剩餘上行空間）、invalidation distance（失效距離）、portfolio concentration（投資組合集中度）、issuer role integrity（發行人／資產角色完整性）、latest Capital State（最新資本狀態）與 opportunity cost（機會成本）。因此「結構健康 + 恐懼」只能提高部署意願，不能直接產生固定股數或自動交易。
+6. **Evidence Independence（證據獨立性）**：Higher-Timeframe Price Structure（較高時間尺度價格結構）若仍由同一底層價格資料衍生，只能 refine interpretation（細化詮釋），不得被計為另一票獨立證據；未經驗證的事件座標不得升格為永久門檻。
+
+核心判斷：
+
+> 不要在恐懼本身買；要先分辨市場只是情緒轉弱，還是結構已經壞掉。
+
+> 低風險／低情緒決定機會是否變便宜；結構完整性決定 CRT 是否值得提高資本部署意願。
+
 ## 6. 季節轉換的漸進式部署
 
 轉換不是單點，部署也不得從空倉直接跳到滿額。下列順序是資本節奏語言，不是固定比例、新批次數或正式 gate（關卡）：

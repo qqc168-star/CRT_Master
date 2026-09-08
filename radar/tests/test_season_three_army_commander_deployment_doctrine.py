@@ -54,6 +54,22 @@ class SeasonThreeArmyCommanderDeploymentDoctrineTests(unittest.TestCase):
             with self.subTest(literal=literal):
                 self.assertIn(literal, self.doctrine)
 
+    def test_structure_aware_capital_deployment_is_explicit(self) -> None:
+        required_literals = (
+            "Structure-Aware Capital Deployment（結構感知資本部署）",
+            "Cheap / Fear is not enough（便宜／恐懼本身不足）",
+            "`UNRESOLVED`（未決）",
+            "`INVALIDATED`（失效）",
+            "`LOST_NOT_RECLAIMED`（失守未收復）",
+            "不得新增機械式 DCA（動態定投）倍數",
+            "不得被計為另一票獨立證據",
+            "capital_decision_authority = USER_ONLY",
+        )
+        for literal in required_literals:
+            with self.subTest(literal=literal):
+                self.assertIn(literal, self.doctrine)
+
+
     def test_preserved_formal_locks_are_explicit(self) -> None:
         required_literals = (
             "`20 / 20 / 17 / 25 / 13 / 5`",
