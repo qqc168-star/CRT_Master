@@ -125,6 +125,49 @@ Never reconstruct missing formal implementation from old chats or memory. If the
 - 能由機器自行多花運算時間而減少使用者操作、等待、搬運與重複確認時，預設讓機器承擔。
 - process overhead（流程負擔）若不能降低實際風險或提升 North Star decision quality（北極星決策品質），即應刪除。
 
+### 5. Local Git 身分、傳輸與成果承接｜Local Git Identity, Transport, and Transfer
+
+#### Repo Root Lock（版本庫根目錄鎖）
+
+- CRT_Master 唯一 Local Git（本機 Git）施工入口固定為：
+  `C:\Users\maxwe\OneDrive\文件\GitHub\CRT_Master`
+- Work / Codex（工作模式／程式施工代理）在任何 Git 動作前，必須先執行 `git rev-parse --show-toplevel`，並確認輸出與上述路徑完全相符；不一致即 `BLOCKED`，不得自行猜測 repo root（版本庫根目錄）或從父目錄繼續。
+
+#### Git Transport Preflight（Git 傳輸前檢）
+
+- 新工程開工前必須驗證 remote reachable（遠端可達）、credential helper available（憑證輔助程式可用）、使用者 Local Git 可承接最終 Push（推送），且 final Git write path（最終 Git 寫入路徑）已知。
+- 不得做到 full regression（完整回歸）後，才發現施工環境無法 Push（推送）。
+
+#### Commit Transferability（提交可轉移性）
+
+- 若 Work / Codex（工作模式／程式施工代理）的施工環境與使用者 Local Git 不是同一個 repository object database（版本庫物件資料庫），不得將該環境的 commit SHA（提交雜湊）宣稱為「已在本機可 Push 的成果」。
+- 施工前必須確認 commit / branch / worktree（提交／分支／工作樹）如何真正回傳至使用者 Local Git。
+
+#### Patch Fallback（補丁備援）
+
+- Patch（補丁）只在 Git 寫入失敗，或 commit / branch / worktree（提交／分支／工作樹）沒有真正落到使用者 Local Git 時使用。
+- 一旦確認 commit / ref（提交／參照）不存在於使用者 Local Git，立即切換 Patch Recovery（補丁恢復）；不得反覆嘗試不存在的 commit / ref。
+
+#### No Human Relay（禁止人肉快遞）
+
+- 凡 Work / Codex 能自主完成的 repo 定位、Git 狀態檢查、isolated worktree（隔離工作樹）建立、Patch apply（補丁套用）、tests（測試）、regression（回歸）、Push（推送）與 PR（合併請求），不得拆成多輪要求使用者複製命令、執行、截圖、貼回，再取得下一條命令。
+- 只有真正需要 human approval（人類批准）、GUI（圖形介面）手動互動、Formal lock（正式鎖）、stash（暫存修改）、elevated / destructive OS action（提升權限／破壞性系統動作），或代理已合理排障仍無法解除的 blocker（阻塞）才可停止。
+
+#### Fail-Stop Output Discipline（失敗即停輸出紀律）
+
+- 自動腳本任一步失敗後，不得繼續執行後續步驟或印出 `SUCCESS`。
+- 互動式 PowerShell（命令列）診斷預設不得以 `exit 1` 關閉使用者整個視窗；必須保留視窗或落下完整 log（日誌），並清楚顯示 root cause（根因）。
+
+#### Tool Division（工具分工）
+
+- ChatGPT（一般對話）負責研究、證據、假說、判斷、規格、驗收條件與施工骨架；Codex（程式施工代理）負責 repository code changes（版本庫程式修改）、isolated worktree、tests、regression、Commit / Push / PR；Work（工作模式）負責 Windows 實機、PowerShell、本機檔案、Local Git、TWS、Task Scheduler（工作排程器）、deployment（部署）與實機驗證。
+- Manual Engineering Fallback（人工工程備援）只在 Work / Codex 額度耗盡、平台阻擋或工具不可用時啟用，並採一次性完整施工；不得把它降格為日常流程。
+
+#### ChatGPT GitHub App Boundary（ChatGPT GitHub 應用程式邊界）
+
+- ChatGPT GitHub App 只用於 read / search / verify（讀取／搜尋／驗證）current `main`（目前主分支）；Branch / Commit / File write（分支／提交／檔案寫入）一律由 Local Git 完成。
+- 若遇 `HTTP 403`，不得反覆重試，也不得視為 CRT 程式故障。
+
 ## Authority boundary
 
 - Production: `NOT_APPROVED`
