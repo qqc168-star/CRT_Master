@@ -134,6 +134,27 @@ class SecondKnifeContractGuardTests(unittest.TestCase):
         self.assertIn("`Simplicity first`（簡單優先）", readme)
         self.assertIn("`HTTP 403`，不得反覆重試", readme)
 
+    def test_bootloader_locks_local_git_transfer_and_failure_discipline(self):
+        readme = (ROOT.parent / "README.md").read_text(encoding="utf-8")
+        required = (
+            "Repo Root Lock（版本庫根目錄鎖）",
+            r"C:\Users\maxwe\OneDrive\文件\GitHub\CRT_Master",
+            "git rev-parse --show-toplevel",
+            "Git Transport Preflight（Git 傳輸前檢）",
+            "credential helper available（憑證輔助程式可用）",
+            "Commit Transferability（提交可轉移性）",
+            "repository object database（版本庫物件資料庫）",
+            "Patch Fallback（補丁備援）",
+            "不得反覆嘗試不存在的 commit / ref",
+            "No Human Relay（禁止人肉快遞）",
+            "Fail-Stop Output Discipline（失敗即停輸出紀律）",
+            "不得以 `exit 1` 關閉使用者整個視窗",
+            "Tool Division（工具分工）",
+            "ChatGPT GitHub App Boundary（ChatGPT GitHub 應用程式邊界）",
+        )
+        for text in required:
+            self.assertIn(text, readme)
+
 
 
 if __name__ == "__main__":
