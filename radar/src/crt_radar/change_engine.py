@@ -14,6 +14,7 @@ from .oi_revision_policy import OiRevisionPolicyError, is_scoped_metric
 
 HORIZONS_MS = {
     "1d": 86_400_000,
+    "3d": 3 * 86_400_000,
     "7d": 7 * 86_400_000,
     "30d": 30 * 86_400_000,
 }

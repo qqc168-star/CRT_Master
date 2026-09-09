@@ -8,6 +8,9 @@ from typing import Any
 
 from .gpt_bridge_outbox import enqueue_bridge_payload
 from .run_ledger import GENESIS_HASH, RunLedger
+from .season_transition_warning_overlay import (
+    assert_season_transition_warning_overlay,
+)
 
 
 SCHEMA_VERSION = "CRT_GPT_HANDOFF_V0.1"
@@ -98,6 +101,7 @@ BRIDGE_OPTIONAL_MARKET_SECTIONS = (
     "transition_diagnostic",
     "btc_entry_gate",
     "btc_bull_validation",
+    "season_transition_warning_overlay",
     "mstr_asst_market_health",
     "asset_strategy_delta",
     "premarket_market_data",
@@ -484,6 +488,9 @@ def _bridge_market_context(
 
     for key in BRIDGE_OPTIONAL_MARKET_SECTIONS:
         if key in pack:
+            if key == "season_transition_warning_overlay":
+                assert_season_transition_warning_overlay(pack[key])
+
             if key in {
                 "asset_strategy_delta",
                 "premarket_market_data",

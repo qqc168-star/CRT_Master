@@ -141,6 +141,7 @@ class SourceGateMigrationTests(unittest.TestCase):
 
         parsed = parse_funding(payload)
 
+        self.assertAlmostEqual(parsed["funding_3d_mean_bp"], 10_000 * sum(rates) / len(rates))
         self.assertAlmostEqual(parsed["abs_funding_3d_mean_bp"], 10_000 * sum(rates) / len(rates))
 
     def test_funding_three_day_mean_rejects_missing_interval(self):
@@ -157,6 +158,7 @@ class SourceGateMigrationTests(unittest.TestCase):
 
         parsed = parse_funding(payload)
 
+        self.assertNotIn("funding_3d_mean_bp", parsed)
         self.assertNotIn("abs_funding_3d_mean_bp", parsed)
 
     def test_registry_uses_market_route_for_force_order(self):

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 from crt_radar.evidence_pack import (
@@ -190,6 +191,7 @@ class SeasonThreeArmyGptE2ETests(unittest.TestCase):
             )
             self.assertIn("asset_strategy_delta", pack)
             self.assertIn("btc_bull_validation", pack)
+            self.assertIn("season_transition_warning_overlay", pack)
             self.assertEqual(
                 pack["model_status"]["btc_season_router"]["state"],
                 "CANDIDATE_BLOCKED",
@@ -266,6 +268,23 @@ class SeasonThreeArmyGptE2ETests(unittest.TestCase):
                 market["premarket_market_data"],
                 pack["premarket_market_data"],
             )
+            self.assertEqual(
+                market["season_transition_warning_overlay"],
+                pack["season_transition_warning_overlay"],
+            )
+
+            unsafe_pack = deepcopy(pack)
+            unsafe_pack["season_transition_warning_overlay"][
+                "formal_season"
+            ] = "SPRING"
+            with self.assertRaisesRegex(
+                ValueError,
+                "SEASON_TRANSITION_WARNING_OVERLAY_INVALID",
+            ):
+                build_minimized_bridge_payload(
+                    unsafe_pack,
+                    handoff,
+                )
 
             contract = bridge[
                 "analysis_contract"

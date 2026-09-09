@@ -399,9 +399,12 @@ def parse_funding(payload: Any) -> dict[str, Any]:
             abs((right - left) - 28_800_000) <= 5_000
             for left, right in zip(timestamps, timestamps[1:])
         ):
-            result["abs_funding_3d_mean_bp"] = 10_000.0 * abs(
-                statistics.fmean(_finite(item.get("fundingRate"), "fundingRate") for item in selected)
+            funding_3d_mean = statistics.fmean(
+                _finite(item.get("fundingRate"), "fundingRate")
+                for item in selected
             )
+            result["funding_3d_mean_bp"] = 10_000.0 * funding_3d_mean
+            result["abs_funding_3d_mean_bp"] = 10_000.0 * abs(funding_3d_mean)
     return result
 
 

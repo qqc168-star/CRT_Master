@@ -13,6 +13,13 @@ from typing import Any
 
 EXPECTED_LAYER_WEIGHTS = {"L1": 20, "L2": 20, "L3": 17, "L4": 25, "L5": 13, "L6": 5}
 EXPECTED_LIGHT_THRESHOLDS = [-60, -35, 35, 60]
+LIGHT_BUCKETS = (
+    "C0_VERY_UNSUPPORTIVE",
+    "C1_UNSUPPORTIVE",
+    "C2_MIXED",
+    "C3_SUPPORTIVE",
+    "C4_VERY_SUPPORTIVE",
+)
 KNOWN_TRANSFORMS = {"ROBUST_Z", "PERCENTILE", "TANH_FIXED"}
 
 
@@ -250,9 +257,27 @@ def score_feature(feature: dict[str, Any], observation: dict[str, Any]) -> float
     raise CandidateModelError("TRANSFORM_UNSUPPORTED")
 
 
+def threshold_bucket(
+    score: float,
+    thresholds: list[float] | None = None,
+) -> str:
+    """Apply the existing Radar five-light boundaries without changing them."""
+
+    active_thresholds = (
+        EXPECTED_LIGHT_THRESHOLDS
+        if thresholds is None
+        else thresholds
+    )
+    if active_thresholds != EXPECTED_LIGHT_THRESHOLDS:
+        raise CandidateModelError("LIGHT_THRESHOLDS_CHANGED")
+    value = _finite(score, "LIGHT_SCORE_INVALID")
+    if value < -100 or value > 100:
+        raise CandidateModelError("LIGHT_SCORE_OUT_OF_RANGE")
+    return LIGHT_BUCKETS[bisect_right(active_thresholds, value)]
+
+
 def _threshold_bucket(score: float, thresholds: list[float]) -> str:
-    labels = ["C0_VERY_UNSUPPORTIVE", "C1_UNSUPPORTIVE", "C2_MIXED", "C3_SUPPORTIVE", "C4_VERY_SUPPORTIVE"]
-    return labels[bisect_right(thresholds, score)]
+    return threshold_bucket(score, thresholds)
 
 
 def aggregate_feature_scores(
@@ -410,5 +435,4 @@ def evaluate_candidate(
     }
     result["candidate_output_hash"] = _sha256(result)
     return result
-
 

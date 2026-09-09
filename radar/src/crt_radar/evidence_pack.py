@@ -10,6 +10,9 @@ from typing import Any
 from .assumption_boundary_watch import evaluate_assumption_watch
 from .asset_strategy_delta import build_asset_strategy_delta
 from .btc_bull_validation import evaluate_btc_bull_validation
+from .btc_control_transfer_validation import (
+    evaluate_control_transfer_validation,
+)
 from .change_engine import compute_changes, distill_top_changes
 from .mstr_asst_market_health import validate_mstr_asst_market_health
 from .observation_store import Observation, ObservationStore, extract_observations
@@ -22,6 +25,10 @@ from .premarket_battle_map import (
 from .premarket_live_market_handoff import validate_premarket_live_market_handoff
 from .reanalysis_wake import fuse_reanalysis_wake
 from .reflexivity_overlay import build_reflexivity_overlay
+from .season_transition_warning_overlay import (
+    assert_season_transition_warning_overlay,
+    build_season_transition_warning_overlay,
+)
 from .v110_candidate import evaluate_v110_candidate
 
 
@@ -365,6 +372,10 @@ def build_evidence_pack(
     mstr_asst_market_health: dict[str, Any] | None = None,
     premarket_live_market_handoff: dict[str, Any] | None = None,
     premarket_battle_map: dict[str, Any] | None = None,
+    institutional_flow_context: dict[str, Any] | None = None,
+    previous_season_transition_overlay: dict[str, Any] | None = None,
+    season_transition_replay_context: dict[str, Any] | None = None,
+    btc_control_transfer_validation_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
         raise ValueError("source_gate must be an object")
@@ -482,6 +493,31 @@ def build_evidence_pack(
         transition_diagnostic=transition_diagnostic,
         layers=layers,
         generated_at_ms=generated_at,
+    )
+    pack["btc_control_transfer_validation"] = (
+        evaluate_control_transfer_validation(
+            btc_control_transfer_validation_evidence
+        )
+    )
+    pack["season_transition_warning_overlay"] = (
+        build_season_transition_warning_overlay(
+            formal_candidate=formal_candidate,
+            layers=layers,
+            changes=changes,
+            btc_bull_validation=pack["btc_bull_validation"],
+            btc_entry_gate=btc_entry_gate,
+            transition_diagnostic=transition_diagnostic,
+            generated_at_ms=generated_at,
+            institutional_flow_context=institutional_flow_context,
+            previous_overlay=previous_season_transition_overlay,
+            historical_replay_context=season_transition_replay_context,
+            btc_control_transfer_validation=pack[
+                "btc_control_transfer_validation"
+            ],
+        )
+    )
+    assert_season_transition_warning_overlay(
+        pack["season_transition_warning_overlay"]
     )
     pack["evidence_pack_hash"] = _sha256(pack)
     return pack

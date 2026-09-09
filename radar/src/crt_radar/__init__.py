@@ -22,6 +22,7 @@ __all__ = [
     "mstr_asst_options_daily_snapshot",
     "reflexivity_overlay",
     "run_ledger",
+    "season_transition_warning_overlay",
     "source_gate_runner",
     "source_registry",
     "sla_review",

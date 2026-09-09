@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import tempfile
@@ -34,6 +35,9 @@ from .observation_store import ObservationStore, extract_observations
 from .plain_language_notice import build_plain_language_notice
 from .private_profile import default_private_profile_path, load_private_profile
 from .runtime_freshness import apply_runtime_checks, assess_file_freshness
+from .season_transition_warning_overlay import (
+    validate_season_transition_warning_overlay,
+)
 from .source_gate_runner import (
     FetchResult,
     default_liquidation_snapshot_path,
@@ -89,6 +93,10 @@ def run_daily_evidence(
     btc_entry_gate_runner: Callable[..., dict[str, Any]] | None = None,
     assumption_watch_context: dict[str, Any] | None = None,
     mstr_asst_market_health: dict[str, Any] | None = None,
+    institutional_flow_context: dict[str, Any] | None = None,
+    previous_season_transition_overlay: dict[str, Any] | None = None,
+    season_transition_replay_context: dict[str, Any] | None = None,
+    btc_control_transfer_validation_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     source_gate = run_source_gate(
         registry,
@@ -225,6 +233,12 @@ def run_daily_evidence(
         assumption_watch_context=assumption_watch_context,
         private_context=private_context,
         mstr_asst_market_health=mstr_asst_market_health,
+        institutional_flow_context=institutional_flow_context,
+        previous_season_transition_overlay=previous_season_transition_overlay,
+        season_transition_replay_context=season_transition_replay_context,
+        btc_control_transfer_validation_evidence=(
+            btc_control_transfer_validation_evidence
+        ),
     )
 
 
@@ -245,6 +259,41 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"{label} must contain a JSON object")
     return payload
+
+
+def _load_previous_season_transition_overlay(
+    evidence_pack_path: Path,
+) -> dict[str, Any] | None:
+    if not evidence_pack_path.exists():
+        return None
+    try:
+        payload = _load_json_object(
+            evidence_pack_path,
+            label="Previous Evidence Pack",
+        )
+    except ValueError:
+        return None
+    supplied_hash = payload.get("evidence_pack_hash")
+    material = dict(payload)
+    material.pop("evidence_pack_hash", None)
+    calculated_hash = hashlib.sha256(
+        json.dumps(
+            material,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    if supplied_hash != calculated_hash:
+        return None
+    overlay = payload.get("season_transition_warning_overlay")
+    if not isinstance(overlay, dict):
+        return None
+    return (
+        overlay
+        if not validate_season_transition_warning_overlay(overlay)
+        else None
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -278,6 +327,33 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Optional local-only validated MSTR/ASST Market Health V0.1 "
             "snapshot to fuse into Evidence Pack and GPT Wake."
+        ),
+    )
+    parser.add_argument(
+        "--season-transition-flow-context",
+        type=Path,
+        default=None,
+        help=(
+            "Optional research-only 1D/5D/20D/60D/120D institutional "
+            "flow context; no formal threshold authority."
+        ),
+    )
+    parser.add_argument(
+        "--season-transition-replay-context",
+        type=Path,
+        default=None,
+        help=(
+            "Optional historical replay ground truth for detection-latency "
+            "and false-positive evaluation."
+        ),
+    )
+    parser.add_argument(
+        "--btc-control-transfer-validation-evidence",
+        type=Path,
+        default=None,
+        help=(
+            "Optional research-only post-candidate control-transfer "
+            "validation evidence."
         ),
     )
     parser.add_argument("--maturity-ledger", type=Path, default=None)
@@ -337,6 +413,33 @@ def main(argv: list[str] | None = None) -> int:
         if args.mstr_asst_market_health is not None
         else None
     )
+    institutional_flow_context = (
+        _load_json_object(
+            args.season_transition_flow_context,
+            label="Season Transition Institutional Flow Context",
+        )
+        if args.season_transition_flow_context is not None
+        else None
+    )
+    season_transition_replay_context = (
+        _load_json_object(
+            args.season_transition_replay_context,
+            label="Season Transition Historical Replay Context",
+        )
+        if args.season_transition_replay_context is not None
+        else None
+    )
+    btc_control_transfer_validation_evidence = (
+        _load_json_object(
+            args.btc_control_transfer_validation_evidence,
+            label="BTC Control Transfer Validation Evidence",
+        )
+        if args.btc_control_transfer_validation_evidence is not None
+        else None
+    )
+    previous_season_transition_overlay = (
+        _load_previous_season_transition_overlay(args.output)
+    )
     pack = run_daily_evidence(
         registry,
         observation_db=args.observation_db,
@@ -350,6 +453,16 @@ def main(argv: list[str] | None = None) -> int:
         btc_entry_gate_runner=run_live_btc_entry_gate,
         assumption_watch_context=assumption_watch_context,
         mstr_asst_market_health=mstr_asst_market_health,
+        institutional_flow_context=institutional_flow_context,
+        previous_season_transition_overlay=(
+            previous_season_transition_overlay
+        ),
+        season_transition_replay_context=(
+            season_transition_replay_context
+        ),
+        btc_control_transfer_validation_evidence=(
+            btc_control_transfer_validation_evidence
+        ),
     )
     write_json_atomic(args.output, pack)
     if args.wake_output is not None:
