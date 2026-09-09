@@ -48,6 +48,7 @@ COMPARABLE_METRICS = {
     ("OPEN_INTEREST_NOTIONAL", "open_interest_notional_usd"),
     ("OPEN_INTEREST_NOTIONAL", "oi_to_market_cap_pct"),
     ("FUNDING_RATE", "funding_rate"),
+    ("FUNDING_RATE", "funding_3d_mean_bp"),
     ("FUNDING_RATE", "abs_funding_3d_mean_bp"),
     ("LIQUIDATION_AGGREGATES", "liquidation_1h_total_usd"),
     ("LIQUIDATION_AGGREGATES", "liquidation_24h_total_usd"),
@@ -126,6 +127,8 @@ def _metric_rows(family: str, parsed: dict[str, Any]) -> list[tuple[str, float]]
         ]
         if parsed.get("abs_funding_3d_mean_bp") is not None:
             rows.append(("abs_funding_3d_mean_bp", _finite(parsed.get("abs_funding_3d_mean_bp"))))
+        if parsed.get("funding_3d_mean_bp") is not None:
+            rows.append(("funding_3d_mean_bp", _finite(parsed.get("funding_3d_mean_bp"))))
         return rows
     if family == "BTC_SPOT_PRICE":
         return [

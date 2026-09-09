@@ -156,6 +156,7 @@ class FirstEvidenceSliceTests(unittest.TestCase):
             pack = build_evidence_pack(gate(31), observation_db=db, generated_at_ms=BASE_MS + 31 * DAY_MS)
             horizons = pack["changes"]["open_interest_contracts"]["horizons"]
             self.assertEqual(horizons["1d"]["history_state"], "AVAILABLE")
+            self.assertEqual(horizons["3d"]["history_state"], "AVAILABLE")
             self.assertEqual(horizons["7d"]["history_state"], "AVAILABLE")
             self.assertEqual(horizons["30d"]["history_state"], "AVAILABLE")
             self.assertEqual(pack["pack_state"], "READY_FOR_ANALYST")
@@ -241,6 +242,17 @@ class FirstEvidenceSliceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             pack = build_evidence_pack(gate(0, onchain_ok=False), observation_db=Path(td) / "obs.sqlite3", generated_at_ms=BASE_MS)
             self.assertEqual(pack["pack_state"], "PARTIAL_FOR_ANALYST")
+            self.assertIn("season_transition_warning_overlay", pack)
+            overlay = pack["season_transition_warning_overlay"]
+            self.assertIn("btc_control_transfer_validation", pack)
+            self.assertEqual(
+                pack["btc_control_transfer_validation"]["state"],
+                "NOT_AVAILABLE",
+            )
+            self.assertIsNone(overlay["formal_season"])
+            self.assertFalse(
+                overlay["authority"]["score_may_determine_btc_season"]
+            )
             self.assertNotIn("L5", pack["layers"])
 
     def test_automation_never_fills_analyst_judgment(self):
