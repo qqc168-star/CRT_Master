@@ -59,6 +59,10 @@ def canonical_hash(obj) -> str:
         ).encode("utf-8")
     ).hexdigest()
 
+def canonical_source_bytes(raw: bytes) -> bytes:
+    """Hash source content independently of Git checkout line endings."""
+    return raw.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+
 class BtcSeasonFormalSourceRecoveryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -157,20 +161,28 @@ class BtcSeasonFormalSourceRecoveryTests(unittest.TestCase):
     def test_protected_files_match_recovery_snapshot(self):
         hashes = self.report["protected_file_hashes_at_recovery"]
         self.assertEqual(
-            sha256(ENVELOPE_PATH.read_bytes()),
+            sha256(canonical_source_bytes(ENVELOPE_PATH.read_bytes())),
             hashes["formal_input_envelope_sha256"],
         )
         self.assertEqual(
-            sha256(MAPPING_PATH.read_bytes()),
+            sha256(canonical_source_bytes(MAPPING_PATH.read_bytes())),
             hashes["semantic_mapping_file_sha256"],
         )
         self.assertEqual(
-            sha256(SEAL_PATH.read_bytes()),
+            sha256(canonical_source_bytes(SEAL_PATH.read_bytes())),
             hashes["approval_seal_sha256"],
         )
         self.assertEqual(
-            sha256(SOURCE_MATRIX_PATH.read_bytes()),
+            sha256(canonical_source_bytes(SOURCE_MATRIX_PATH.read_bytes())),
             hashes["source_responsibility_matrix_sha256"],
+        )
+
+    def test_recovery_hashes_are_portable_across_git_line_endings(self):
+        source_lf = b"line one\nline two\n"
+        source_crlf = b"line one\r\nline two\r\n"
+        self.assertEqual(
+            sha256(canonical_source_bytes(source_lf)),
+            sha256(canonical_source_bytes(source_crlf)),
         )
 
     def test_recovery_has_required_formal_families(self):
