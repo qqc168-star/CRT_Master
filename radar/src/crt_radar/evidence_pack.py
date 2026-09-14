@@ -30,6 +30,7 @@ from .season_transition_warning_overlay import (
     build_season_transition_warning_overlay,
 )
 from .v110_candidate import evaluate_v110_candidate
+from .treasury_company_ct import add_treasury_company_ct
 
 
 PACK_SCHEMA_VERSION = "CRT_EVIDENCE_PACK_V0.2"
@@ -376,6 +377,7 @@ def build_evidence_pack(
     previous_season_transition_overlay: dict[str, Any] | None = None,
     season_transition_replay_context: dict[str, Any] | None = None,
     btc_control_transfer_validation_evidence: dict[str, Any] | None = None,
+    treasury_company_ct_input: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
         raise ValueError("source_gate must be an object")
@@ -519,5 +521,7 @@ def build_evidence_pack(
     assert_season_transition_warning_overlay(
         pack["season_transition_warning_overlay"]
     )
+    if treasury_company_ct_input is not None:
+        add_treasury_company_ct(pack, treasury_company_ct_input)
     pack["evidence_pack_hash"] = _sha256(pack)
     return pack
