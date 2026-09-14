@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-$CanonicalRepoRoot = "C:\Users\maxwe\OneDrive\文件\GitHub\CRT_Master"
+$CanonicalRepoRoot = "C:\Users\maxwe\OneDrive\" + [char]0x6587 + [char]0x4EF6 + "\GitHub\CRT_Master"
 $ExpectedOrigin = "https://github.com/qqc168-star/CRT_Master.git"
 
 function Fail-Preflight {
