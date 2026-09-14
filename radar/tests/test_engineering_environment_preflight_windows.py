@@ -25,10 +25,7 @@ class EngineeringEnvironmentPreflightWindowsTests(unittest.TestCase):
         self.assertIn("WRONG_EXECUTION_ENVIRONMENT", self.text)
 
     def test_locks_the_canonical_repo_root(self) -> None:
-        self.assertIn(
-            '"C:\\Users\\maxwe\\OneDrive\\文件\\GitHub\\CRT_Master"',
-            self.text,
-        )
+        self.assertIn('[char]0x6587 + [char]0x4EF6', self.text)
         self.assertIn("git rev-parse --show-toplevel", self.text)
         self.assertIn("WRONG_REPO_ROOT", self.text)
 
