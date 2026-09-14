@@ -2,6 +2,23 @@
 
 ## 工程基準與範圍
 
+## V0.1.1 Corrective Delta
+
+- 每筆 CT 證據強制保存 `effective_time`、`disclosure_time`、`first_seen_time`、
+  `retrieval_time` 四座時鐘。Decision Replay 僅在 disclosure 已可得時使用；
+  Audit Replay 以 retrieval 可得性重建稽核視角。任一未來可見性或時鐘倒序均為
+  `BLOCKED`，不得以日後修訂資料回灌過往決策。
+- `source_semantic` 是必填且版本化的 binding（identity、version、effective_from、
+  effective_to）。CRT formal diluted-equity mNAV、SaylorTracker diluted mNAV、
+  Strategy issuer mNAV 為三條永久分線；CRT 價格狀態只接受前者，未綁定即
+  `SOURCE_SEMANTIC_UNBOUND_BLOCKED`。
+- SaylorTracker 只可經人工核准的 Sensor Admission Record 與 supplied Offline CSV
+  Import 進入 `RESEARCH_SECONDARY`。匯入保存 provenance、raw hash、retrieval、
+  first-seen 與 coverage；沒有 crawler，也永遠不是交易門檻輸入。
+- Net BPS Attribution 是證據性拆解：Market Translation、Asset Action、Claim Action、
+  Reserve Action、Share Denominator。Strive 沒有成熟正式語義時只能 `BLOCKED` 或
+  `RESEARCH_CANDIDATE`，不能冒充正式指標。
+
 施工時已從 GitHub（遠端版本庫）重新確認 `main`（主分支）為
 `f920689524fbfd5984deae1024e9b850aee31424`。交接包的程式與補丁是研究參考；
 本實作依主分支的 `CRT_CORE_CONTRACT.md`、`CRT_EVIDENCE_PACK_CONTRACT.md`、
