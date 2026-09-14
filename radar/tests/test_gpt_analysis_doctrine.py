@@ -78,6 +78,23 @@ class GptAnalysisDoctrineTests(unittest.TestCase):
         self.assertIn("role-compatible alternatives（角色相容替代方案）", self.doctrine)
         self.assertIn("不得假造排序", self.doctrine)
 
+    def test_issuer_health_translation_and_reversible_rotation_preservation_are_explicit(self) -> None:
+        for text in (
+            "Issuer Health -> Allocation Translation（發行人健康到配置轉譯）",
+            "Fact -> Issuer Health -> Investor Risk -> Asset Role -> Portfolio Impact -> Capital Judgment",
+            "Risk Improvement（風險改善）不等於 Allocation Increase（配置增加）",
+            "Risk-Budget Release（風險預算釋放）",
+            "Liability Relief（負債減壓）",
+            "Liquidity Burn（流動性燃燒）",
+            "Market Handoff Test（市場接棒檢查）",
+            "Reversible Rotation Preservation Check（可逆輪動保全檢查）",
+            "Capital Preservation Ratio（資本保全比）",
+            "Entitlement Clock（權利時鐘）",
+            "Cash Clock（現金時鐘）",
+        ):
+            self.assertIn(text, self.doctrine)
+        self.assertIn("不是正式六層分數、燈號、交易 gate（關卡）或機器執行授權", self.doctrine)
+
     def test_finding_admission_keeps_formal_three_and_adds_applicability_locally(self) -> None:
         for text in (
             "Necessity（必要性）",

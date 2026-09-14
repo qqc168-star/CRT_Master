@@ -179,6 +179,20 @@ BTC（比特幣）方向不能直接複製到所有 BTC（比特幣）相關資�
 
 > 市場方向轉強，但資產特定資料不足，因此新增資本主張 `BLOCKED`。
 
+### 8.1 Issuer Health -> Allocation Translation（發行人健康到配置轉譯）
+
+當發行人行動、儲備、回購、融資、配息或信用資料改變時，GPT（分析主廚）必須依下列鏈條轉譯，而不是把單一好消息直接翻成加碼：
+
+`Fact -> Issuer Health -> Investor Risk -> Asset Role -> Portfolio Impact -> Capital Judgment`
+
+（事實 → 發行人健康 → 投資人風險 → 資產角色 → 投資組合影響 → 資本判斷）
+
+**Risk Improvement（風險改善）不等於 Allocation Increase（配置增加）**。發行人信用或配息安全改善時，首先可提高既有持倉的 `HOLD`（續抱）信心，或釋放原先為該持倉保留的 **Risk-Budget Release（風險預算釋放）**；新增資本仍須比較角色相容替代方案、集中度、流動性與現金選擇權，不能由風險改善機械推出。
+
+評估發行人回購時，必須同時比較 **Liability Relief（負債減壓）** 與 **Liquidity Burn（流動性燃燒）**：退休的清算優先請求權、未來現金分配或其他負擔，是否足以補償被消耗的可用流動性。必須分開列示 designated / protected reserve（指定／受保護準備金）與 unrestricted / free cash（非受限／自由現金）；前者不得在沒有法律可得性與用途證據時，直接當成可自由動用的回購或配息現金。
+
+對發行人縮減買入力度後的價格，應做 **Market Handoff Test（市場接棒檢查）**：價格與流動性仍能站住，才增加 independent demand（獨立市場需求）證據；一旦縮手即失守，則 issuer dependence（發行人依賴）仍高。這是需求品質的研究判讀，不是價格門檻或自動資本行動。
+
 ## 9. Portfolio Interaction（投資組合互動）
 
 資本判斷不是逐檔資產判斷的加總。
@@ -223,6 +237,38 @@ GPT（分析主廚）可提出 `BUY / SELL / HOLD / WAIT / ROTATE`（買進／�
 6. **Portfolio impact（投資組合影響）**：對集中度、角色、流動性與後續資本選擇權的影響。
 
 Capital recommendation（資本建議）是 GPT（分析主廚）的 decision support（決策支援），不是 Evidence Pack（證據包）的 machine action（機器行動），也不是實際成交。
+
+### 10.2 Reversible Rotation Preservation Check（可逆輪動保全檢查）
+
+若兩個收益型面額資產競爭同一筆資本，GPT（分析主廚）必須把「途中領到多少配息」與「原核心資產能否完整回來」分開。以 A（原核心資產）換入 B（暫時承接資產）再換回 A 時，使用已成交或可驗證的 bid / ask（買價／賣價）、實際摩擦與實際可用現金作研究計算：
+
+`q_B = (q_A * A0_bid - C_out) / B0_ask`
+
+`q_A_back = (q_B * (B1_bid + d_cash) - C_back) / A1_ask`
+
+`R_cap = q_A_back / q_A`
+
+其中 `R_cap` 是 **Capital Preservation Ratio（資本保全比）**：
+
+- `R_cap < 1`：原核心資產股數受到侵蝕。
+- `R_cap = 1`：原核心資產股數完整保全。
+- `R_cap > 1`：回程後原核心資產股數增厚。
+
+`d_cash` 只能採用 Cash Clock（現金時鐘）已確認在券商帳戶中實際可用的現金；Entitlement Clock（權利時鐘）雖可記錄已取得的配息權利，卻不得提前計入回程購買力。這兩個時間鐘必須永久分開。
+
+接近面額時，以下式子可作 mental arithmetic（心算）的 approximate diagnostic（近似診斷）：
+
+`G0 = B0_ask - A0_bid`
+
+`G1 = B1_bid - A1_ask`
+
+`E_approx ≈ d_cash + G1 - G0 - c`
+
+它不能取代 `R_cap`，因為只有精確回程關係式會揭露單位數、雙向 bid / ask（買價／賣價）與進出摩擦後，核心資產是否真正可回復。
+
+收益型面額資產還必須區分 **Par Recovery Mode（面額修復模式）** 與 **Carry Harvest Mode（收益收割模式）**。當原資產仍有明顯的面額修復空間時，不得只因另一資產短期 carry（收益）較高就機械輪動；必須先通過 returnability（可回復性）與資本保全檢查。
+
+Position size（部位大小）由 returnability（可回復性）、市場深度、滑價、回程流動性及投資組合風險共同決定。**Partial Roll（部分輪動）** 是正常風險控制工具，不等於策略失敗。以上均為 GPT（分析主廚）的研究檢查，不是正式六層分數、燈號、交易 gate（關卡）或機器執行授權。
 
 ## 11. 最小輸出格式
 
