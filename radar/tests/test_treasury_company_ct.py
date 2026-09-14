@@ -9,7 +9,9 @@ from pathlib import Path
 
 from crt_radar.diluted_equity_mnav import build_diluted_equity_mnav
 from crt_radar.evidence_pack import build_evidence_pack
-from crt_radar.treasury_company_ct import FORMAL_MNAV_REF, build_treasury_company_ct
+from crt_radar.treasury_company_ct import (FORMAL_MNAV_REF, admit_saylortracker_sensor,
+    build_net_bps_attribution, build_treasury_company_ct, import_saylortracker_offline_csv,
+    validate_pit_replay)
 from test_first_evidence_slice import gate
 from test_reflexivity_overlay import empty_section
 
@@ -20,8 +22,13 @@ ISSUER = "CIK-0001050446"
 
 
 def evidence(at=T2, **fields):
-    return dict(issuer_id=ISSUER, effective_at_ms=at, available_at_ms=at,
-                source_ref=f"synthetic-fixture:{at}", verification_state="VALIDATED", **fields)
+    base = dict(issuer_id=ISSUER, effective_time=at, disclosure_time=at,
+                first_seen_time=at, retrieval_time=at,
+                source_ref=f"synthetic-fixture:{at}", verification_state="VALIDATED",
+                source_semantic={"identity": "ISSUER_VERIFIED_FACT", "version": "V1",
+                    "effective_from": 1, "effective_to": None})
+    base.update(fields)
+    return base
 
 
 def asset(at, btc, shares=100, basis="diluted-split-adjusted-v1"):
@@ -61,12 +68,33 @@ def kwargs():
                 asset_history=[asset(T0, 100), asset(T1, 110), asset(T2, 121)],
                 funding_instruments=[funding()], burden_current=burden(), burden_previous=burden(T1),
                 maturities=[], capital_conversion_events=[], management_events=[],
-                price_financing_state={**mnav, **evidence()},
+                price_financing_state={**mnav, **evidence(source_semantic={"identity": "CRT_FORMAL_DILUTED_EQUITY_MNAV", "version": "V1", "effective_from": 1, "effective_to": None})},
                 coverage={key: evidence(coverage_state="COMPLETE", scope_ref="issuer-explicit-test-scope",
                     empty_reason="VERIFIED_NO_MATCH") for key in ("funding", "maturities", "capital_conversion", "management")})
 
 
 class TreasuryCompanyCtTests(unittest.TestCase):
+    def test_v011_pit_semantics_and_future_leakage_are_fail_closed(self):
+        row = evidence(T1, disclosure_time=T1 + 1, first_seen_time=T1 + 2, retrieval_time=T1 + 3)
+        self.assertEqual(validate_pit_replay(row, issuer_id=ISSUER, replay_at=T1, mode="DECISION_REPLAY")["state"], "BLOCKED")
+        self.assertEqual(validate_pit_replay(row, issuer_id=ISSUER, replay_at=T1 + 3, mode="AUDIT_REPLAY")["state"], "AVAILABLE")
+        row.pop("first_seen_time")
+        self.assertEqual(validate_pit_replay(row, issuer_id=ISSUER, replay_at=T2, mode="AUDIT_REPLAY")["state"], "BLOCKED")
+
+    def test_v011_semantic_lines_sensor_import_and_net_bps_are_nontrading(self):
+        data = kwargs()
+        data["price_financing_state"]["source_semantic"]["identity"] = "SAYLORTRACKER_DILUTED_MNAV_RESEARCH"
+        self.assertIsNone(build_treasury_company_ct(**data)["price_financing_state"]["mnav"])
+        admitted = admit_saylortracker_sensor({"sensor_id": "st-1", "admission_ref": "manual-review",
+            "approved_by": "analyst", "approved_at": "2026-09-14", "coverage": "MSTR diluted mNAV",
+            "source_class": "RESEARCH_SECONDARY", "collection_method": "OFFLINE_CSV_IMPORT"})
+        imported = import_saylortracker_offline_csv("effective_time,disclosure_time,first_seen_time,mnav\n10,11,12,1.2\n", admitted, retrieval_time=13)
+        self.assertEqual(imported["state"], "RESEARCH_SECONDARY")
+        self.assertFalse(imported["trading_threshold_eligible"])
+        attribution = build_net_bps_attribution(opening_btc=100, closing_btc=120, opening_shares=100,
+            closing_shares=110, components={key: 0 for key in ("Market Translation", "Asset Action", "Claim Action", "Reserve Action", "Share Denominator")}, semantic_state="RESEARCH_CANDIDATE")
+        self.assertEqual(attribution["state"], "RESEARCH_CANDIDATE")
+        self.assertEqual(build_net_bps_attribution(opening_btc=1, closing_btc=1, opening_shares=1, closing_shares=1, components={}, semantic_state="UNBOUND")["state"], "BLOCKED")
     def test_case_a_holdings_growth_does_not_hide_dilution(self):
         data = kwargs()
         data["asset_history"] = [asset(T1, 100), asset(T2, 110, 115)]
@@ -128,8 +156,8 @@ class TreasuryCompanyCtTests(unittest.TestCase):
 
     def test_missing_source_time_issuer_or_validation_blocks_only_affected_record(self):
         for key, value in (("source_ref", ""), ("verification_state", "UNKNOWN"),
-                           ("issuer_id", "wrong"), ("available_at_ms", T2 + 1),
-                           ("effective_at_ms", T2 + 1)):
+                           ("issuer_id", "wrong"), ("disclosure_time", T2 + 1),
+                           ("effective_time", T2 + 1)):
             with self.subTest(key=key):
                 data = kwargs()
                 data["burden_current"][key] = value
@@ -155,7 +183,7 @@ class TreasuryCompanyCtTests(unittest.TestCase):
             self.assertEqual(len(result["observations"]), 2)
 
     def test_basis_mismatch_and_duplicate_times_keep_levels_but_block_comparison(self):
-        for change in ({"basis_ref": "different-split-basis"}, {"effective_at_ms": T1}):
+        for change in ({"basis_ref": "different-split-basis"}, {"effective_time": T1}):
             data = kwargs()
             data["asset_history"][-1].update(change)
             result = build_treasury_company_ct(**data)["organs"]["per_share_asset_engine"]
@@ -164,7 +192,7 @@ class TreasuryCompanyCtTests(unittest.TestCase):
 
     def test_unequal_spans_do_not_invent_deceleration_or_horizons(self):
         data = kwargs()
-        data["asset_history"][0]["effective_at_ms"] -= DAY
+        data["asset_history"][0]["effective_time"] -= DAY
         result = build_treasury_company_ct(**data)["organs"]["per_share_asset_engine"]
         self.assertIsNone(result["growth_direction"])
         self.assertIsNotNone(result["direction"])

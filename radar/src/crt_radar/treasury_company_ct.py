@@ -8,6 +8,8 @@ from __future__ import annotations
 import math
 import hashlib
 import json
+import csv
+from io import StringIO
 from collections import Counter
 from copy import deepcopy
 from typing import Any
@@ -17,9 +19,15 @@ from .diluted_equity_mnav import (
     build_diluted_equity_mnav,
 )
 
-SCHEMA_VERSION = "CRT_TREASURY_COMPANY_CT_V0.1"
+SCHEMA_VERSION = "CRT_TREASURY_COMPANY_CT_V0.1.1"
 OVERLAY_TYPE = "NON_WEIGHTED_EVIDENCE_OVERLAY"
 FORMAL_MNAV_REF = "radar/RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md"
+REPLAY_MODES = {"DECISION_REPLAY", "AUDIT_REPLAY"}
+MNAV_SEMANTIC_IDENTITIES = {
+    "CRT_FORMAL_DILUTED_EQUITY_MNAV",
+    "SAYLORTRACKER_DILUTED_MNAV_RESEARCH",
+    "STRATEGY_ISSUER_MNAV",
+}
 
 
 def _text(value: Any) -> bool:
@@ -52,7 +60,8 @@ def _finish(section: dict, usable: bool) -> dict:
     return section
 
 
-def _metadata(raw: Any, section: dict, claim: str, issuer: str, as_of: int) -> dict | None:
+def _metadata(raw: Any, section: dict, claim: str, issuer: str, as_of: int,
+              replay_mode: str = "DECISION_REPLAY") -> dict | None:
     if not isinstance(raw, dict):
         _block(section, claim, "EVIDENCE_MISSING_OR_INVALID")
         return None
@@ -60,13 +69,31 @@ def _metadata(raw: Any, section: dict, claim: str, issuer: str, as_of: int) -> d
             or raw.get("verification_state") != "VALIDATED"):
         _block(section, claim, "SOURCE_OR_ISSUER_NOT_VALIDATED")
         return None
-    effective, available = raw.get("effective_at_ms"), raw.get("available_at_ms")
-    if not (_time(effective) and _time(available) and effective <= available <= as_of):
-        _block(section, claim, "EVIDENCE_TIME_INVALID_OR_FUTURE")
+    # Four clocks are deliberately distinct.  Old `*_at_ms` names are not
+    # accepted here: silently mapping them would make an audit look like a
+    # decision-time observation and permits future-information leakage.
+    clocks = {key: raw.get(key) for key in (
+        "effective_time", "disclosure_time", "first_seen_time", "retrieval_time")}
+    if (replay_mode not in REPLAY_MODES or not all(_time(value) for value in clocks.values())
+            or not (clocks["effective_time"] <= clocks["disclosure_time"]
+                    <= clocks["first_seen_time"] <= clocks["retrieval_time"])):
+        _block(section, claim, "PIT_FOUR_CLOCKS_INVALID")
         return None
-    return {key: raw[key] for key in (
-        "issuer_id", "source_ref", "verification_state", "effective_at_ms", "available_at_ms"
-    )}
+    visibility = clocks["disclosure_time"] if replay_mode == "DECISION_REPLAY" else clocks["retrieval_time"]
+    if visibility > as_of:
+        _block(section, claim, "PIT_FUTURE_LEAKAGE_BLOCKED")
+        return None
+    semantic = raw.get("source_semantic")
+    if (not isinstance(semantic, dict) or not _text(semantic.get("identity"))
+            or not _text(semantic.get("version")) or not _time(semantic.get("effective_from"))
+            or not (_time(semantic.get("effective_to")) or semantic.get("effective_to") is None)
+            or semantic["effective_from"] > clocks["effective_time"]
+            or (semantic.get("effective_to") is not None and semantic["effective_to"] < clocks["effective_time"])):
+        _block(section, claim, "SOURCE_SEMANTIC_UNBOUND_BLOCKED")
+        return None
+    return {"issuer_id": raw["issuer_id"], "source_ref": raw["source_ref"],
+            "verification_state": raw["verification_state"], **clocks,
+            "source_semantic": {key: semantic[key] for key in ("identity", "version", "effective_from", "effective_to")}}
 
 
 def _numeric(raw: dict, key: str, section: dict, claim: str, *, signed: bool = False) -> float | None:
@@ -102,7 +129,7 @@ def _direction(delta: float | None, *, lower: bool = False) -> str | None:
 def _comparable(previous: dict | None, current: dict | None) -> bool:
     return bool(previous and current and _text(current.get("basis_ref"))
                 and previous.get("basis_ref") == current["basis_ref"]
-                and previous["effective_at_ms"] < current["effective_at_ms"])
+                and previous["effective_time"] < current["effective_time"])
 
 
 def _asset(history: Any, issuer: str, as_of: int) -> dict:
@@ -113,16 +140,16 @@ def _asset(history: Any, issuer: str, as_of: int) -> dict:
     if not isinstance(history, list) or not history:
         _block(out, "asset_history", "ASSET_HISTORY_MISSING")
         return out
-    dated = [row for row in history if isinstance(row, dict) and _time(row.get("effective_at_ms"))]
-    counts = Counter(row["effective_at_ms"] for row in dated)
+    dated = [row for row in history if isinstance(row, dict) and _time(row.get("effective_time"))]
+    counts = Counter(row["effective_time"] for row in dated)
     invalid_time = len(dated) != len(history)
     if invalid_time:
         _block(out, "current", "ASSET_TIME_UNKNOWN")
     rows = []
-    for index, raw in enumerate(sorted(dated, key=lambda row: row["effective_at_ms"])):
+    for index, raw in enumerate(sorted(dated, key=lambda row: row["effective_time"])):
         claim = f"asset_history[{index}]"
         row = _metadata(raw, out, claim, issuer, as_of)
-        if counts[raw["effective_at_ms"]] != 1:
+        if counts[raw["effective_time"]] != 1:
             _block(out, claim, "DUPLICATE_ASSET_TIME")
             row = None
         if row is not None:
@@ -150,8 +177,8 @@ def _asset(history: Any, issuer: str, as_of: int) -> dict:
         delta = _calc(out, "asset_change", [previous["btc_per_diluted_share"], current["btc_per_diluted_share"]],
                       lambda before, now: now / before - 1)
         out["growth_observations"].append({
-            "from_ms": previous["effective_at_ms"], "to_ms": current["effective_at_ms"],
-            "span_ms": current["effective_at_ms"] - previous["effective_at_ms"],
+            "from_ms": previous["effective_time"], "to_ms": current["effective_time"],
+            "span_ms": current["effective_time"] - previous["effective_time"],
             "change_pct": delta, "source_refs": [previous["source_ref"], current["source_ref"]],
         })
     growth = out["growth_observations"]
@@ -228,7 +255,7 @@ def _funding(raw: Any, issuer: str, as_of: int, coverage: Any) -> dict:
         previous = record.get("previous_cost")
         if previous is not None:
             meta = _metadata(previous, out, claim + ".previous_cost", issuer, as_of)
-            if meta and _text(record.get("cost_basis_ref")) and previous.get("cost_basis_ref") == record["cost_basis_ref"] and meta["effective_at_ms"] < row["effective_at_ms"]:
+            if meta and _text(record.get("cost_basis_ref")) and previous.get("cost_basis_ref") == record["cost_basis_ref"] and meta["effective_time"] < row["effective_time"]:
                 before = _numeric(previous, "annual_cost_rate_pct", out, claim + ".previous_cost")
                 delta = _calc(out, claim + ".cost_direction", [row["annual_cost_rate_pct"], before], lambda a, b: a - b)
                 row["cost_direction"] = _direction(delta, lower=True)
@@ -345,7 +372,7 @@ def _events(raw: Any, issuer: str, as_of: int, coverage: Any, *, management: boo
             if not row["consequence_basis_ref"]:
                 _block(out, claim + ".economic_consequences", "CONSEQUENCE_BASIS_MISSING")
         out["events"].append(row)
-    out["events"].sort(key=lambda row: (row["effective_at_ms"], row["event_id"]))
+    out["events"].sort(key=lambda row: (row["effective_time"], row["event_id"]))
     # No cross-event sum: accounting scopes may overlap even when IDs differ.
     return _finish(out, bool(out["events"]) or out.get("empty_reason") == "VERIFIED_NO_MATCH")
 
@@ -355,6 +382,10 @@ def _price(raw: Any, issuer: str, as_of: int) -> dict:
     out.update(mnav=None, semantic_ref=None)
     meta = _metadata(raw, out, "price_financing_state", issuer, as_of)
     if meta is None:
+        return out
+    semantic = meta["source_semantic"]
+    if semantic["identity"] != "CRT_FORMAL_DILUTED_EQUITY_MNAV":
+        _block(out, "mnav", "MNAV_SEMANTIC_LINE_NOT_FORMAL_CRT")
         return out
     valid = (raw.get("schema_version") == MNAV_SCHEMA_VERSION and raw.get("state") == "AVAILABLE"
              and raw.get("semantic_ref") == FORMAL_MNAV_REF and raw.get("evidence_alignment_state") == "VALIDATED"
@@ -380,6 +411,78 @@ def _price(raw: Any, issuer: str, as_of: int) -> dict:
     out.update(meta, mnav=float(value), semantic_ref=FORMAL_MNAV_REF,
                asset_id=raw["asset_id"], evidence_alignment_state="VALIDATED")
     return _finish(out, True)
+
+
+def build_net_bps_attribution(*, opening_btc: Any, closing_btc: Any,
+                              opening_shares: Any, closing_shares: Any,
+                              components: Any, semantic_state: str = "FORMAL") -> dict:
+    """Evidence-only bridge from two verified per-share levels to explicit causes.
+
+    It intentionally does not infer a missing residual: an unbound issuer
+    semantic (notably Strive) is a blocked research candidate, never a metric.
+    """
+    labels = ("Market Translation", "Asset Action", "Claim Action", "Reserve Action", "Share Denominator")
+    out = {"state": "BLOCKED", "unit": "NET_BPS", "components": {label: None for label in labels},
+           "net_bps_change": None, "blockers": [], "classification": None}
+    if semantic_state not in ("FORMAL", "RESEARCH_CANDIDATE"):
+        out["blockers"].append("NET_BPS_SEMANTIC_UNBOUND_BLOCKED")
+        return out
+    out["classification"] = semantic_state
+    numbers = (opening_btc, closing_btc, opening_shares, closing_shares)
+    if not all(_number(value) and value >= 0 for value in numbers) or opening_shares <= 0 or closing_shares <= 0:
+        out["blockers"].append("NET_BPS_LEVELS_INVALID")
+        return out
+    if not isinstance(components, dict) or any(not _number(components.get(label)) for label in labels):
+        out["blockers"].append("NET_BPS_ATTRIBUTION_COMPONENTS_INCOMPLETE")
+        return out
+    out["components"] = {label: float(components[label]) for label in labels}
+    out["net_bps_change"] = (closing_btc / closing_shares - opening_btc / opening_shares) * 10_000
+    out["state"] = "RESEARCH_CANDIDATE" if semantic_state == "RESEARCH_CANDIDATE" else "AVAILABLE"
+    return out
+
+
+def validate_pit_replay(record: dict, *, issuer_id: str, replay_at: int, mode: str) -> dict:
+    """Validate one record at a replay cutoff without calculating a claim."""
+    section = _section()
+    metadata = _metadata(record, section, "replay", issuer_id, replay_at, mode)
+    return {"state": "AVAILABLE" if metadata else "BLOCKED", "mode": mode,
+            "record": metadata, "blockers": section["blockers"]}
+
+
+def admit_saylortracker_sensor(record: Any) -> dict:
+    """Admit only a human-approved, offline research sensor; no crawler exists."""
+    required = ("sensor_id", "admission_ref", "approved_by", "approved_at", "coverage")
+    if not isinstance(record, dict) or any(not _text(record.get(key)) for key in required):
+        return {"state": "BLOCKED", "code": "SENSOR_ADMISSION_RECORD_INVALID"}
+    if record.get("source_class") != "RESEARCH_SECONDARY" or record.get("collection_method") != "OFFLINE_CSV_IMPORT":
+        return {"state": "BLOCKED", "code": "SAYLORTRACKER_RESEARCH_ONLY_OFFLINE_ONLY"}
+    return {"state": "ADMITTED", **{key: record[key] for key in required},
+            "source_class": "RESEARCH_SECONDARY", "collection_method": "OFFLINE_CSV_IMPORT"}
+
+
+def import_saylortracker_offline_csv(csv_text: str, admission_record: dict, *, retrieval_time: int) -> dict:
+    """Parse supplied bytes only; provenance and raw hash make it audit-replayable."""
+    admission = admit_saylortracker_sensor(admission_record)
+    if admission["state"] != "ADMITTED" or not isinstance(csv_text, str) or not _time(retrieval_time):
+        return {"state": "BLOCKED", "code": "OFFLINE_CSV_IMPORT_INVALID"}
+    digest = hashlib.sha256(csv_text.encode("utf-8")).hexdigest()
+    rows = []
+    for row in csv.DictReader(StringIO(csv_text)):
+        try:
+            effective = int(row["effective_time"])
+            disclosure = int(row["disclosure_time"])
+            first_seen = int(row["first_seen_time"])
+        except (KeyError, TypeError, ValueError):
+            return {"state": "BLOCKED", "code": "OFFLINE_CSV_CLOCKS_INVALID"}
+        rows.append({**row, "effective_time": effective, "disclosure_time": disclosure,
+                     "first_seen_time": first_seen, "retrieval_time": retrieval_time,
+                     "provenance": admission["admission_ref"], "raw_hash": digest,
+                     "coverage": admission["coverage"], "source_class": "RESEARCH_SECONDARY",
+                     "source_semantic": {"identity": "SAYLORTRACKER_DILUTED_MNAV_RESEARCH", "version": "OFFLINE_CSV_V1",
+                         "effective_from": effective, "effective_to": None}})
+    return {"state": "RESEARCH_SECONDARY", "sensor": admission, "raw_hash": digest,
+            "retrieval_time": retrieval_time, "first_seen_time": min((row["first_seen_time"] for row in rows), default=None),
+            "coverage": admission["coverage"], "rows": rows, "trading_threshold_eligible": False}
 
 
 def build_treasury_company_ct(*, issuer_id: str, as_of_ms: int,
