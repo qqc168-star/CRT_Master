@@ -1,10 +1,6 @@
-[CmdletBinding()]
-param(
-    [string]$CanonicalRepoRoot = "C:\Users\maxwe\OneDrive\文件\GitHub\CRT_Master",
-    [string]$ExpectedOrigin = "https://github.com/qqc168-star/CRT_Master.git"
-)
-
 $ErrorActionPreference = "Stop"
+$CanonicalRepoRoot = "C:\Users\maxwe\OneDrive\文件\GitHub\CRT_Master"
+$ExpectedOrigin = "https://github.com/qqc168-star/CRT_Master.git"
 
 function Fail-Preflight {
     param([string]$Code, [string]$Detail)
