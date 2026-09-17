@@ -14,7 +14,65 @@ class GptAnalysisDoctrineTests(unittest.TestCase):
         cls.readme = cls.readme_path.read_text(encoding="utf-8")
 
     def test_doctrine_is_boot_discoverable(self) -> None:
-        self.assertIn("CRT_GPT_ANALYSIS_DOCTRINE_V0.1.md", self.readme)
+        boot = self.readme.split("## Boot sequence for a fresh GPT", 1)[1].split("\n## ", 1)[0]
+        self.assertIn("Read `CRT_GPT_ANALYSIS_DOCTRINE_V0.1.md`", boot)
+
+    def identity_lock(self) -> str:
+        return self.doctrine.split("### 1.1 Project Identity Lock（專案身份鎖）", 1)[1].split(
+            "## 2. 權限與正式邊界", 1
+        )[0]
+
+    def test_project_identity_lock_binds_ns_to_current_main_and_crt_chain(self) -> None:
+        lock = self.identity_lock()
+        for text in (
+            "`🎯 第一顆比特幣｜CRT`",
+            "固定分析／統帥身份為 `N.S.`",
+            "commander identity（統帥身份）",
+            "必須先讀取 current GitHub `main`",
+            "Engineering SSOT（工程唯一真實來源）",
+            "不得沿用聊天記憶、舊 SHA（提交雜湊）或舊工程狀態",
+            "必須先服從 current `main`",
+            "`CRT_CORE_CONTRACT.md`",
+            "`CRT_EVIDENCE_PACK_CONTRACT.md`",
+            "最新可用 Evidence Pack（證據包）",
+            "再依本準則與 `CRT_SEASON_THREE_ARMY_COMMANDER_DEPLOYMENT_DOCTRINE_V0.1.md`",
+            "不得讓一般助理人格越過 CRT",
+            "不得自行建立第二套簡化框架",
+        ):
+            with self.subTest(required=text):
+                self.assertIn(text, lock)
+
+    def test_project_identity_lock_fails_closed_without_fabricated_formal_claims(self) -> None:
+        lock = self.identity_lock()
+        for text in (
+            "current `main`（目前主分支）無法讀取時",
+            "判斷必須標示 `BLOCKED`",
+            "證據缺失、過期、無效或無法驗真時",
+            "受影響主張必須 `BLOCKED`",
+            "`WAIT`（等待）",
+            "不得自行補數",
+            "不得假裝正式點燈或正式季節已確認",
+            "claim-scoped（主張範圍限定）",
+            "獨立有效證據仍可支持",
+            "不得用降低精度取代受阻正式主張",
+        ):
+            with self.subTest(required=text):
+                self.assertIn(text, lock)
+
+    def test_project_identity_lock_preserves_capital_and_formal_authority(self) -> None:
+        lock = self.identity_lock()
+        for text in (
+            "User（使用者）保有最終資本決定權",
+            "身份鎖不授予任何正式交易權限",
+            "project-level analysis routing（專案層分析路由）",
+            "不新增第七層",
+            "不修改正式六層權重、燈號閾值、`mNAV` 語義",
+            "Season Router（季節路由器）",
+            "Production approval（正式生產批准）",
+            "External Action Authority（外部行動權限）",
+        ):
+            with self.subTest(required=text):
+                self.assertIn(text, lock)
 
     def test_existing_reanalysis_sequence_is_preserved_in_order(self) -> None:
         sequence = (
