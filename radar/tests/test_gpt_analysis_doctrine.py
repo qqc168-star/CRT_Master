@@ -86,6 +86,88 @@ class GptAnalysisDoctrineTests(unittest.TestCase):
         offsets = [self.doctrine.index(item) for item in sequence]
         self.assertEqual(offsets, sorted(offsets))
 
+    def test_catalyst_is_expectation_surprise_repricing_aware(self) -> None:
+        catalyst = self.doctrine.split("### 4.1 `CATALYST`（催化事件）", 1)[1].split(
+            "### 4.2 `AMPLIFIER`（放大機制）", 1
+        )[0]
+        for text in (
+            "Expectation -> Actual -> Surprise -> Repricing",
+            "不得只依 headline direction（標題方向）",
+            "rates / yield curve / USD / relevant risk assets",
+            "surprise causal claim（意外差因果主張）保持 `unresolved`",
+            "禁止自行補造市場原先預期",
+            "不新增 Macro Layer（宏觀層）",
+        ):
+            with self.subTest(required=text):
+                self.assertIn(text, catalyst)
+
+    def test_amplifier_blocks_causal_shortcuts(self) -> None:
+        amplifier = self.doctrine.split("### 4.2 `AMPLIFIER`（放大機制）", 1)[1].split(
+            "### 4.3 `PERSISTENCE`（持續性）", 1
+        )[0]
+        for text in (
+            "Source Event -> L1/L2 -> L3 -> L4 -> L5/L6 -> Asset / Portfolio",
+            "ETF/ETP flow -> automatic directional BTC spot demand",
+            "flow / creation semantics",
+            "clock alignment",
+            "hedging / basis contamination",
+            "spot confirmation",
+            "OI up = bullish",
+            "Funding up",
+            "carry / basis",
+            "spot leadership",
+            "liquidation structure",
+            "leverage fragility",
+            "Capital Raised != BTC Purchased != BTC/share Accretion",
+            "Capital Raised -> Uses of Capital -> BTC / Other Uses -> Diluted Shares -> BTC/share",
+        ):
+            with self.subTest(required=text):
+                self.assertIn(text, amplifier)
+
+    def test_acceptance_compares_expected_and_actual_response(self) -> None:
+        acceptance = self.doctrine.split("### 4.4 `ACCEPTANCE`（市場接受）", 1)[1].split(
+            "### 4.5 `CONTRADICTIONS`（矛盾證據）", 1
+        )[0]
+        for text in (
+            "Expected Response -> Actual Response",
+            "unexpected resilience",
+            "unexpected weakness",
+            "bad news + BTC did not fall = BUY",
+            "good news + BTC did not rise = SELL",
+            "spot（現貨）、ETP（交易所交易產品）、leverage（槓桿）、structure（結構）與 Persistence（持續性）",
+        ):
+            with self.subTest(required=text):
+                self.assertIn(text, acceptance)
+
+    def test_contradictions_require_attribution_not_vote_averaging(self) -> None:
+        contradictions = self.doctrine.split("### 4.5 `CONTRADICTIONS`（矛盾證據）", 1)[1].split(
+            "### 4.6 `MISSING_EVIDENCE`（缺失證據）", 1
+        )[0]
+        for text in (
+            "不得平均、相消或以簡單票數決勝",
+            "competing hypotheses（競爭假說）",
+            "attribution path（歸因路徑）",
+            "下一項最能區分",
+            "結論保持 `unresolved`",
+            "structural spot demand",
+            "sell-side contraction",
+            "short covering",
+            "不得直接判為 bullish confirmation",
+        ):
+            with self.subTest(required=text):
+                self.assertIn(text, contradictions)
+
+    def test_persistence_windows_and_reanalysis_sequence_remain_unchanged(self) -> None:
+        persistence = self.doctrine.split("### 4.3 `PERSISTENCE`（持續性）", 1)[1].split(
+            "### 4.4 `ACCEPTANCE`（市場接受）", 1
+        )[0]
+        self.assertIn("1D / 7D / 30D", persistence)
+        self.assertNotIn("1D / 5D / 20D", persistence)
+        self.assertIn(
+            "CATALYST -> AMPLIFIER -> PERSISTENCE -> ACCEPTANCE -> CONTRADICTIONS -> MISSING_EVIDENCE",
+            self.doctrine,
+        )
+
     def test_governance_authority_remains_read_only(self) -> None:
         required = (
             "Production（正式生產）：`NOT_APPROVED`",
@@ -106,6 +188,22 @@ class GptAnalysisDoctrineTests(unittest.TestCase):
         self.assertIn("Evidence Independence", self.doctrine)
         self.assertIn("不得把多個由同一底層變數衍生的指標當成多票獨立支持", self.doctrine)
         self.assertIn("獨立證據家族", self.doctrine)
+
+    def test_evidence_independence_blocks_cross_use_double_counting(self) -> None:
+        independence = self.doctrine.split("## 5. Evidence Independence（證據獨立性）", 1)[1].split(
+            "## 6. Change -> Regime（變化到市場狀態）", 1
+        )[0]
+        for text in (
+            "Evidence use != Evidence independence",
+            "同一底層證據可以支援多個分析問題",
+            "不能因跨用途使用而取得多張 independent votes",
+            "CME basis",
+            "ETF / ETP flow hedge contamination",
+            "L4 leverage quality",
+            "不得增加成兩份獨立 confirmation",
+        ):
+            with self.subTest(required=text):
+                self.assertIn(text, independence)
 
     def test_capital_judgment_requires_invalidation_and_portfolio_impact(self) -> None:
         self.assertIn("Invalidation（失效條件）", self.doctrine)
@@ -152,6 +250,25 @@ class GptAnalysisDoctrineTests(unittest.TestCase):
         ):
             self.assertIn(text, self.doctrine)
         self.assertIn("不是正式六層分數、燈號、交易 gate（關卡）或機器執行授權", self.doctrine)
+
+    def test_btc_treasury_issuer_financing_requires_allocation_and_dilution(self) -> None:
+        issuer_health = self.doctrine.split(
+            "### 8.1 Issuer Health -> Allocation Translation（發行人健康到配置轉譯）", 1
+        )[1].split("## 9. Portfolio Interaction（投資組合互動）", 1)[0]
+        for text in (
+            "Financing Capacity -> Capital Raised -> Uses of Capital -> BTC Holdings / Other Uses -> Diluted Shares -> BTC/share",
+            "只證明可能取得資本",
+            "只證明資本已取得",
+            "必須由實際 capital allocation evidence",
+            "必須再納入 diluted share change",
+            "debt repayment",
+            "cash reserve",
+            "preferred support / distributions",
+            "repurchases",
+            "均不得默認為 BTC buying power",
+        ):
+            with self.subTest(required=text):
+                self.assertIn(text, issuer_health)
 
     def test_finding_admission_keeps_formal_three_and_adds_applicability_locally(self) -> None:
         for text in (
