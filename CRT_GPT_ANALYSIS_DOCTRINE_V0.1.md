@@ -75,6 +75,17 @@ GPT（分析主廚）在開始市場判讀前，先確認四件事：
 - 事件先發生、價格後上漲，只能證明時間順序，不能直接證明因果。
 - 若存在多個同時候選催化因素，保留競爭假說，不強迫單因歸因。
 
+對具有可觀察市場預期的宏觀、政策或制度事件，必須沿以下事件鏈判讀：
+
+`Expectation -> Actual -> Surprise -> Repricing`
+
+- 分開保存市場原始 expectation（預期）、actual result（實際結果）、兩者形成的 surprise（意外差）與實際 market repricing（市場重新定價）；不得只依 headline direction（標題方向）判斷催化效果。
+- Repricing（重新定價）優先由 rates / yield curve / USD / relevant risk assets（利率／殖利率曲線／美元／相關風險資產）等實際市場證據確認，不得把預期的市場反應當成已發生的反應。
+- expectation（預期）、actual（實際）或 repricing（重新定價）任一必要環節缺失時，surprise causal claim（意外差因果主張）保持 `unresolved`（未解）。
+- 禁止自行補造市場原先預期；無可驗證 expectation（預期）時，只能陳述事件與已觀察反應，不得偽造 surprise（意外差）。
+
+這是既有 `CATALYST`（催化事件）的因果精度要求，不新增 Macro Layer（宏觀層）。
+
 ### 4.2 `AMPLIFIER`（放大機制）
 
 回答：**什麼機制把變化放大？**
@@ -86,6 +97,31 @@ GPT（分析主廚）在開始市場判讀前，先確認四件事：
 可能的放大機制包括美元與利率、信用與流動性、現貨資金、槓桿、清算、發行人資本行動與反身性。
 
 不得把「事件與 BTC（比特幣）同方向」直接寫成「事件導致 BTC（比特幣）」。至少需要一段可觀察的傳導機制；若中間證據斷裂，因果狀態必須保持 unresolved（未解）。
+
+#### ETP / Spot（交易所交易產品／現貨）
+
+不得推論 `ETF/ETP flow -> automatic directional BTC spot demand`（ETF／ETP 資金流自動等於同方向 BTC 現貨需求）。應依現有證據檢查：
+
+- flow / creation semantics（資金流／申贖語義）；
+- clock alignment（時間鐘對齊）；
+- hedging / basis contamination（避險／基差污染）；
+- spot confirmation（現貨確認）。
+
+任何缺環只縮小受影響的 flow-to-spot causal claim（資金流到現貨因果主張），不得以缺失環節反向補成方向結論。
+
+#### Derivatives（衍生品）
+
+不得推論 `OI up = bullish`（未平倉量上升即看多），也不得把 `Funding up`（資金費率上升）自動判為 bullish / bearish（看多／看空）。衍生品判讀必須聯合 carry / basis（持有成本／基差）、spot leadership（現貨領先性）、liquidation structure（清算結構）與 leverage fragility（槓桿脆弱性）；證據不完整時縮小相關主張。
+
+#### Issuer Capital（發行人資本）
+
+永久區分：
+
+`Capital Raised != BTC Purchased != BTC/share Accretion`
+
+必須沿下列鏈條追蹤，不得跳步：
+
+`Capital Raised -> Uses of Capital -> BTC / Other Uses -> Diluted Shares -> BTC/share`
 
 ### 4.3 `PERSISTENCE`（持續性）
 
@@ -112,6 +148,12 @@ Transient price crossing（短暫價格穿越）不是 acceptance（接受）。
 
 Acceptance（接受）是證據組合，不是一根 K 線（價格蠟燭圖）。
 
+當 Catalyst / Repricing（催化事件／重新定價）足以形成合理方向性壓力時，還必須比較：
+
+`Expected Response -> Actual Response`
+
+實際 BTC（比特幣）反應偏離合理預期時，只能先標記 `unexpected resilience`（意外韌性）或 `unexpected weakness`（意外疲弱）。不得從 `bad news + BTC did not fall = BUY`（壞消息加 BTC 未跌即買進），也不得從 `good news + BTC did not rise = SELL`（好消息加 BTC 未漲即賣出）。任何資本判斷仍須取得 spot（現貨）、ETP（交易所交易產品）、leverage（槓桿）、structure（結構）與 Persistence（持續性）的確認。
+
 ### 4.5 `CONTRADICTIONS`（矛盾證據）
 
 回答：**什麼東西正在反駁我們？**
@@ -126,6 +168,15 @@ Acceptance（接受）是證據組合，不是一根 K 線（價格蠟燭圖）�
 - 投資組合矛盾，例如單一資產本身有利，但集中度已使整體組合風險惡化。
 
 矛盾不是雜訊垃圾桶；它通常是最有價值的 analyst attention（分析員注意）來源之一。
+
+具有決策意義的矛盾不得平均、相消或以簡單票數決勝。必須：
+
+1. 保留 competing hypotheses（競爭假說）。
+2. 提出 attribution path（歸因路徑），說明各假說需要哪些可觀察傳導。
+3. 明列下一項最能區分 competing hypotheses（競爭假說）的證據。
+4. 現有證據無法區分時，結論保持 `unresolved`（未解）。
+
+例如 `Macro adverse / BTC resilient`（宏觀不利／BTC 有韌性）可能來自 structural spot demand（結構性現貨需求）、sell-side contraction（賣方收縮）、short covering（空頭回補）、leverage（槓桿）或 other mechanism（其他機制）。在 attribution（歸因）未完成前，不得直接判為 bullish confirmation（看多確認）。
 
 ### 4.6 `MISSING_EVIDENCE`（缺失證據）
 
@@ -149,6 +200,8 @@ GPT（分析主廚）不得把多個由同一底層變數衍生的指標當成�
 例：BTC（比特幣）上漲、Fear & Greed（恐懼與貪婪）、MVRV（市值／實現價值比）與 NUPL（淨未實現盈虧）同時轉強，不等於四個完全獨立的看多證據；其中多項可能共同受 BTC（比特幣）價格上升驅動。
 
 分析應回答「有幾個獨立證據家族」，而不只是「有幾個指標同方向」。
+
+`Evidence use != Evidence independence`（證據用途不等於證據獨立性）。同一底層證據可以支援多個分析問題，但不能因跨用途使用而取得多張 independent votes（獨立票）。例如 CME basis（芝商所基差）可同時協助判讀 ETF / ETP flow hedge contamination（ETF／ETP 資金流的避險污染）與 L4 leverage quality（第四層槓桿品質），底層仍只有一份證據，不得增加成兩份獨立 confirmation（確認）。
 
 ## 6. Change -> Regime（變化到市場狀態）
 
@@ -201,6 +254,17 @@ BTC（比特幣）方向不能直接複製到所有 BTC（比特幣）相關資�
 `Fact -> Issuer Health -> Investor Risk -> Asset Role -> Portfolio Impact -> Capital Judgment`
 
 （事實 → 發行人健康 → 投資人風險 → 資產角色 → 投資組合影響 → 資本判斷）
+
+BTC Treasury（比特幣財庫公司）的資本轉譯還必須保留完整鏈條：
+
+`Financing Capacity -> Capital Raised -> Uses of Capital -> BTC Holdings / Other Uses -> Diluted Shares -> BTC/share`
+
+- Financing Capacity（融資能力）只證明可能取得資本。
+- Capital Raised（已募資本）只證明資本已取得。
+- BTC Purchase（比特幣購買）必須由實際 capital allocation evidence（資本配置證據）確認。
+- BTC/share accretion（每股比特幣增厚）必須再納入 diluted share change（稀釋後股數變化）。
+
+debt repayment（償債）、cash reserve（現金準備）、preferred support / distributions（特別股支持／分配）、repurchases（回購）與 other uses of capital（其他資本用途）均不得默認為 BTC buying power（比特幣購買力）。
 
 **Risk Improvement（風險改善）不等於 Allocation Increase（配置增加）**。發行人信用或配息安全改善時，首先可提高既有持倉的 `HOLD`（續抱）信心，或釋放原先為該持倉保留的 **Risk-Budget Release（風險預算釋放）**；新增資本仍須比較角色相容替代方案、集中度、流動性與現金選擇權，不能由風險改善機械推出。
 
