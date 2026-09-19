@@ -4,6 +4,8 @@ import math
 from copy import deepcopy
 from typing import Any
 
+from .diluted_equity_mnav import SCHEMA_VERSION as MNAV_SCHEMA_VERSION
+
 from .issuer_fact_history import (
     latest_fact,
     latest_previous_delta,
@@ -281,12 +283,24 @@ def _per_share(
     return _available(float(btc) / float(shares))
 
 
-def _mnav_wrapper(result: dict[str, Any] | None) -> dict[str, Any]:
+def _mnav_wrapper(result: dict[str, Any] | None, asset_id: str) -> dict[str, Any]:
     if not isinstance(result, dict):
         return _blocked("MNAV_RESULT_NOT_SUPPLIED")
 
+    envelope = deepcopy(result)
     if result.get("state") != "AVAILABLE":
-        return _blocked(result.get("reason", "MNAV_NOT_AVAILABLE"))
+        return {**envelope, **_blocked(result.get("reason", "MNAV_NOT_AVAILABLE")), "mnav": None}
+    if (
+        result.get("schema_version") != MNAV_SCHEMA_VERSION
+        or result.get("asset_id") != asset_id
+        or not isinstance(result.get("semantic_ref"), str)
+        or not result["semantic_ref"].strip()
+        or result.get("evidence_alignment_state") != "VALIDATED"
+        or result.get("action_output") != "NONE"
+        or result.get("external_action_authority") != "NONE"
+        or result.get("external_action_performed") is not False
+    ):
+        return {**envelope, **_blocked("MNAV_ENVELOPE_INVALID"), "mnav": None}
 
     value = result.get("mnav")
 
@@ -294,10 +308,11 @@ def _mnav_wrapper(result: dict[str, Any] | None) -> dict[str, Any]:
         not isinstance(value, (int, float))
         or isinstance(value, bool)
         or not math.isfinite(float(value))
+        or value <= 0
     ):
-        return _blocked("MNAV_RESULT_INVALID")
+        return {**envelope, **_blocked("MNAV_RESULT_INVALID"), "mnav": None}
 
-    return {"state": "AVAILABLE", "mnav": float(value)}
+    return {**envelope, "state": "AVAILABLE", "mnav": float(value)}
 
 
 def _issuer_events_for_identity(
@@ -343,11 +358,12 @@ def _bind_growth_asset(
     *,
     spec: dict[str, Any] | None,
     mnav_result: dict[str, Any] | None,
+    asset_id: str,
     evaluation_window: dict[str, Any] | None,
 ) -> dict[str, Any]:
     fields = {
         "premarket_price": _blocked("LIVE_MARKET_DATA_OUT_OF_SCOPE"),
-        "diluted_mnav": _mnav_wrapper(mnav_result),
+        "diluted_mnav": _mnav_wrapper(mnav_result, asset_id),
         "btc_holdings_current": _blocked("BINDING_SPEC_MISSING"),
         "btc_holdings_last_3": _blocked("BINDING_SPEC_MISSING"),
         "btc_per_diluted_share": _blocked("BINDING_SPEC_MISSING"),
@@ -957,6 +973,7 @@ def build_premarket_evidence_binding(
         reflexivity_overlay,
         spec=specs.get("MSTR"),
         mnav_result=mnav.get("MSTR"),
+        asset_id="MSTR",
         evaluation_window=evaluation_window,
     )
 
@@ -964,6 +981,7 @@ def build_premarket_evidence_binding(
         reflexivity_overlay,
         spec=specs.get("ASST"),
         mnav_result=mnav.get("ASST"),
+        asset_id="ASST",
         evaluation_window=evaluation_window,
     )
 

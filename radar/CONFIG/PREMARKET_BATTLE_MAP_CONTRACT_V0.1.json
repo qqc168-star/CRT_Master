@@ -93,26 +93,16 @@
       "premarket_price",
       "diluted_mnav",
       "btc_holdings_current",
-      "btc_holdings_last_3",
       "btc_per_diluted_share",
       "diluted_shares",
-      "atm_issuance",
-      "dilution_accretion",
       "issuer_events"
     ],
     "ASST": [
       "premarket_price",
       "diluted_mnav",
       "btc_holdings_current",
-      "btc_holdings_last_3",
       "btc_per_diluted_share",
       "diluted_shares",
-      "dilution",
-      "sata_burden",
-      "warrants",
-      "short_interest",
-      "gamma",
-      "options_vs_spot",
       "issuer_events"
     ],
     "STRC": [
@@ -206,5 +196,21 @@
     "machine_execution": "FORBIDDEN",
     "external_action_authority": "NONE",
     "capital_decision_authority": "USER_ONLY"
+  },
+  "supporting_facts": {
+    "MSTR": [
+      "btc_holdings_last_3",
+      "atm_issuance",
+      "dilution_accretion"
+    ],
+    "ASST": [
+      "btc_holdings_last_3",
+      "dilution",
+      "sata_burden",
+      "warrants",
+      "short_interest",
+      "gamma",
+      "options_vs_spot"
+    ]
   }
 }

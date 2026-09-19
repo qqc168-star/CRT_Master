@@ -35,12 +35,39 @@ def select_fact_history(
         return {"state": "BLOCKED", "reason": "ASSET_FACT_SECTION_MISSING", "items": []}
 
     coverage = section.get("coverage_state")
-    if section.get("section_state") == "BLOCKED" or coverage == "BLOCKED":
+    if coverage not in {"COMPLETE", "PARTIAL"}:
         return {"state": "BLOCKED", "reason": "ASSET_FACT_SECTION_BLOCKED", "items": []}
 
     raw_items = section.get("items")
     if not isinstance(raw_items, list):
         return {"state": "BLOCKED", "reason": "ASSET_FACT_ITEMS_MISSING", "items": []}
+
+    # A section can be blocked by an unrelated claim. Only explicit scoped
+    # blockers may be excluded; unknown/global blockers remain fail closed.
+    blocker_section = overlay.get("blockers", {})
+    blockers = blocker_section.get("items", []) if isinstance(blocker_section, dict) else None
+    if not isinstance(blockers, list) or (
+        section.get("section_state") == "BLOCKED" and not blockers
+    ):
+        return {"state": "BLOCKED", "reason": "UNSCOPED_FACT_BLOCKER", "items": []}
+    selected_ids = {
+        raw.get("asset_fact_id") for raw in raw_items
+        if isinstance(raw, dict) and raw.get("fact_type") == fact_type
+        and (issuer_id is None or raw.get("issuer_id") == issuer_id)
+        and (security_id is None or raw.get("security_id") == security_id)
+    }
+    claim_ids = selected_ids | {fact_type, issuer_id, security_id, "issuer_facts", "asset_facts"}
+    for blocker in blockers:
+        if not isinstance(blocker, dict):
+            return {"state": "BLOCKED", "reason": "INVALID_FACT_BLOCKER", "items": []}
+        scope = blocker.get("scope")
+        affected = blocker.get("affected_ids")
+        if scope in {"EVENT", "JUDGMENT"}:
+            continue
+        if (scope not in {"FACT", "CALCULATION"} or not isinstance(affected, list)
+                or not affected or any(not isinstance(x, str) for x in affected)
+                or claim_ids.intersection(affected)):
+            return {"state": "BLOCKED", "reason": "CLAIM_SCOPED_FACT_BLOCKED", "items": []}
 
     candidates = []
     for raw in raw_items:

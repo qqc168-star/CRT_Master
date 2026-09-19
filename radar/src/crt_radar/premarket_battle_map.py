@@ -387,6 +387,11 @@ def build_premarket_battle_map(
         "source_mode": source_mode,
         "first_screen": first_screen,
         "asset_fact_readiness": readiness,
+        "asset_facts": deepcopy(supplied_assets),
+        "supporting_fact_readiness": {
+            asset: _asset_readiness(asset, supplied_assets.get(asset, {}), fields)
+            for asset, fields in locked.get("supporting_facts", {}).items()
+        },
         "missing_evidence": missing_evidence,
         "analysis_sections": sections,
         "live_market_handoff": (
