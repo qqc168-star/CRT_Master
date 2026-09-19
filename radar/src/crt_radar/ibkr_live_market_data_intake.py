@@ -784,6 +784,7 @@ def build_ibkr_crt_outputs(
     evidence_pack: dict[str, Any] | None = None,
     source_gate_result: dict[str, Any] | None = None,
     as_of: str | None = None,
+    mnav_results: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     binding = build_equity_source_binding(registry, source_id=SOURCE_ID)
     end_ms = int(snapshot["retrieved_at_ms"])
@@ -795,6 +796,7 @@ def build_ibkr_crt_outputs(
     )
     evidence_binding = build_premarket_evidence_binding(
         reflexivity_overlay=evidence_pack,
+        mnav_results=mnav_results,
         evaluation_window=window,
     )
     handoff = build_premarket_live_market_handoff(
@@ -863,6 +865,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--registry", type=Path, default=_default_radar_path("CONFIG", "SOURCE_REGISTRY_V1.2.json"))
     parser.add_argument("--ibkr-source-overlay", type=Path, default=_default_radar_path("CONFIG", "IBKR_EQUITY_SOURCE_V0.1.json"))
     parser.add_argument("--battle-map-contract", type=Path, default=_default_radar_path("CONFIG", "PREMARKET_BATTLE_MAP_CONTRACT_V0.1.json"))
+    parser.add_argument("--mnav-results", type=Path, default=None)
     parser.add_argument("--source-gate", type=Path, default=None)
     parser.add_argument("--evidence-pack-input", type=Path, default=None)
     parser.add_argument("--snapshot-output", type=Path, default=_default_radar_path("runtime", "equity", "premarket", "latest.json"))
@@ -897,6 +900,7 @@ def main(argv: list[str] | None = None) -> int:
         registry=registry,
         battle_map_contract=contract,
         evidence_pack=_load_json(args.evidence_pack_input),
+        mnav_results=_load_json(args.mnav_results),
         source_gate_result=_load_json(args.source_gate),
         as_of=datetime.now(tz=ZoneInfo("Asia/Taipei")).isoformat(),
     )

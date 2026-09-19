@@ -144,6 +144,13 @@ class PremarketEvidenceBindingTests(unittest.TestCase):
             },
             mnav_results={
                 "MSTR": {
+                    "schema_version": "CRT_DILUTED_EQUITY_MNAV_EVIDENCE_V0.1",
+                    "asset_id": "MSTR",
+                    "semantic_ref": "FORMAL_CRT",
+                    "evidence_alignment_state": "VALIDATED",
+                    "action_output": "NONE",
+                    "external_action_authority": "NONE",
+                    "external_action_performed": False,
                     "state": "AVAILABLE",
                     "mnav": 0.8,
                 }
@@ -532,6 +539,13 @@ class PremarketEvidenceBindingTests(unittest.TestCase):
             },
             mnav_results={
                 "MSTR": {
+                    "schema_version": "CRT_DILUTED_EQUITY_MNAV_EVIDENCE_V0.1",
+                    "asset_id": "MSTR",
+                    "semantic_ref": "FORMAL_CRT",
+                    "evidence_alignment_state": "VALIDATED",
+                    "action_output": "NONE",
+                    "external_action_authority": "NONE",
+                    "external_action_performed": False,
                     "state": "AVAILABLE",
                     "mnav": 0.80,
                 }
