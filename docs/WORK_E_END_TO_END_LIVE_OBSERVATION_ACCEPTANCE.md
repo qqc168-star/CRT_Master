@@ -53,7 +53,40 @@ Focused reproduction: from repository root, set `PYTHONPATH=radar/src` and run
 `python -m unittest discover -s radar/tests -p test_work_e_end_to_end_observation.py -v`.
 The existing full-regression CI discovers this test automatically.
 
-## Real live read-only acceptance — BLOCKED, not PASS
+## Latest live attempt — port 7496 listening, API handshake timeout
+
+Resumed on 2026-09-20 Asia/Taipei after the user confirmed TWS was logged in,
+the read-only API setting was checked, and the actual port was 7496.
+Actual `inspect_ibkr_environment(ports=(7496,))` returned listening=true,
+ibapi_python_available=true, and no preflight blockers. GitHub main and local
+origin/main were independently rechecked and remained at the source SHA above.
+
+Executed once from the existing Work E worktree, using the native implementation:
+
+```text
+python -m crt_radar.ibkr_live_market_data_intake --port 7496 --confirm-tws-read-only --duration-seconds 10 --snapshot-output radar/runtime/work_e_7496/snapshot.json --handoff-output radar/runtime/work_e_7496/handoff.json --battle-map-output radar/runtime/work_e_7496/battle_map.json
+```
+
+Result: exit 1, `IbkrIntakeError: IBKR API handshake timed out` at the existing
+`NativeIbkrFeed.collect` readiness wait. The configured 10-second collection
+window was never reached. The existing default handshake timeout is 8 seconds.
+The code raises before `reqMarketDataType`, `reqMktData`, or `reqRealTimeBars`;
+its finally block disconnects. No order, position, account, or funds API was
+invoked. No retry or substitute feed was used.
+
+Current sole observed blocker: **IBKR_API_HANDSHAKE_TIMEOUT**. The previous
+port-not-listening blocker is resolved. The timeout does not establish its
+underlying TWS cause; no login or subscription diagnosis is claimed.
+
+Actual IBKR market data obtained: **none**. One native live intake attempt,
+zero completed observation cycles. No snapshot, live handoff, battle map,
+Commander journal, or downstream acceptance artifact was produced. Downstream
+acceptance remains NOT RUN and fail-closed. No GPT prices or Commander lines
+were manufactured. Draft PR #101 remains unmerged because live acceptance is
+not PASS. This continuation changes only this report; prior code regression
+results remain applicable without repeating the completed construction.
+
+## Initial live preflight — historical result, superseded above
 
 The existing `inspect_ibkr_environment()` was invoked against the actual local
 environment and repeated outside the network sandbox to rule out sandbox denial.
@@ -75,7 +108,7 @@ Both returned the same result:
 }
 ```
 
-This is the sole observed live blocker. It is limited to the four standard local
+This was the sole observed live blocker at the initial attempt. It is limited to the four standard local
 TWS/Gateway endpoints; no claim is made about custom remote endpoints. No IBKR
 session could be established, no market subscriptions were submitted, and zero
 live observation cycles ran. No order, position, account, or funds API was called.
