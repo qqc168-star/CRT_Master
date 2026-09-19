@@ -53,7 +53,30 @@ Focused reproduction: from repository root, set `PYTHONPATH=radar/src` and run
 `python -m unittest discover -s radar/tests -p test_work_e_end_to_end_observation.py -v`.
 The existing full-regression CI discovers this test automatically.
 
-## Latest live attempt — port 7496 listening, API handshake timeout
+## Latest authorized retry — handshake succeeds, timestamped trade missing
+
+After the user reconnected TWS and explicitly requested one retry, the same
+preflight confirmed 127.0.0.1:7496 listening with no blockers. The same native
+CLI command below was executed once again with `--port 7496` and a 10-second
+collection window. This time the handshake succeeded, the native market-data
+subscription window completed, and the feed returned to snapshot validation.
+
+Result: exit 1, `IbkrIntakeError: MSTR has no timestamped premarket trade` at
+`build_ibkr_equity_live_snapshot`. The previous handshake timeout is resolved.
+The current sole observed blocker is **MSTR_TIMESTAMPED_PREMARKET_TRADE_MISSING**.
+Validation reached this check after accepting MSTR market_data_type=1; this
+does not establish a usable, fresh trade or successful downstream acceptance.
+No raw capture is persisted by the existing CLI on validation failure, so L1
+bid/ask/last values or other asset callbacks cannot be reported as verified
+artifacts. No validated snapshot or observation journal was written.
+
+One 10-second native market-data collection completed in this retry, but zero
+validated Commander observation cycles completed. Journal and downstream
+acceptance remain NOT RUN. No forbidden order/position/account/funds API was
+called, no fake feed was substituted, and no contract or authority was changed.
+The existing fail-closed check remains intact. PR #101 stays Draft/unmerged.
+
+## Previous live attempt — port 7496 listening, API handshake timeout
 
 Resumed on 2026-09-20 Asia/Taipei after the user confirmed TWS was logged in,
 the read-only API setting was checked, and the actual port was 7496.
