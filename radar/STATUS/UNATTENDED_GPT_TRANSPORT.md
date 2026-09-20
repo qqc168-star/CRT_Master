@@ -116,3 +116,26 @@ incomplete. Further delivery requires a genuine event whose unchanged builder
 output fits the existing ceiling, or an explicitly scoped change to the existing
 bridge minimization policy before a new event is published. Raising the ceiling,
 truncating this record, changing its identity or faking a wake is not a remedy.
+
+## Authorized bounded-detail projection
+
+The user authorized a minimal amendment to the existing bridge builder. For an
+oversized payload only, the builder now projects research detail before computing
+the new payload hash. Capital State, analysis contract, event lineage, privacy and
+authority are unchanged. All current layer metric values, observation timestamps,
+quality states and missing-required-metric lists remain. Formal model state,
+weights and thresholds remain. Asset strategy and premarket sections remain intact.
+
+The payload explicitly lists omitted detail and binds the original market context
+by hash: per-metric provenance and redundant required lists; historical change
+tables/rankings; candidate scoring hashes; non-trigger DVOL research detail;
+transition 30-minute windows, duplicate prompts and machine causal hypotheses;
+bull-validation check values. Data-health gaps and all bull check-status lists are
+retained. Transition impulse/prior-60m/recent-60m observations remain available for
+GPT's own causal analysis. Omitted detail must not be interpreted as absent evidence.
+
+The actual snapshot previously measuring 49,231 bytes now measures 16,131 bytes
+under this projection and passes the unchanged envelope size validation. This is
+an in-memory verification only, not a replacement of its existing outbox record.
+If mandatory content still exceeds 16 KiB, the existing request builder rejects it;
+there is no arbitrary byte truncation, rounded numeric data or raised limit.

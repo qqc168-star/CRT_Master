@@ -185,6 +185,47 @@ class WorkerTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNotNone(worker._SENSITIVE_TEXT.search(text))
 
+    def test_oversized_builder_preserves_facts_locks_lineage_and_declares_omissions(self):
+        evidence = bridge_pack(pack(evidence_hash="b" * 64, requested=True))
+        evidence["changes"] = {"historical_detail": "x" * 20000}
+        evidence["layers"] = {"L1": {
+            "status": "BLOCKED", "missing_required_metrics": ["unavailable"],
+            "required_metrics": ["actual", "unavailable"],
+            "metrics": {"actual": {"value": 12.5, "as_of_ms": 12345,
+                                    "quality_state": "VALID_FRESH", "evidence_hash": "c" * 64}},
+        }}
+        evidence["reanalysis_wake"]["current_value"] = 12.5
+        original = copy.deepcopy(evidence)
+        handoff = run_gpt_handoff_gate(evidence, build_plain_language_notice(evidence),
+                                      ledger_path=self.root / "large.jsonl")
+        with patch("crt_radar.gpt_handoff._bound_bridge_detail"):
+            full = build_minimized_bridge_payload(evidence, handoff)
+        minimized = build_minimized_bridge_payload(evidence, handoff)
+        self.assertEqual(evidence, original)
+        for key in ("capital_state", "analysis_contract", "authority", "privacy", "event"):
+            self.assertEqual(minimized[key], full[key])
+        market = minimized["market_context"]
+        self.assertEqual(market["minimization"]["source_market_context_hash"],
+                         _canonical_hash(full["market_context"]))
+        self.assertIn("Omitted is not absent", market["minimization"]["omitted_detail"])
+        self.assertEqual(market["layers"]["L1"]["status"], "BLOCKED")
+        self.assertEqual(market["layers"]["L1"]["missing_required_metrics"], ["unavailable"])
+        self.assertEqual(market["layers"]["L1"]["metrics"]["actual"],
+                         {"value": 12.5, "as_of_ms": 12345, "quality_state": "VALID_FRESH"})
+        self.assertEqual(market["wake_observation"]["current_value"], 12.5)
+        envelope = build_request_envelope(minimized, model=SMOKE_MODEL)
+        self.assertLessEqual(len(envelope["request_body"]["input"].encode()), 16384)
+
+    def test_required_analysis_is_never_truncated_to_force_size_acceptance(self):
+        evidence = bridge_pack(pack(evidence_hash="b" * 64, requested=True))
+        handoff = run_gpt_handoff_gate(evidence, build_plain_language_notice(evidence),
+                                      ledger_path=self.root / "required.jsonl")
+        handoff["instruction_for_gpt"] = "x" * 20000
+        candidate = build_minimized_bridge_payload(evidence, handoff)
+        self.assertEqual(candidate["analysis_contract"]["instruction_for_gpt"], "x" * 20000)
+        with self.assertRaisesRegex(ValueError, "byte ceiling"):
+            build_request_envelope(candidate, model=SMOKE_MODEL)
+
     def test_receipt_tampering_rejected_on_replay(self):
         self.run_event()
         state = self.stored()
