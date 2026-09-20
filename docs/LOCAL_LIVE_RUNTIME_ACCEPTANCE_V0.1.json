@@ -1,0 +1,170 @@
+{
+  "integration": {
+    "checked_at": "2026-09-20T23:40:12.408178+00:00",
+    "base_main": "f46317bf61768de349052a6c76316675d59667e1",
+    "original_pr_102_head": "f10e678f86fc335ebeadafdede37c4f98858141b",
+    "method": "HISTORY_PRESERVING_INTEGRATION_ON_CURRENT_MAIN",
+    "work_e_pr_101_state": "OPEN_NOT_MERGED",
+    "full_tests": 823,
+    "full_regression_result": "PASS",
+    "lifecycle_tests_in_full_suite": 15,
+    "compile": "PASS",
+    "program_registry": "PASS",
+    "read_only_surface": "PASS",
+    "upstream_transport_files": "UNCHANGED_FROM_BASE_MAIN",
+    "original_uncommitted_changes": "PRESERVED_NOT_IMPORTED",
+    "item_7_report_state": "WAITING_FOR_NEW_QUALIFIED_EVENT",
+    "item_7_generation_attempts": 0,
+    "merge_and_deployment": "PROHIBITED_UNTIL_ITEM_7_LIVE_ACCEPTANCE_COMPLETE",
+    "auto_merge": "NOT_ENABLED",
+    "deployed": false,
+    "live_tests_performed": false,
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE",
+    "capital_decision_authority": "USER_ONLY",
+    "action_output": "NONE"
+  },
+  "historical_pr_102_acceptance": {
+    "base_main": "b48b6336d4972db11df1b253de03fc81ea4517fd",
+    "work_e_pr": 101,
+    "work_e_state": "OPEN_NOT_MERGED",
+    "runtime_depends_on_work_e": false,
+    "focused_tests": 13,
+    "related_tests": 50,
+    "full_tests": 804,
+    "regression_result": "PASS",
+    "read_only_surface": "PASS",
+    "program_registry": "PASS",
+    "compile": "PASS",
+    "scheduled_task": "CRT-Local-Live-Runtime",
+    "logon_trigger": "ENABLED_CURRENT_USER",
+    "actual_logout_login_test": "NOT_PERFORMED",
+    "execution_time_limit": "PT0S",
+    "multiple_instances": "IgnoreNew",
+    "runtime_root": "C:\\Users\\maxwe\\CRT_LocalLiveRuntime",
+    "source_hashes": [
+      {
+        "file": "local_live_runtime.py",
+        "sha256": "9263EE640EB7A652858E19808B8C72FDFC35077DC8AE9C886828B61EE3070FB9"
+      },
+      {
+        "file": "ibkr_live_market_data_intake.py",
+        "sha256": "3F423ED02A53BCFD41330CAE09920157E7091C7D1121B68084D807F9F775B9F3"
+      }
+    ],
+    "lifecycle": {
+      "result": "PASS",
+      "scope": "REAL_TWS_TRANSPORT_CONTROLLED_DISCONNECT_RECONNECT",
+      "endpoint": "127.0.0.1:7496",
+      "before": {
+        "action_output": "NONE",
+        "at_ms": 1789864435231,
+        "capital_decision_authority": "USER_ONLY",
+        "endpoint": "127.0.0.1:7496",
+        "evidence_usable": false,
+        "exchange_trade_freshness": "NOT_VALIDATED",
+        "external_action_authority": "NONE",
+        "fail_closed": true,
+        "journal_sequence": 185,
+        "live_callback_assets": [
+          "ASST",
+          "STRC"
+        ],
+        "machine_execution": "FORBIDDEN",
+        "pid": 21660,
+        "premarket_pipeline": "PENDING_MARKET_WINDOW",
+        "production": "NOT_APPROVED",
+        "state": "RECEIVING",
+        "valid_until_ms": 1789864440231
+      },
+      "paused": {
+        "action_output": "NONE",
+        "at_ms": 1789864443021,
+        "capital_decision_authority": "USER_ONLY",
+        "endpoint": "127.0.0.1:7496",
+        "evidence_usable": false,
+        "external_action_authority": "NONE",
+        "fail_closed": true,
+        "journal_sequence": 188,
+        "machine_execution": "FORBIDDEN",
+        "pid": 21660,
+        "premarket_pipeline": "PENDING_MARKET_WINDOW",
+        "production": "NOT_APPROVED",
+        "reason": "LOCAL_CONTROLLED_DISCONNECT",
+        "state": "PAUSED",
+        "valid_until_ms": 1789864448021
+      },
+      "resumed": {
+        "action_output": "NONE",
+        "at_ms": 1789864463756,
+        "capital_decision_authority": "USER_ONLY",
+        "endpoint": "127.0.0.1:7496",
+        "evidence_usable": false,
+        "exchange_trade_freshness": "NOT_VALIDATED",
+        "external_action_authority": "NONE",
+        "fail_closed": true,
+        "journal_sequence": 194,
+        "live_callback_assets": [
+          "ASST",
+          "STRC",
+          "SATA"
+        ],
+        "machine_execution": "FORBIDDEN",
+        "pid": 21660,
+        "premarket_pipeline": "PENDING_MARKET_WINDOW",
+        "production": "NOT_APPROVED",
+        "state": "RECEIVING",
+        "valid_until_ms": 1789864468756
+      },
+      "socket_counts": [
+        1,
+        0,
+        1
+      ],
+      "worker_loss": {
+        "action_output": "NONE",
+        "at_ms": 1789864466066,
+        "capital_decision_authority": "USER_ONLY",
+        "endpoint": "127.0.0.1:7496",
+        "evidence_usable": false,
+        "external_action_authority": "NONE",
+        "fail_closed": true,
+        "journal_sequence": 195,
+        "machine_execution": "FORBIDDEN",
+        "pid": 21660,
+        "premarket_pipeline": "PENDING_MARKET_WINDOW",
+        "production": "NOT_APPROVED",
+        "reason": "WORKER_EXIT_OR_TIMEOUT",
+        "retry_after_seconds": 5,
+        "state": "WAITING_FOR_TWS",
+        "valid_until_ms": 1789864471066
+      },
+      "worker_recovery": {
+        "action_output": "NONE",
+        "at_ms": 1789864477950,
+        "capital_decision_authority": "USER_ONLY",
+        "endpoint": "127.0.0.1:7496",
+        "evidence_usable": false,
+        "exchange_trade_freshness": "NOT_VALIDATED",
+        "external_action_authority": "NONE",
+        "fail_closed": true,
+        "journal_sequence": 200,
+        "live_callback_assets": [
+          "ASST",
+          "STRC",
+          "SATA"
+        ],
+        "machine_execution": "FORBIDDEN",
+        "pid": 21660,
+        "premarket_pipeline": "PENDING_MARKET_WINDOW",
+        "production": "NOT_APPROVED",
+        "state": "RECEIVING",
+        "valid_until_ms": 1789864482950
+      },
+      "premarket_snapshot": "PENDING_MARKET_WINDOW",
+      "work_e_downstream": "PENDING_MARKET_WINDOW",
+      "commander_observation": "PENDING_MARKET_WINDOW"
+    }
+  },
+  "historical_evidence_scope": "Original PR #102 only; not a deployment or live acceptance of the integrated revision."
+}
