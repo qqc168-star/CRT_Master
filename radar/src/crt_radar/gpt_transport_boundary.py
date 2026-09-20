@@ -6,6 +6,7 @@ import json
 import os
 import secrets
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,68 @@ from .gpt_bridge_outbox import _validate_bridge_payload
 BOUNDARY_SCHEMA_VERSION = "CRT_GPT_TRANSPORT_BOUNDARY_V0.1"
 PENDING_REASON = "TRANSPORT_NOT_CONFIGURED"
 VALID_STATES = {"PENDING", "CLAIMED", "RETRYABLE", "DELIVERED"}
+
+
+@contextmanager
+def delivery_lock(state_dir: str | Path, event_id: str):
+    """Nonblocking OS lock; process death releases it, unlike lock-file leases.
+
+    All worker read/modify/write operations, including provider I/O, hold this
+    lock. Never unlink the lock file: replacing its inode defeats mutual exclusion.
+    """
+    if len(event_id) != 64 or any(c not in "0123456789abcdef" for c in event_id):
+        raise ValueError("Invalid event identity")
+    root = Path(state_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / f"{event_id}.lock").open("a+b") as handle:
+        if os.name == "nt":
+            import msvcrt
+            if handle.seek(0, os.SEEK_END) == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            try:
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                yield False
+                return
+        else:
+            import fcntl
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                yield False
+                return
+        try:
+            yield True
+        finally:
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle, fcntl.LOCK_UN)
+
+
+def persist_boundary_state(state_dir: str | Path, state: dict[str, Any]) -> None:
+    """Atomically persist a validated transition while holding delivery_lock."""
+    state = _validate_state(state)
+    target = Path(state_dir) / f"{state['event_id']}.json"
+    fd, name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(state, handle, ensure_ascii=False, sort_keys=True, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(name, target)
+        if os.name != "nt":
+            directory = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+    finally:
+        Path(name).unlink(missing_ok=True)
 
 
 def _canonical_hash(value: Any) -> str:
