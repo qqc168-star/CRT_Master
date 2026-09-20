@@ -58,6 +58,7 @@ if (-not (Test-Path $Python)) {
 }
 
 $env:PYTHONPATH = Join-Path $RadarRoot "src"
+$env:PYTHONIOENCODING = "utf-8"
 
 # The existing hourly task also acts as a watchdog for the continuous, read-only
 # liquidation collector. It starts a hidden worker only when no matching worker exists.
