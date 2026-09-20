@@ -1,0 +1,11 @@
+{
+  "host": "127.0.0.1",
+  "port": 7496,
+  "client_id": 171,
+  "duration_seconds": 300,
+  "connect_timeout_seconds": 12,
+  "backoff_initial_seconds": 5,
+  "backoff_max_seconds": 60,
+  "heartbeat_timeout_seconds": 15,
+  "journal_retention_days": 14
+}

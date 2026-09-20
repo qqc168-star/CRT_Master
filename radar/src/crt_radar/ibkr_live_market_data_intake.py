@@ -524,8 +524,12 @@ def _native_feed_app(
 
 
 class NativeIbkrFeed:
-    def __init__(self, observation_sink: IbkrObservationSink | None = None) -> None:
+    def __init__(
+        self, observation_sink: IbkrObservationSink | None = None,
+        *, lifecycle_sink: Callable[[str, dict[str, Any]], None] | None = None,
+    ) -> None:
         self.observation_sink = observation_sink
+        self.lifecycle_sink = lifecycle_sink
 
     def collect(self, config: IbkrIntakeConfig) -> dict[str, Any]:
         locked = config.validate()
@@ -540,6 +544,8 @@ class NativeIbkrFeed:
             thread.start()
             if not app.ready.wait(locked.connect_timeout_seconds):
                 raise IbkrIntakeError("IBKR API handshake timed out")
+            if self.lifecycle_sink:
+                self.lifecycle_sink("CONNECTED", {})
 
             app.reqMarketDataType(LIVE_MARKET_DATA_TYPE)
             for index, asset in enumerate(ASSET_ORDER):
@@ -558,7 +564,25 @@ class NativeIbkrFeed:
                 app.reqRealTimeBars(bar_id, contract, 5, "TRADES", False, [])
                 request_ids.append((l1_id, bar_id))
 
-            threading.Event().wait(locked.duration_seconds)
+            if self.lifecycle_sink is None:
+                threading.Event().wait(locked.duration_seconds)
+            else:
+                deadline = time.monotonic() + locked.duration_seconds
+                while time.monotonic() < deadline:
+                    threading.Event().wait(min(1.0, max(0.0, deadline - time.monotonic())))
+                    if not app.isConnected():
+                        raise IbkrIntakeError("IBKR connection lost")
+                    with app.lock:
+                        sample = {"captured_at_ms": int(time.time() * 1000),
+                                  "assets": deepcopy(app.assets)}
+                        failures = deepcopy(app.failures)
+                    # Lifecycle journal stores incremental observations, not repeated
+                    # copies of every bar accumulated in this capture session.
+                    for item in sample["assets"].values():
+                        item["bars_5s"] = item["bars_5s"][-1:]
+                    if failures:
+                        raise IbkrIntakeError("IBKR market data request failed: " + json.dumps(failures))
+                    self.lifecycle_sink("CAPTURE", sample)
         finally:
             for l1_id, bar_id in request_ids:
                 try:
@@ -571,6 +595,8 @@ class NativeIbkrFeed:
             finally:
                 if thread is not None:
                     thread.join(timeout=2.0)
+                if self.lifecycle_sink:
+                    self.lifecycle_sink("DISCONNECTED", {})
 
         with app.lock:
             failures = deepcopy(app.failures)
