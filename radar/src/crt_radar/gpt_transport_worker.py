@@ -37,7 +37,7 @@ _PAYLOAD_FIELDS = {
     "authority", "bridge_payload_hash",
 }
 _SENSITIVE_TEXT = re.compile(
-    r"(?:[A-Za-z]:[\\/]|\\\\[^\\\s]+\\|file://|/(?:home|Users|tmp|var)/|"
+    r"(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\\\\[^\\\s]+\\|file://|/(?:home|Users|tmp|var)/|"
     r"\bsk-[A-Za-z0-9_-]{12,}|\bBearer\s+\S+|"
     r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})", re.IGNORECASE
 )

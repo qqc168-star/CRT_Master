@@ -58,7 +58,7 @@ does not send notifications and does not establish durable exactly-once downstre
 notification delivery; that must be verified in #8 using the existing downstream
 path. Provider output remains analysis, never machine execution authority.
 
-## Live preflight findings (2026-09-21)
+## Initial live preflight findings (2026-09-21)
 
 - No OPENAI_API_KEY is present in Process, User or Machine environment scopes.
 - The actual `CRT-Observation-History` task uses the existing CRT_Runtime outbox.
@@ -82,3 +82,37 @@ unattended transport.
 - Full regression: 803 PASS (Python 3.13.14, Windows).
 - Compile, program registry, read-only surface and diff whitespace checks: PASS.
 - No real provider request was made; no live receipt was created.
+
+## Credential follow-up and actual qualified event
+
+User-scope OPENAI_API_KEY presence is now verified. The existing agent process did
+not inherit it, so a new local Python child process was started with the User value
+passed through its environment; it confirmed presence without printing the secret.
+Billing and disabled auto-reload are user-reported, not independently queried.
+
+The actual runtime now reports GPT_HANDOFF_READY for event
+`d0fee5d059cb90ac37cd100a3d9707292a51aec0a958792d49e7a7b34636feba`.
+The existing BTC intraday threshold triggered MATERIAL_CHANGE_RELATIVE_TO_INTRADAY_HISTORY.
+NO_HANDOFF is no longer the active blocker. The Evidence Pack remains BLOCKED for
+other recorded data-quality gaps; these were neither hidden nor promoted.
+
+Rebuilding this event in memory with the unchanged current-main bridge builder
+produces **49,231 UTF-8 bytes**, already canonically serialized without whitespace.
+Its market_context is 43,834 bytes; changes alone are 20,767 bytes. The unchanged
+request contract rejects it above 16,384 bytes. There is no existing size-bounded
+projection in the current builder. Its older deployed outbox record was not
+rewritten, re-identified, or replaced. No alternate outbox was created.
+
+Actual public HTTPS provenance also exposed a worker regex false positive: the
+last character of `https:` was matched as a Windows drive letter. The drive-path
+pattern now requires a preceding non-alphanumeric boundary. A focused regression
+test permits public HTTPS provenance while retaining local-path rejection.
+All 13 focused worker tests and targeted compile/diff checks PASS. The previously
+valid 803-test run was not repeated locally.
+
+See UNATTENDED_GPT_LIVE_PREFLIGHT.json for sanitized event/hash/size evidence.
+There have been **zero provider requests** and no live Delivery Receipt. #7 remains
+incomplete. Further delivery requires a genuine event whose unchanged builder
+output fits the existing ceiling, or an explicitly scoped change to the existing
+bridge minimization policy before a new event is published. Raising the ceiling,
+truncating this record, changing its identity or faking a wake is not a remedy.

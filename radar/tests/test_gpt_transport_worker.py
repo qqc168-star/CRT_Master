@@ -171,6 +171,20 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(result["state"], "CREDENTIAL_UNAVAILABLE")
         self.assertEqual(self.stored()["state"], "PENDING")
 
+    def test_public_https_provenance_is_not_a_windows_drive_path(self):
+        candidate = copy.deepcopy(self.payload)
+        candidate["market_context"]["dvol_regime_watch"] = {
+            "provenance": {"endpoint": "https://www.deribit.com/api/v2/public/get_volatility_index_data"}
+        }
+        candidate.pop("bridge_payload_hash")
+        candidate["bridge_payload_hash"] = _canonical_hash(candidate)
+        self.assertEqual(worker.validate_transport_payload(candidate)[0], self.event)
+        for text in [r"C:\Users\owner\portfolio.json", "C:/private/file.json",
+                     "stored at D:/secrets/key", "file:///C:/secrets/key",
+                     "https://example.com/Users/private/key"]:
+            with self.subTest(text=text):
+                self.assertIsNotNone(worker._SENSITIVE_TEXT.search(text))
+
     def test_receipt_tampering_rejected_on_replay(self):
         self.run_event()
         state = self.stored()
