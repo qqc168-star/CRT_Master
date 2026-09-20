@@ -139,3 +139,31 @@ under this projection and passes the unchanged envelope size validation. This is
 an in-memory verification only, not a replacement of its existing outbox record.
 If mandatory content still exceeds 16 KiB, the existing request builder rejects it;
 there is no arbitrary byte truncation, rounded numeric data or raised limit.
+
+## Post-merge deployment and one-event watch
+
+PR #103 merged as `9b1b0cb61b4c5e04b358e48d2be0ad7e083e2b1d` and the actual
+observation runtime was fast-forwarded to that commit. Deployed compile, registry
+and read-only checks PASS. The PR-triggered CI for head `38a30d5` passed all 806
+tests. Its parallel push CI hit two existing collector timing failures; a local
+targeted check also exceeded the 250 ms wall-clock assertion. Collector code and
+thresholds were not changed; the CI discrepancy is retained rather than hidden.
+
+A new process successfully authenticated a read-only model metadata GET for the
+fixed `gpt-5.6-luna` model (HTTP 200). There were no generation requests. The next
+actual observation remained NO_WAKE / CHANGE_WITHIN_INTRADAY_HISTORY (approximately
+0.0695% change, historical percentile 21.93 against 90). It wrote its evidence,
+wake and handoff records, then failed printing a Unicode status symbol under cp950.
+The observation launcher now explicitly uses UTF-8 for Python output.
+
+`scripts/accept_one_gpt_event.py` is an operational one-event acceptance observer.
+It does not collect or generate events and does not change the hourly task or wake
+criteria. It ignores every preexisting outbox filename, waits up to 24 hours for a
+new actual event linked to current evidence, validates the existing envelope and
+calls the deployed worker. It records PENDING/CLAIMED/DELIVERED and performs the
+ordinary duplicate replay, then exits after that single attempted delivery.
+Any ambiguous provider failure stops acceptance without retry. The acceptance
+report is not a second receipt or transport state store; the existing boundary and
+its response evidence remain authoritative. Six targeted runner/launcher tests PASS.
+
+No live PASS or item #7 completion may be recorded while this observer is waiting.
