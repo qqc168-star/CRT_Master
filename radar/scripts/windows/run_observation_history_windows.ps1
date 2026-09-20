@@ -139,6 +139,14 @@ if ($TransportBoundaryExit -ne 0) {
     exit $TransportBoundaryExit
 }
 
+# Explicit local opt-in; no key or private runtime paths enter the GPT payload.
+if ($env:CRT_GPT_TRANSPORT_ENABLED -eq "1") {
+    & $Python -m crt_radar.gpt_transport_worker --outbox-dir $BridgeOutbox --state-dir $TransportBoundary
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "GPT transport requires local attention; see boundary state."
+    }
+}
+
 if (Test-Path -LiteralPath $EtpCaptureIfDue) {
     try {
         & $EtpCaptureIfDue -RepoRoot $RepoRoot -RuntimeRoot $RuntimeRoot

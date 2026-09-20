@@ -1123,6 +1123,7 @@ def build_minimized_bridge_payload(
     }
 
     _assert_bridge_privacy(payload)
+    _bound_bridge_detail(payload, pack)
 
     payload[
         "bridge_payload_hash"
@@ -1131,6 +1132,83 @@ def build_minimized_bridge_payload(
     _assert_bridge_privacy(payload)
 
     return payload
+
+
+def _bound_bridge_detail(payload: dict[str, Any], pack: dict[str, Any]) -> None:
+    """Project oversized research detail, never mutate evidence or an outbox.
+
+    Keep capital, analysis semantics, formal locks, current metric values/times/
+    quality and every layer's missing inputs. Omitted research detail is explicitly
+    distinguished from absent evidence and bound to the original market hash.
+    The provider's independent 16 KiB validation remains the final fail-closed gate.
+    """
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                            separators=(",", ":")).encode("utf-8")
+    # Reserve the final bridge_payload_hash field before computing that hash.
+    if len(serialized) + 90 <= 16 * 1024:
+        return
+    market = payload["market_context"]
+    original_hash = _canonical_hash(market)
+    for layer in market.get("layers", {}).values():
+        if not isinstance(layer, dict):
+            raise ValueError("Bridge layer must be an object")
+        layer.pop("required_metrics", None)
+        for name, row in layer.get("metrics", {}).items():
+            layer["metrics"][name] = {
+                key: deepcopy(row[key]) for key in ("value", "quality_state", "as_of_ms")
+                if key in row
+            }
+    market["changes"] = {}
+    for key in ("top_changes", "note"):
+        market.get("distillation", {}).pop(key, None)
+    # Source pack + market hash bind the omitted repeated per-metric provenance.
+    scoring = market.get("model_status", {}).get("locked_formal_scoring", {})
+    for key in ("candidate_contract_hash", "candidate_output_hash"):
+        scoring.pop(key, None)
+    diagnostic = market.get("transition_diagnostic")
+    if isinstance(diagnostic, dict):
+        diagnostic.pop("gpt_handoff", None)
+        diagnostic.pop("wake", None)
+        diagnostic.pop("mechanism_findings", None)
+        diagnostic.get("data_health", {}).pop("provenance", None)
+        if "windows" in diagnostic:
+            diagnostic["windows"] = {
+                key: value for key, value in diagnostic["windows"].items()
+                if key in {"impulse_window", "prior_60m", "recent_60m"}
+            }
+    bull = market.get("btc_bull_validation")
+    if isinstance(bull, dict):
+        market["btc_bull_validation"] = {
+            key: value for key, value in bull.items() if key in {
+                "state", "reason", "scope", "authority", "blocked_checks",
+                "pending_checks", "mixed_checks", "adverse_checks", "supportive_checks",
+                "machine_may_confirm_bull_transition", "control_transfer_loop_closed",
+            }
+        }
+    # Preserve DVOL detail when it is the trigger, otherwise include its status.
+    wake = pack.get("reanalysis_wake", {})
+    dvol = market.get("dvol_regime_watch")
+    if isinstance(dvol, dict) and "DVOL" not in str(wake.get("wake_sources", [])):
+        market["dvol_regime_watch"] = {
+            key: value for key, value in dvol.items() if key in {
+                "state", "reason", "scope", "current_dvol", "as_of_ms", "direction",
+                "formal_model_authority", "season_transition_authority",
+            }
+        }
+    market["wake_observation"] = {
+        key: deepcopy(wake[key]) for key in (
+            "current_value", "previous_value", "percent_change", "historical_percentile",
+            "baseline_count", "metric", "input_family",
+        ) if key in wake
+    }
+    market["minimization"] = {
+        "source_market_context_hash": original_hash,
+        "omitted_detail": (
+            "Omitted: metric provenance/required lists, history/rankings, scoring hashes, "
+            "non-trigger DVOL detail, transition 30m/prompts/machine hypotheses, bull values. "
+            "Omitted is not absent; do not infer. See source evidence."
+        ),
+    }
 
 
 def _assert_optional_authority(
