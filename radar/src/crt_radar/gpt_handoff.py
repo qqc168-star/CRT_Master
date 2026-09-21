@@ -1254,7 +1254,8 @@ def _compact_supporting_context(market: dict[str, Any], authority: dict[str, Any
     # Missing fields remain distinguishable from explicit nulls by field presence.
     columns = ["value", "as_of_ms", "quality_state"]
     metadata: list[list[Any]] = []
-    for layer in market.get("layers", {}).values():
+    for layer_name in sorted(market.get("layers", {})):
+        layer = market["layers"][layer_name]
         for name, row in sorted(layer.get("metrics", {}).items()):
             if set(row) == set(columns):
                 pair = [row["as_of_ms"], row["quality_state"]]

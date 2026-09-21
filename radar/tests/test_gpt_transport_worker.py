@@ -273,6 +273,11 @@ class WorkerTests(unittest.TestCase):
         reduced = build_minimized_bridge_payload(evidence, handoff)
         self.assertEqual(evidence, original)
         self.assertEqual(reduced, build_minimized_bridge_payload(evidence, handoff))
+        reordered = copy.deepcopy(evidence)
+        reordered["layers"] = dict(reversed(list(reordered["layers"].items())))
+        for layer in reordered["layers"].values():
+            layer["metrics"] = dict(reversed(list(layer["metrics"].items())))
+        self.assertEqual(reduced, build_minimized_bridge_payload(reordered, handoff))
         for key in ("capital_state", "analysis_contract", "authority", "privacy", "event"):
             self.assertEqual(reduced[key], full[key])
         market = reduced["market_context"]
