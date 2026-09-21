@@ -1209,6 +1209,82 @@ def _bound_bridge_detail(payload: dict[str, Any], pack: dict[str, Any]) -> None:
             "Omitted is not absent; do not infer. See source evidence."
         ),
     }
+    if len(json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                      separators=(",", ":")).encode("utf-8")) + 90 >= 16 * 1024:
+        _compact_supporting_context(market)
+
+
+def _compact_supporting_context(market: dict[str, Any]) -> None:
+    """Second-stage projection; current facts stay explicit, detail stays hash-bound."""
+    for section in ("transition_diagnostic", "btc_entry_gate",
+                    "btc_bull_validation", "dvol_regime_watch"):
+        if isinstance(market.get(section), dict):
+            market[section].pop("schema_version", None)
+    overlay = market.get("season_transition_warning_overlay")
+    if isinstance(overlay, dict):
+        # The overlay repeats layer inputs, model explanations and display cards.
+        # Keep formal status, blockers, veto evidence and authority locks.
+        summary = {key: deepcopy(overlay[key]) for key in (
+            "authority", "inherited_locks", "formal_season", "formal_season_status",
+        ) if key in overlay}
+        summary["source_overlay_hash"] = overlay.get("overlay_hash")
+        summary["light_evidence_status"] = {
+            name: row.get("evidence_status")
+            for name, row in overlay.get("lights", {}).items()
+        }
+        gate = overlay.get("gate_core_veto", {})
+        summary["gate_reasons"] = {
+            name: row["reason"]
+            for name, row in gate.items() if isinstance(row, dict)
+            and "reason" in row
+        }
+        summary["veto"] = gate.get("veto", {})
+        summary.get("inherited_locks", {}).pop("light_buckets", None)
+        summary["conflict_evidence"] = overlay.get("lights", {}).get(
+            "conflict_veto", {}).get("raw_metrics", {})
+        market["season_transition_warning_overlay"] = summary
+
+    # Column names explicitly define every value; no precision loss or truncation.
+    # Missing fields remain distinguishable from explicit nulls by field presence.
+    columns = ["value", "as_of_ms", "quality_state"]
+    market["metric_columns"] = columns
+    for layer in market.get("layers", {}).values():
+        rows = list(layer.get("metrics", {}).values())
+        # Share only metadata that is actually identical, with explicit defaults.
+        defaults = {
+            key: rows[0][key] for key in ("as_of_ms", "quality_state")
+            if rows and all(key in row and row[key] == rows[0].get(key) for row in rows)
+        }
+        if defaults:
+            layer["metric_defaults"] = defaults
+            layer["metric_columns"] = [key for key in columns if key not in defaults]
+        for name, row in layer.get("metrics", {}).items():
+            if set(row) == set(columns):
+                layer["metrics"][name] = [
+                    row[key] for key in layer.get("metric_columns", columns)
+                ]
+
+    diagnostic = market.get("transition_diagnostic")
+    if isinstance(diagnostic, dict):
+        diagnostic.get("windows", {}).pop("prior_60m", None)
+    health = market.get("data_health", {})
+    distillation = market.get("distillation", {})
+    if ("data_quality_conflicts" in distillation and
+            distillation["data_quality_conflicts"] == health.get("critical_blockers")):
+        distillation["data_quality_conflicts"] = {"same_as": "market_context.data_health.critical_blockers"}
+    six_layer = market.get("model_status", {}).get("six_layer_evidence", {})
+    missing = {name: layer["missing_required_metrics"]
+               for name, layer in market.get("layers", {}).items()
+               if layer.get("missing_required_metrics")}
+    if "missing_by_layer" in six_layer and six_layer["missing_by_layer"] == missing:
+        six_layer["missing_by_layer"] = {"same_as": "layers.*.missing_required_metrics"}
+    market["minimization"]["omitted_detail"] = (
+        "Omitted is not absent: provenance/lists/history/hashes, non-trigger DVOL detail, "
+        "diagnostic hypotheses/prior windows, bull values, overlay support/schema labels."
+    )
+    market["metric_encoding"] = (
+        "Arrays=zip(layer or market metric_columns,row)+metric_defaults; objects=literal; same_as=reference."
+    )
 
 
 def _assert_optional_authority(

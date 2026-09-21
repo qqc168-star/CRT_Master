@@ -268,10 +268,14 @@ class SeasonThreeArmyGptE2ETests(unittest.TestCase):
                 market["premarket_market_data"],
                 pack["premarket_market_data"],
             )
-            self.assertEqual(
-                market["season_transition_warning_overlay"],
-                pack["season_transition_warning_overlay"],
-            )
+            overlay = market["season_transition_warning_overlay"]
+            source_overlay = pack["season_transition_warning_overlay"]
+            self.assertEqual(overlay["source_overlay_hash"], source_overlay["overlay_hash"])
+            for key in ("formal_season", "formal_season_status", "authority"):
+                self.assertEqual(overlay[key], source_overlay[key])
+            self.assertEqual(overlay["inherited_locks"]["light_thresholds"],
+                             source_overlay["inherited_locks"]["light_thresholds"])
+            self.assertIn("Omitted is not absent", market["minimization"]["omitted_detail"])
 
             unsafe_pack = deepcopy(pack)
             unsafe_pack["season_transition_warning_overlay"][

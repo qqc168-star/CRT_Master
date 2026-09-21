@@ -23,7 +23,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - 進行中：`1`
 - 完成率：`75%`
 - 目前唯一進行中項目：`#7`
-- 目前任務：`ZERO_COST_MANUAL_TRANSPORT_CLOSURE`
+- 目前任務：`ITEM_7_PAYLOAD_CLOSURE_LIVE_ACCEPTANCE`
 
 完成率只使用：
 
@@ -232,130 +232,27 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 ## 目前已知阻塞
 
-`ITEM_7_UNATTENDED_GPT_TRANSPORT_NOT_IMPLEMENTED`
+`ITEM_7_PAYLOAD_CLOSURE_PENDING_LIVE_ACCEPTANCE`
 
-目前系統已能可靠完成：
+Engineering SSOT 已重新核對：GitHub main `05b582ff50d35fcc664aef6fe1c5ecfb929529f7`，PR #105 已合併。
+使用者已授權 #7 單次真實 provider request、CI PASS 後合併與 Runtime 對齊；先前零費用人工路徑限制已由本次明確施工令取代。
 
-`市場資料`
-→ `Evidence Pack（證據包）`
-→ `最新 Capital State（資本狀態）`
-→ `Plan Drift（計畫偏離）`
-→ `Wake Fusion（喚醒融合）`
-→ `GPT Handoff Gate（GPT 交接閘門）`
-→ `GPT Reanalysis Semantics（GPT 重新分析語義）`
-→ `Minimized Bridge Payload（最小化橋接資料包）`
-→ `Durable Local Outbox（可靠本機寄件匣）`
-
-Transport Boundary Closure V0.1（傳輸邊界閉合 V0.1）新增：
-
-- Durable Local Outbox（可靠本機寄件匣）事件同步為 local-only（僅本機）`PENDING` delivery state（送達狀態）。
-- 同一 `event_id` 與相同 payload hash（資料包雜湊）採 idempotent（冪等）處理。
-- 同一 `event_id` 但不同 payload hash（資料包雜湊）採 fail-closed（失敗關閉）。
-- `CLAIMED`（已領取）、`RETRYABLE`（可重試）、`DELIVERED`（已送達）只建立狀態機契約與測試。
-- 真正值班 Runtime（執行環境）目前只執行 `sync`，不執行 claim（領取）或 delivery（送達）。
-- 未選定 Transport Adapter（傳輸轉接器）時，不得 claim（領取），也不得宣告 delivered（已送達）。
-
-OpenAI Responses Adapter Contract V0.1（OpenAI 回應介面轉接器契約 V0.1）新增離線契約：
-
-- Request Envelope（請求封套）固定 `store = false`、`background = false`，並禁止 tools（工具）。
-- API Key（介面金鑰）只記錄 `OPENAI_API_KEY` 環境變數名稱，契約本身不得讀取或保存 secret（秘密值）。
-- 直接重用既有 GPT Reanalysis Semantics（GPT 重新分析語義）。
-- Response（回應）只有 `status = completed` 才能形成 Delivery Receipt（送達收據）。
-- Retry Policy（重試政策）已建立 bounded（有界）分類契約。
-- 本契約未匯入 OpenAI SDK（OpenAI 軟體開發套件）、未執行 HTTP（網路請求）、未接入值班 Runtime（執行環境）。
-
-Live Smoke Test Guardrails V0.1（真實煙霧測試護欄 V0.1）在離線契約中新增：
-
-- Smoke Model（煙霧測試模型）精準鎖定為 `gpt-5.6-luna`；其他模型 fail-closed（失敗關閉）。
-- Input（輸入）採 UTF-8 byte ceiling（位元組硬上限）`16384`；超限不得形成 Request Envelope（請求封套）。
-- `max_output_tokens` 精準鎖定為 `1800`；即使重新封裝 request hash（請求雜湊）也不得提高。
-- Request Body（請求本體）採 exact field allowlist（精準欄位允許清單），不得加入其他可能擴張費用或權限的欄位。
-- `max_attempts = 1`、`auto_retry = false`；HTTP `408 / 409 / 429 / 5xx` 等失敗結果一律 `TERMINAL`（終止），不得自動再打一發。
-- Delivery Receipt（送達收據）的 response model（回應模型）必須與鎖定模型一致。
-- 護欄模組仍不匯入 OpenAI SDK（OpenAI 軟體開發套件）、HTTP client（網路用戶端）或 secret-reading surface（秘密讀取介面）。
-- 本刀沒有執行 Network Write（網路寫入）、沒有讀取 API Key（介面金鑰）、沒有產生 API cost（介面費用），也沒有接入值班 Runtime（執行環境）。
-
-Zero-Cost Manual Transport Closure V0.1（零費用人工傳輸閉合 V0.1）新增平行人工路徑：
-
-- 使用 literal `127.0.0.1`（固定本機位址）的 one-shot Loopback HTTP（單次本機迴路請求）驗證實際序列化、HTTP POST（網路送出）、HTTP response（網路回應）與 Receipt（收據）形成能力。
-- Loopback（本機迴路）只允許固定 `/v1/responses` 路徑；`localhost`、其他 IP（網路位址）、外部網域、query（查詢參數）、userinfo（使用者資訊）一律 fail-closed（失敗關閉）。
-- Loopback request（本機迴路請求）不得帶入 Authorization（授權）、API key（介面金鑰）、OpenAI organization/project（OpenAI 組織／專案）等 credential header（憑證標頭）。
-- Manual Handoff Bundle（人工交接包）輸出 `manual-handoff.json`、`manual-prompt.txt` 與 `loopback-receipt.json`，並採 no-clobber（禁止覆寫）處理。
-- 使用者把 `manual-prompt.txt` 人工貼入自行選定的 ChatGPT session（ChatGPT 對話），再把文字回應存成本機檔案。
-- 只有使用者明確帶入 `--confirm-user-transfer`（確認人工傳輸）後，才可形成 hash-bound Manual Receipt（雜湊綁定人工收據）。
-- Handoff（交接）、response（回應）與 receipt（收據）各自有雜湊綁定；內容與雜湊不一致、限制即使重新封裝雜湊仍被改寫，或不同回應與既有收據衝突時一律 fail-closed（失敗關閉）。
-- 本程式不讀取 API Key（介面金鑰）、不連接 OpenAI API（OpenAI 介面）、不產生額外 API cost（介面費用）；只在測試與明確 `prepare`（準備）命令中執行本機 Loopback HTTP（迴路請求）。
-- Manual Receipt（人工收據）明確維持 `live_openai_api_transport_verified = false`、`provider_model_identity_verified = false`、`unattended_delivery_verified = false` 與 `existing_transport_boundary_completed = false`。
-- 人工閉合不把既有 Transport Boundary（傳輸邊界）的 `PENDING` 改寫成 `DELIVERED`，也不宣稱完成自動主動交接。
-
-因此 #7 尚未完成。零費用人工路徑可完成：
-
-`Minimized Bridge Payload（最小化橋接資料包）`
-→ `Loopback Acceptance（本機迴路驗收）`
-→ `Manual Handoff（人工交接）`
-→ `使用者自行貼入 ChatGPT 對話`
-→ `使用者保存文字回應`
-→ `Manual Receipt（人工收據）`
-→ `MANUAL_TRANSFER_ATTESTED（人工傳輸已證明）`
-
-這條路徑不需要 API account / billing（介面帳戶／計費）或 API Key（介面金鑰），但必須有人執行 copy/paste（複製／貼上），不能證明 OpenAI API（OpenAI 介面）本身、指定 provider model（供應端模型）或 unattended delivery（無人值守送達）。既有自動 Transport Boundary（傳輸邊界）仍維持 `PENDING`。
-
-#7 若要依原始「主動交接」定義完成，仍缺：
-
-`PENDING`
-→ `使用者另外批准的 Unattended Transport Adapter（無人值守傳輸轉接器）`
-→ `CLAIMED`
-→ `GPT 讀取最新最小化證據`
-→ `GPT 重新分析`
-→ `形成一次可通知使用者的決策建議`
-→ `Delivery Receipt（送達收據）`
-→ `DELIVERED`
-
-在 #7 完成前：
-
-- Unattended GPT Transport（無人值守 GPT 傳輸）維持 `NOT_IMPLEMENTED`；目前只有 offline Adapter Contract（離線轉接器契約）與 human-mediated manual path（人工中介路徑）。
-- External Network Write（外部網路寫入）不得由本刀新增；只有 literal `127.0.0.1`（固定本機位址）Loopback HTTP（本機迴路請求）可以執行。
-- `REANALYSIS_REQUIRED`（需要重新分析）不得直接等同交易指令。
-- 不得由機器自行修改持倉、計畫價格或資金配置。
-- 不得自動下單。
-- 相同狀態不得造成重複通知風暴。
-- GPT（大廚）必須讀取最新 Evidence Pack（證據包）與最新 Capital State（資本狀態）後才重新分析。
-- External Action Authority（外部行動權限）維持 `NONE`。
-- Production approval（正式生產批准）維持不變。
+真實事件已完成 `Evidence → REANALYSIS_REQUESTED → GPT_HANDOFF_READY → PENDING`，舊 payload 為 `24,480 bytes`，尚未發出 provider request。
+新增支援內容投影在原始事件離線重播為 `16,266 bytes`，上限維持 `16,384 bytes`。
+保留事件血統、source Evidence Pack hash、原始 market context hash、omitted_detail、Capital State、Plan Drift、分析契約、六層最新 metric value / timestamp / quality、缺失／阻塞證據、MSTR / ASST facts 與正式鎖。
+metric arrays 使用明示 columns/defaults，可精確還原，沒有位元組截斷或數值四捨五入。
+省略內容不等同不存在；完整來源由既有 hash 綁定。既有 outbox 不改寫。
 
 ## 下一個唯一有效動作
 
-完成 Zero-Cost Manual Transport Closure V0.1（零費用人工傳輸閉合 V0.1）的離線驗收並合併 current main（目前主分支）後，使用一個合格的本機 Minimized Bridge Payload（最小化橋接資料包）執行：
+聚焦測試與完整回歸通過後，Commit / Push / PR，CI PASS 後 Merge，Runtime 對齊新 main，執行一次真實 #7 acceptance。
 
-`python -m crt_radar.manual_transport_closure prepare --bridge-payload <payload.json> --bundle-dir <output-bundle>`
+只有以下全部通過才可將 #7 標成 COMPLETE：
 
-使用者人工貼上 `<output-bundle>/manual-prompt.txt` 並把回應另存為本機文字檔後，再明確執行：
+`real Evidence → REANALYSIS_REQUESTED → GPT_HANDOFF_READY → payload < 16,384 bytes → PENDING → CLAIMED → generation_attempts = 1 → provider completed response → DELIVERED → durable Delivery Receipt → 同 event replay → ALREADY_DELIVERED → transport_performed = false → notification_eligible = false`
 
-`python -m crt_radar.manual_transport_closure close --bundle-dir <output-bundle> --response-file <response.txt> --confirm-user-transfer`
-
-最後以 `verify`（驗證）命令重驗收完整 bundle（資料包）。這次實際演練只驗收 human-mediated closure（人工中介閉合），不得把結果改標成 OpenAI API delivery（OpenAI 介面送達）或 unattended delivery（無人值守送達）。
-
-使用者已選擇零額外 API cost（介面費用）路徑；獨立 API account / billing / credential readiness（介面帳戶／計費／憑證就緒）改為 `DEFERRED_BY_USER_CHOICE`（依使用者選擇暫緩），不是本路徑的前置條件。API Key（介面金鑰）不得讀取、External Network Write（外部網路寫入）維持 `NONE`、API cost（介面費用）維持 `ZERO`、Production approval（正式生產批准）維持不變、External Action Authority（外部行動權限）維持 `NONE`。
-
-#7 目前只允許：
-
-`合格重大異動`
-→ `可靠 Wake（喚醒）`
-→ `GPT Handoff（GPT 交接）`
-→ `Minimized Bridge（最小化橋接）`
-→ `Durable Local Outbox（可靠本機寄件匣）`
-→ `PENDING Transport Boundary（待傳輸邊界）`
-→ `可選的 Manual Handoff / Manual Receipt（人工交接／人工收據）平行證據`
-
-不得在 #7：
-
-- 自動認定成交
-- 自動修改使用者持倉
-- 自動下單
-- 自動移動資金
-- 修改正式模型、六層權重、燈號閾值或 mNAV 語義
-- 修改 Production approval（正式生產批准）
-- 修改 External Action Authority（外部行動權限）
+驗收覆寫只限 PR #105 既有單次入口。普通 cycle 維持 production percentile `95`，不得留下永久覆寫。
+#7 在真實 receipt 驗證前仍未完成，進度維持 `6 / 8 = 75%`。不得施工 PR #102 或 #8。
 
 ## 暫緩工作
 
