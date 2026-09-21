@@ -1,10 +1,27 @@
 param(
     [string]$RepoRoot = "$env:USERPROFILE\CRT_EvidenceRunner",
     [string]$RuntimeRoot = "$env:USERPROFILE\CRT_Runtime",
-    [int]$PhoneL4MaxAgeSeconds = 300
+    [int]$PhoneL4MaxAgeSeconds = 300,
+    [Nullable[double]]$AcceptanceWakePercentile = $null,
+    [switch]$ConfirmAcceptanceWakeOverride
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($null -ne $AcceptanceWakePercentile) {
+    if (-not $ConfirmAcceptanceWakeOverride) {
+        throw "Acceptance wake override requires -ConfirmAcceptanceWakeOverride"
+    }
+    if (
+        [double]::IsNaN([double]$AcceptanceWakePercentile) -or
+        [double]$AcceptanceWakePercentile -le 0.0 -or
+        [double]$AcceptanceWakePercentile -gt 100.0
+    ) {
+        throw "Acceptance wake percentile must be in (0, 100]"
+    }
+}
+
+
 
 $RadarRoot = Join-Path $RepoRoot "radar"
 $Registry = Join-Path $RadarRoot "CONFIG\SOURCE_REGISTRY_V1.2.json"
@@ -110,6 +127,18 @@ $RunnerArgs = @(
     "--phone-l4-freshness-path", $PhoneL4,
     "--phone-l4-max-age-seconds", "$PhoneL4MaxAgeSeconds"
 )
+
+if ($null -ne $AcceptanceWakePercentile) {
+    $RunnerArgs += @(
+        "--acceptance-wake-percentile",
+        "$AcceptanceWakePercentile",
+        "--confirm-acceptance-wake-override"
+    )
+    Write-Host (
+        "ACCEPTANCE_WAKE_OVERRIDE_ONESHOT=" +
+        "$AcceptanceWakePercentile"
+    ) -ForegroundColor Yellow
+}
 
 if (Test-Path -LiteralPath $MstrAsstMarketHealth) {
     $RunnerArgs += @(
