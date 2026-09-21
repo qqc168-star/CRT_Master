@@ -59,6 +59,15 @@ def main() -> int:
             except (ValueError, KeyError):
                 # No repairs or rewriting of an incompatible published record.
                 continue
+            override = current.get("reanalysis_wake", {}).get("acceptance_override", {})
+            report.update({
+                "acceptance_override_used": override.get("acceptance_override_used", False),
+                "acceptance_wake_operational_percentile": override.get("acceptance_wake_operational_percentile"),
+                "production_wake_operational_percentile": override.get(
+                    "production_wake_operational_percentile",
+                    current.get("reanalysis_wake", {}).get("operational_percentile")),
+                "persistent_configuration_changed": override.get("persistent_configuration_changed", False),
+            })
             report.update(event_id=event_id, bridge_payload_hash=payload_hash,
                           request_hash=envelope["request_hash"],
                           input_utf8_bytes=len(envelope["request_body"]["input"].encode("utf-8")),

@@ -56,6 +56,49 @@ def default_evidence_pack_path() -> Path:
     return Path(__file__).resolve().parents[2] / "runtime" / "evidence" / "latest.json"
 
 
+def _resolve_wake_operational_percentile(
+    dvol_regime_watch: dict[str, Any],
+    acceptance_override: float | None,
+) -> tuple[float, dict[str, Any] | None]:
+    """Resolve the ordinary wake sensitivity plus an explicit one-shot acceptance override.
+
+    The override is transport-acceptance-only.  It does not alter the DVOL regime
+    recommendation, formal CRT thresholds, investment thresholds, or persisted
+    production configuration.
+    """
+    recommended = dvol_regime_watch.get(
+        "recommended_wake_operational_percentile",
+        95.0,
+    )
+    try:
+        recommended = float(recommended)
+    except (TypeError, ValueError):
+        recommended = 95.0
+    if not (0.0 < recommended <= 100.0):
+        recommended = 95.0
+
+    if acceptance_override is None:
+        return recommended, None
+
+    override = float(acceptance_override)
+    if not (0.0 < override <= 100.0):
+        raise ValueError(
+            "acceptance wake percentile must be in (0, 100]"
+        )
+
+    return override, {
+        "scope": "ONE_SHOT_TRANSPORT_ACCEPTANCE_ONLY",
+        "acceptance_override_used": True,
+        "production_wake_operational_percentile": recommended,
+        "acceptance_wake_operational_percentile": override,
+        "persistent_configuration_changed": False,
+        "formal_threshold_authority": "NONE",
+        "investment_threshold_authority": "NONE",
+        "external_action_authority": "NONE",
+        "action_output": "NONE",
+    }
+
+
 def write_json_atomic(path: str | Path, payload: dict[str, Any]) -> None:
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -97,6 +140,7 @@ def run_daily_evidence(
     previous_season_transition_overlay: dict[str, Any] | None = None,
     season_transition_replay_context: dict[str, Any] | None = None,
     btc_control_transfer_validation_evidence: dict[str, Any] | None = None,
+    acceptance_wake_operational_percentile: float | None = None,
 ) -> dict[str, Any]:
     source_gate = run_source_gate(
         registry,
@@ -123,17 +167,13 @@ def run_daily_evidence(
                 error=f"{type(exc).__name__}:{exc}",
             )
 
-    wake_operational_percentile = dvol_regime_watch.get(
-        "recommended_wake_operational_percentile",
-        95.0,
+    (
+        wake_operational_percentile,
+        acceptance_override_metadata,
+    ) = _resolve_wake_operational_percentile(
+        dvol_regime_watch,
+        acceptance_wake_operational_percentile,
     )
-    try:
-        wake_operational_percentile = float(wake_operational_percentile)
-    except (TypeError, ValueError):
-        wake_operational_percentile = 95.0
-
-    if not (0.0 < wake_operational_percentile <= 100.0):
-        wake_operational_percentile = 95.0
 
     btc_rows = [
         row
@@ -193,6 +233,11 @@ def run_daily_evidence(
             "external_action_authority": "NONE",
             "external_action_performed": False,
         }
+
+    if acceptance_override_metadata is not None:
+        reanalysis_wake["acceptance_override"] = (
+            acceptance_override_metadata
+        )
 
     if reanalysis_wake["state"] == "REANALYSIS_REQUESTED":
         if transition_diagnostic_runner is None:
@@ -321,6 +366,22 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--handoff-ledger", type=Path, default=None)
     parser.add_argument("--bridge-outbox-dir", type=Path, default=None)
     parser.add_argument(
+        "--acceptance-wake-percentile",
+        type=float,
+        default=None,
+        help=(
+            "One-shot transport-acceptance-only BTC wake percentile. "
+            "Does not change persisted production wake policy."
+        ),
+    )
+    parser.add_argument(
+        "--confirm-acceptance-wake-override",
+        action="store_true",
+        help=(
+            "Required acknowledgement for --acceptance-wake-percentile."
+        ),
+    )
+    parser.add_argument(
         "--mstr-asst-market-health",
         type=Path,
         default=None,
@@ -371,6 +432,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Transport-only freshness limit for --phone-l4-freshness-path. Source-level freshness remains authoritative.",
     )
     args = parser.parse_args(argv)
+
+    if (
+        args.acceptance_wake_percentile is not None
+        and not args.confirm_acceptance_wake_override
+    ):
+        raise ValueError(
+            "--acceptance-wake-percentile requires "
+            "--confirm-acceptance-wake-override"
+        )
 
     if (
         (args.handoff_output is None)
@@ -462,6 +532,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         btc_control_transfer_validation_evidence=(
             btc_control_transfer_validation_evidence
+        ),
+        acceptance_wake_operational_percentile=(
+            args.acceptance_wake_percentile
         ),
     )
     write_json_atomic(args.output, pack)

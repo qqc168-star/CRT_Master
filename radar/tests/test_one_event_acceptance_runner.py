@@ -33,7 +33,12 @@ class OneEventRunnerTests(unittest.TestCase):
             evidence.write_text(json.dumps({
                 "generated_at_ms": int(acceptance.time.time() * 1000) + 1,
                 "evidence_pack_hash": self.payload["event"]["source_evidence_pack_hash"],
-                "reanalysis_wake": {"state": "REANALYSIS_REQUESTED"},
+                "reanalysis_wake": {"state": "REANALYSIS_REQUESTED", "acceptance_override": {
+                    "acceptance_override_used": True,
+                    "acceptance_wake_operational_percentile": 0.1,
+                    "production_wake_operational_percentile": 95.0,
+                    "persistent_configuration_changed": False,
+                }},
             }), encoding="utf-8")
 
         argv = ["accept", "--runtime-root", str(runtime), "--output", str(report), "--wait-seconds", "10"]
@@ -48,6 +53,10 @@ class OneEventRunnerTests(unittest.TestCase):
         self.assertEqual(result["replay"]["state"], "ALREADY_DELIVERED")
         self.assertFalse(result["replay"]["transport_performed"])
         self.assertFalse(result["replay"]["notification_eligible"])
+        self.assertTrue(result["acceptance_override_used"])
+        self.assertEqual(result["acceptance_wake_operational_percentile"], 0.1)
+        self.assertEqual(result["production_wake_operational_percentile"], 95.0)
+        self.assertFalse(result["persistent_configuration_changed"])
         provider.assert_called_once()
 
     def test_preexisting_event_is_not_republished_or_sent(self):
