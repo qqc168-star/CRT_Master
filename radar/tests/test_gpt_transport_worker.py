@@ -226,6 +226,59 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "byte ceiling"):
             build_request_envelope(candidate, model=SMOKE_MODEL)
 
+    def test_large_overlay_projection_round_trips_six_layer_facts(self):
+        from test_season_transition_warning_overlay import build
+        evidence = bridge_pack(pack(evidence_hash="b" * 64, requested=True))
+        overlay = build()
+        # A large display-only card models the live repeated overlay detail.
+        overlay["card"] = "研究展示" * 2000
+        overlay.pop("overlay_hash")
+        overlay["overlay_hash"] = _canonical_hash(overlay)
+        evidence["season_transition_warning_overlay"] = overlay
+        evidence["layers"] = {
+            f"L{i}": {"status": "PARTIAL", "missing_required_metrics": [f"missing_{i}"],
+                       "metrics": {
+                           "a": {"value": 0.123456789012345, "as_of_ms": 123,
+                                 "quality_state": "VALID_FRESH"},
+                           "b": {"value": None, "as_of_ms": 124 if i == 1 else 123,
+                                 "quality_state": "VALID_FRESH"},
+                           "incomplete": {"value": None} if i == 2 else {
+                               "value": -4, "as_of_ms": 123, "quality_state": "VALID_FRESH"},
+                       }} for i in range(1, 7)
+        }
+        evidence["mstr_asst_market_health"] = {
+            "MSTR": {"state": "BLOCKED", "missing": ["DILUTED_EQUITY_MNAV"]},
+            "ASST": {"state": "BLOCKED", "missing": ["SHARE_COUNT"]},
+        }
+        original = copy.deepcopy(evidence)
+        handoff = run_gpt_handoff_gate(evidence, build_plain_language_notice(evidence),
+                                      ledger_path=self.root / "overlay.jsonl")
+        with patch("crt_radar.gpt_handoff._bound_bridge_detail"):
+            full = build_minimized_bridge_payload(evidence, handoff)
+        reduced = build_minimized_bridge_payload(evidence, handoff)
+        self.assertEqual(evidence, original)
+        self.assertEqual(reduced, build_minimized_bridge_payload(evidence, handoff))
+        for key in ("capital_state", "analysis_contract", "authority", "privacy", "event"):
+            self.assertEqual(reduced[key], full[key])
+        market = reduced["market_context"]
+        self.assertEqual(market["minimization"]["source_market_context_hash"],
+                         _canonical_hash(full["market_context"]))
+        self.assertEqual(market["mstr_asst_market_health"], evidence["mstr_asst_market_health"])
+        for name, layer in market["layers"].items():
+            self.assertEqual(layer["missing_required_metrics"], evidence["layers"][name]["missing_required_metrics"])
+            for metric, row in layer["metrics"].items():
+                restored = ({**layer.get("metric_defaults", {}),
+                             **dict(zip(layer.get("metric_columns", market["metric_columns"]), row))}
+                            if isinstance(row, list) else row)
+                self.assertEqual(restored, evidence["layers"][name]["metrics"][metric])
+        compact_overlay = market["season_transition_warning_overlay"]
+        self.assertEqual(compact_overlay["source_overlay_hash"], overlay["overlay_hash"])
+        self.assertEqual(compact_overlay["authority"], overlay["authority"])
+        self.assertEqual(compact_overlay["veto"], overlay["gate_core_veto"]["veto"])
+        self.assertEqual(compact_overlay["conflict_evidence"], overlay["lights"]["conflict_veto"]["raw_metrics"])
+        encoded = build_request_envelope(reduced, model=SMOKE_MODEL)["request_body"]["input"]
+        self.assertLess(len(encoded.encode("utf-8")), 16384)
+
     def test_receipt_tampering_rejected_on_replay(self):
         self.run_event()
         state = self.stored()
