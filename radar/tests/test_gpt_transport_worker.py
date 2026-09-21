@@ -250,6 +250,21 @@ class WorkerTests(unittest.TestCase):
             "MSTR": {"state": "BLOCKED", "missing": ["DILUTED_EQUITY_MNAV"]},
             "ASST": {"state": "BLOCKED", "missing": ["SHARE_COUNT"]},
         }
+        evidence["reanalysis_wake"]["wake_sources"].append("DVOL_REGIME_WATCH")
+        evidence["dvol_regime_watch"] = {
+            "state": "EXPANSION_ACTIVATED", "reason": "MATERIAL_REEXPANSION",
+            "current_dvol": 38.81, "as_of_ms": 123, "baseline_count": 365,
+            "rebound_from_30d_low_pct": 16.756919374247904,
+            "recommended_wake_operational_percentile": 90.0,
+            "formal_model_authority": "NONE",
+            "provenance": {"provider": "Public research source"},
+            "research_parameters": {"parameter_authority": "RESEARCH_OPERATIONAL_ONLY"},
+        }
+        evidence["layers"]["L4"]["metrics"].update({
+            f"liquidation_metric_{i}": {"value": i / 7, "as_of_ms": 124 + i % 3,
+                                        "quality_state": "STALE" if i % 2 else "VALID_FRESH"}
+            for i in range(11)
+        })
         original = copy.deepcopy(evidence)
         handoff = run_gpt_handoff_gate(evidence, build_plain_language_notice(evidence),
                                       ledger_path=self.root / "overlay.jsonl")
@@ -258,22 +273,32 @@ class WorkerTests(unittest.TestCase):
         reduced = build_minimized_bridge_payload(evidence, handoff)
         self.assertEqual(evidence, original)
         self.assertEqual(reduced, build_minimized_bridge_payload(evidence, handoff))
+        reordered = copy.deepcopy(evidence)
+        reordered["layers"] = dict(reversed(list(reordered["layers"].items())))
+        for layer in reordered["layers"].values():
+            layer["metrics"] = dict(reversed(list(layer["metrics"].items())))
+        self.assertEqual(reduced, build_minimized_bridge_payload(reordered, handoff))
         for key in ("capital_state", "analysis_contract", "authority", "privacy", "event"):
             self.assertEqual(reduced[key], full[key])
         market = reduced["market_context"]
         self.assertEqual(market["minimization"]["source_market_context_hash"],
                          _canonical_hash(full["market_context"]))
         self.assertEqual(market["mstr_asst_market_health"], evidence["mstr_asst_market_health"])
+        for key, value in evidence["dvol_regime_watch"].items():
+            if key not in {"provenance", "research_parameters"}:
+                self.assertEqual(market["dvol_regime_watch"][key], value)
         for name, layer in market["layers"].items():
             self.assertEqual(layer["missing_required_metrics"], evidence["layers"][name]["missing_required_metrics"])
             for metric, row in layer["metrics"].items():
-                restored = ({**layer.get("metric_defaults", {}),
-                             **dict(zip(layer.get("metric_columns", market["metric_columns"]), row))}
+                restored = ({"value": row[0],
+                             **dict(zip(("as_of_ms", "quality_state"), market["metric_metadata"][row[1]]))}
                             if isinstance(row, list) else row)
                 self.assertEqual(restored, evidence["layers"][name]["metrics"][metric])
         compact_overlay = market["season_transition_warning_overlay"]
         self.assertEqual(compact_overlay["source_overlay_hash"], overlay["overlay_hash"])
-        self.assertEqual(compact_overlay["authority"], overlay["authority"])
+        resolved_authority = {**reduced["authority"], **compact_overlay["authority"]}
+        for key, value in overlay["authority"].items():
+            self.assertEqual(resolved_authority[key], value)
         self.assertEqual(compact_overlay["veto"], overlay["gate_core_veto"]["veto"])
         self.assertEqual(compact_overlay["conflict_evidence"], overlay["lights"]["conflict_veto"]["raw_metrics"])
         encoded = build_request_envelope(reduced, model=SMOKE_MODEL)["request_body"]["input"]
