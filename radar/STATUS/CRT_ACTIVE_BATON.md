@@ -19,11 +19,11 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 ## 固定進度
 
 - 總驗收項目：`8`
-- 已完成：`6`
-- 進行中：`1`
-- 完成率：`75%`
-- 目前唯一進行中項目：`#7`
-- 目前任務：`ITEM_7_PAYLOAD_CLOSURE_LIVE_ACCEPTANCE`
+- 已完成：`7`
+- 進行中：`0`
+- 完成率：`87.5%`
+- 目前唯一進行中項目：`NONE`（#7 已完成，依指示停止）
+- 目前任務：`ITEM_7_COMPLETE_STOPPED_BY_USER_SCOPE`
 
 完成率只使用：
 
@@ -80,7 +80,7 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 ### 第三關：GPT Wake（GPT 喚醒）
 
-- [ ] **#7 Evidence / Wake → GPT（證據／喚醒 → GPT）主動交接**
+- [x] **#7 Evidence / Wake → GPT（證據／喚醒 → GPT）主動交接 — COMPLETE**
   - 合格重大異動必須能觸發 GPT 重新分析。
   - GPT 分析必須使用最新市場證據與最新 Capital State（資本狀態）。
   - 相同狀態不得重複通知轟炸。
@@ -230,34 +230,46 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - Live Action Loop（實戰行動迴圈）完成度：`6 / 8 = 75%`
 - 工作正式移交 #7 GPT Wake（GPT 喚醒）。
 
+## #7 驗收結果
+
+`UNATTENDED_GPT_TRANSPORT_LIVE_ACCEPTANCE_PASS`
+
+- 驗收時間：`2026-09-22`（Asia/Taipei）。
+- 驗收程式／Runtime main SHA：`7e79f81c38579615a9705b8f1b3453f5cfcae938`。
+- Payload closure PR #106 / #107 已合併，CI PASS；完整離線回歸 `816 tests PASS`。
+- 使用者已明確批准唯一目的地 `https://api.openai.com/v1/responses`、模型 `gpt-5.6-luna`、最小化資料範圍及最多一次真實請求；先前外送審批阻塞已解除。
+- 真實 Evidence hash：`6d045c6e5ca1af56f70957da59de1080b94de6e91247be6d063205a09b46a722`。
+- Event ID：`05ba248c6ccada435c443598953fb02e8345ce5e67e1510b00b1f37ef0dd0c62`。
+- 真實市場鏈：`Evidence → REANALYSIS_REQUESTED → GPT_HANDOFF_READY → new outbox → PENDING`。
+- 原始事件大小：`24,480 → 15,323 bytes`（同一來源的離線對照）。
+- 本次新鮮真實請求：`15,605 UTF-8 bytes < 16,384 bytes`；上限未調高。
+- 隱私／權限／request envelope 驗證全部通過；`store=false`、`background=false`、無 tools、`max_output_tokens=1800`。
+- 完整送達鏈：`PENDING → CLAIMED → generation_attempts=1 → provider completed response → DELIVERED → durable Delivery Receipt`。
+- Provider response：`status=completed`、`model=gpt-5.6-luna`；真實 provider request 共 `1` 次。
+- Request hash：`e39cbd656d0327d20bd5a679c695ad7a9f4a2cdca1e7f2c3c7f6e97fa451b9fc`。
+- Response hash：`1ab6efdbc74ff9869a38c9a9f957779ecdfcbf8d2ef0a2f7c37662ca49720300`。
+- Receipt hash：`3c3c29a492e7a3cf59a2650bebf97c484383dc36cba78994948371f66f368a8b`。
+- 持久化 response / request / receipt 已重新讀取並重算驗證一致。
+- 同事件 replay：`ALREADY_DELIVERED`、`transport_performed=false`、`notification_eligible=false`；未再次呼叫 provider。
+- 本機驗收報告 ID：`976536dab5724033847cfcd25e88d87b`；對應原始 Evidence / Wake / Handoff 已於本機保留，私人內容不寫入 Git。
+- PR #105 既有單次 acceptance override：`0.1`；production percentile `95`，`persistent_configuration_changed=false`。
+- 驗收後普通 cycle 已以 transport disabled 執行；確認 production percentile `95`，無 acceptance override 殘留，沒有新增 provider request。
+- 原始 context hash、omitted_detail、事件血統、Capital State、Plan Drift、分析契約、六層最新 value / timestamp / quality、缺失／阻塞證據及正式鎖均保留。壓縮不是不存在；無任意位元組截斷。
+- 既有 stash 未碰，未修改持倉、Capital State、Wake 90/95 policy、六層權重、燈號閾值、mNAV 語義、Production approval 或 External Action Authority。
+
+因此：
+
+- **#7 = COMPLETE**
+- **7 / 8 = 87.5%**
+- 本次單次 provider request 授權已使用完畢，不延伸為後續持續外送授權。
+
 ## 目前已知阻塞
 
-`ITEM_7_PROVIDER_EGRESS_APPROVAL_REQUIRED`
-
-Engineering SSOT 已重新核對：施工基準 main `05b582ff50d35fcc664aef6fe1c5ecfb929529f7`；PR #105、#106 已合併。PR #106 merge / runtime SHA：`23b88847d3806f9e41824face9b9f7a508b0f320`。
-使用者已授權 #7 單次真實 provider request、CI PASS 後合併與 Runtime 對齊；先前零費用人工路徑限制已由本次明確施工令取代。
-
-真實事件已完成 `Evidence → REANALYSIS_REQUESTED → GPT_HANDOFF_READY → PENDING`，舊 payload 為 `24,480 bytes`，尚未發出 provider request。
-新增支援內容投影在原始事件離線重播為 `15,323 bytes`，上限維持 `16,384 bytes`。
-保留事件血統、source Evidence Pack hash、原始 market context hash、omitted_detail、Capital State、Plan Drift、分析契約、六層最新 metric value / timestamp / quality、缺失／阻塞證據、MSTR / ASST facts 與正式鎖。
-metric arrays 使用明示 value / metadata index 與共用 timestamp / quality 表，可精確還原，沒有位元組截斷或數值四捨五入。
-省略內容不等同不存在；完整來源由既有 hash 綁定。既有 outbox 不改寫。
+#7 無剩餘阻塞。#8 未開始、未宣告完成。
 
 ## 下一個唯一有效動作
 
-新市場資料已出現 DVOL trigger 與額外 11 個 L4 指標。只讀預演由 `18,074 bytes` 縮為 `16,216 bytes`，所有最新 metric 精確還原，DVOL 觸發事實保留。原始 `24,480 bytes` 事件現為 `15,323 bytes`。
-
-自動審批拒絕執行真實驗收命令：要求使用者明確批准具體 provider destination 與敏感資料範圍。命令未執行，provider request 次數仍為 `0`；未取得 receipt。
-需批准的具體外送：單次 HTTPS POST 至 `https://api.openai.com/v1/responses`，model `gpt-5.6-luna`，包含最小化事件／市場證據、持倉、現金、資產角色、有效計畫、Plan Drift 與分析契約；不含帳戶識別、完整私人 profile、路徑或憑證欄位。API credential 僅由既有傳輸程式用於授權。`store=false`、`background=false`、無 tools、最多一次 request、輸出上限 1800 tokens。
-
-完成本次補強的測試／PR／CI／合併與 runtime 對齊後，等待上述具體外送批准，再執行既有單次真實 #7 acceptance。不得繞過自動審批拒絕。
-
-只有以下全部通過才可將 #7 標成 COMPLETE：
-
-`real Evidence → REANALYSIS_REQUESTED → GPT_HANDOFF_READY → payload < 16,384 bytes → PENDING → CLAIMED → generation_attempts = 1 → provider completed response → DELIVERED → durable Delivery Receipt → 同 event replay → ALREADY_DELIVERED → transport_performed = false → notification_eligible = false`
-
-驗收覆寫只限 PR #105 既有單次入口。普通 cycle 保留原有 production percentile `90 / 95` 判斷；最新 DVOL activation 對應 `90`，並非本次修改。不得留下永久覆寫。
-#7 在真實 receipt 驗證前仍未完成，進度維持 `6 / 8 = 75%`。不得施工 PR #102 或 #8。
+依使用者指示停止。不得施工 PR #102；不得施工 #8。沒有自動接續的工程工作。
 
 ## 暫緩工作
 
