@@ -232,26 +232,31 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 ## 目前已知阻塞
 
-`ITEM_7_PAYLOAD_CLOSURE_PENDING_LIVE_ACCEPTANCE`
+`ITEM_7_PROVIDER_EGRESS_APPROVAL_REQUIRED`
 
-Engineering SSOT 已重新核對：GitHub main `05b582ff50d35fcc664aef6fe1c5ecfb929529f7`，PR #105 已合併。
+Engineering SSOT 已重新核對：施工基準 main `05b582ff50d35fcc664aef6fe1c5ecfb929529f7`；PR #105、#106 已合併。PR #106 merge / runtime SHA：`23b88847d3806f9e41824face9b9f7a508b0f320`。
 使用者已授權 #7 單次真實 provider request、CI PASS 後合併與 Runtime 對齊；先前零費用人工路徑限制已由本次明確施工令取代。
 
 真實事件已完成 `Evidence → REANALYSIS_REQUESTED → GPT_HANDOFF_READY → PENDING`，舊 payload 為 `24,480 bytes`，尚未發出 provider request。
-新增支援內容投影在原始事件離線重播為 `16,266 bytes`，上限維持 `16,384 bytes`。
+新增支援內容投影在原始事件離線重播為 `15,323 bytes`，上限維持 `16,384 bytes`。
 保留事件血統、source Evidence Pack hash、原始 market context hash、omitted_detail、Capital State、Plan Drift、分析契約、六層最新 metric value / timestamp / quality、缺失／阻塞證據、MSTR / ASST facts 與正式鎖。
-metric arrays 使用明示 columns/defaults，可精確還原，沒有位元組截斷或數值四捨五入。
+metric arrays 使用明示 value / metadata index 與共用 timestamp / quality 表，可精確還原，沒有位元組截斷或數值四捨五入。
 省略內容不等同不存在；完整來源由既有 hash 綁定。既有 outbox 不改寫。
 
 ## 下一個唯一有效動作
 
-聚焦測試與完整回歸通過後，Commit / Push / PR，CI PASS 後 Merge，Runtime 對齊新 main，執行一次真實 #7 acceptance。
+新市場資料已出現 DVOL trigger 與額外 11 個 L4 指標。只讀預演由 `18,074 bytes` 縮為 `16,216 bytes`，所有最新 metric 精確還原，DVOL 觸發事實保留。原始 `24,480 bytes` 事件現為 `15,323 bytes`。
+
+自動審批拒絕執行真實驗收命令：要求使用者明確批准具體 provider destination 與敏感資料範圍。命令未執行，provider request 次數仍為 `0`；未取得 receipt。
+需批准的具體外送：單次 HTTPS POST 至 `https://api.openai.com/v1/responses`，model `gpt-5.6-luna`，包含最小化事件／市場證據、持倉、現金、資產角色、有效計畫、Plan Drift 與分析契約；不含帳戶識別、完整私人 profile、路徑或憑證欄位。API credential 僅由既有傳輸程式用於授權。`store=false`、`background=false`、無 tools、最多一次 request、輸出上限 1800 tokens。
+
+完成本次補強的測試／PR／CI／合併與 runtime 對齊後，等待上述具體外送批准，再執行既有單次真實 #7 acceptance。不得繞過自動審批拒絕。
 
 只有以下全部通過才可將 #7 標成 COMPLETE：
 
 `real Evidence → REANALYSIS_REQUESTED → GPT_HANDOFF_READY → payload < 16,384 bytes → PENDING → CLAIMED → generation_attempts = 1 → provider completed response → DELIVERED → durable Delivery Receipt → 同 event replay → ALREADY_DELIVERED → transport_performed = false → notification_eligible = false`
 
-驗收覆寫只限 PR #105 既有單次入口。普通 cycle 維持 production percentile `95`，不得留下永久覆寫。
+驗收覆寫只限 PR #105 既有單次入口。普通 cycle 保留原有 production percentile `90 / 95` 判斷；最新 DVOL activation 對應 `90`，並非本次修改。不得留下永久覆寫。
 #7 在真實 receipt 驗證前仍未完成，進度維持 `6 / 8 = 75%`。不得施工 PR #102 或 #8。
 
 ## 暫緩工作

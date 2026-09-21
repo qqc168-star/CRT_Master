@@ -271,8 +271,11 @@ class SeasonThreeArmyGptE2ETests(unittest.TestCase):
             overlay = market["season_transition_warning_overlay"]
             source_overlay = pack["season_transition_warning_overlay"]
             self.assertEqual(overlay["source_overlay_hash"], source_overlay["overlay_hash"])
-            for key in ("formal_season", "formal_season_status", "authority"):
+            for key in ("formal_season", "formal_season_status"):
                 self.assertEqual(overlay[key], source_overlay[key])
+            resolved_authority = {**bridge["authority"], **overlay["authority"]}
+            for key, value in source_overlay["authority"].items():
+                self.assertEqual(resolved_authority[key], value)
             self.assertEqual(overlay["inherited_locks"]["light_thresholds"],
                              source_overlay["inherited_locks"]["light_thresholds"])
             self.assertIn("Omitted is not absent", market["minimization"]["omitted_detail"])
