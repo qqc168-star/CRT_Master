@@ -123,6 +123,7 @@ def run_daily_evidence(
     *,
     observation_db: str | Path,
     reflexivity_input: dict[str, Any] | None = None,
+    treasury_valuation_inputs: dict[str, Any] | None = None,
     fetch_overrides: dict[str, FetchResult] | None = None,
     liquidation_aggregate_payload: dict[str, Any] | None = None,
     probe_fetcher: Callable[[SourceSpec], FetchResult] | None = None,
@@ -271,6 +272,7 @@ def run_daily_evidence(
         observation_db=observation_db,
         generated_at_ms=generated_at_ms,
         reflexivity_input=reflexivity_input,
+        treasury_valuation_inputs=treasury_valuation_inputs if treasury_valuation_inputs is not None else {},
         dvol_regime_watch=dvol_regime_watch,
         reanalysis_wake=reanalysis_wake,
         transition_diagnostic=transition_diagnostic,
@@ -348,6 +350,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--observation-db", type=Path, default=default_observation_db_path())
     parser.add_argument("--output", type=Path, default=default_evidence_pack_path())
     parser.add_argument("--private-profile", type=Path, default=default_private_profile_path())
+    parser.add_argument("--treasury-valuation-inputs", type=Path, default=None,
+        help="Local verified CT histories for MSTR/ASST; absent claims remain BLOCKED.")
     parser.add_argument(
         "--btc-entry-context",
         type=Path,
@@ -517,6 +521,10 @@ def main(argv: list[str] | None = None) -> int:
         probe_fetcher=probe_liquidation_stream,
         runtime_checks=runtime_checks,
         private_context=private_context,
+        treasury_valuation_inputs=(
+            _load_json_object(args.treasury_valuation_inputs, label="Treasury valuation inputs")
+            if args.treasury_valuation_inputs is not None else {}
+        ),
         dvol_regime_runner=run_live_dvol_regime_watch,
         transition_diagnostic_runner=run_live_btc_transition_diagnostics,
         btc_entry_gate_context=btc_entry_gate_context,
