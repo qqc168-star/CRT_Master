@@ -1,0 +1,126 @@
+{
+  "scope": "FRESH_REAL_CYCLE_AND_OFFLINE_BRIDGE_PROJECTION",
+  "result": "TREASURY_INTEGRATION_PASS_WITH_UNRELATED_SOURCE_BLOCKER",
+  "generated_at_ms": 1790073045099,
+  "evidence_pack_hash": "36b1674c94a94fb74a49445935bbc74f98f0b1cfa10d3365e03484df90bf1569",
+  "pack_state": "BLOCKED",
+  "source_blockers": [
+    "LIQUIDATION_AGGREGATES_INVALID"
+  ],
+  "treasury": {
+    "MSTR": {
+      "diluted_mnav": 1.040007448294271,
+      "source_semantic": "STRATEGYTRACKER_DILUTED_MNAV_RESEARCH",
+      "as_of": 1790073045099,
+      "evidence_authority": "RESEARCH_SECONDARY_EVIDENCE",
+      "formal_action_critical_state": "BLOCKED",
+      "current_btc_per_diluted_share": null,
+      "previous_btc_per_diluted_share": null,
+      "btc_per_diluted_share_change_pct": null,
+      "btc_share_basis": "MSTR_ASSUMED_DILUTED_SHARES_OFFICIAL",
+      "btc_share_as_of": 1789862400000,
+      "mnav_as_of": 1790071417927,
+      "baseline_counts": {
+        "own": 0,
+        "regime": 0,
+        "benchmark": 0
+      },
+      "own_history_empirical_cdf_pct": null,
+      "regime_empirical_cdf_pct": null,
+      "benchmark_empirical_cdf_pct": null,
+      "benchmark_identity": null,
+      "five_week_mnav_change_pct": null,
+      "preferred_funding_attribution_summary": {
+        "state": "BLOCKED",
+        "research_only": true,
+        "events": []
+      },
+      "quality_state": "PARTIAL",
+      "context_hash": "28b84370acae5970baa952b55ad66b9cba19c997646301503030276b9baf1cfe",
+      "blockers": [
+        "ASSET_COMPARISON_UNAVAILABLE",
+        "CALCULATION_INPUT_INCOMPLETE",
+        "COMPARABLE_BENCHMARK_HISTORY_UNAVAILABLE",
+        "FIVE_WEEK_COMPARABLE_OBSERVATION_UNAVAILABLE",
+        "INSUFFICIENT_BASELINE",
+        "NUMERIC_EVIDENCE_MISSING_OR_INVALID",
+        "OFFICIAL_COMPARABLE_MNAV_INPUTS_REQUIRED",
+        "PIT_REGIME_BINDING_UNAVAILABLE",
+        "VERIFIED_PREFERRED_EVENTS_MISSING"
+      ]
+    },
+    "ASST": {
+      "diluted_mnav": 1.3369883749173848,
+      "source_semantic": "STRATEGYTRACKER_DILUTED_MNAV_RESEARCH",
+      "as_of": 1790073045099,
+      "evidence_authority": "RESEARCH_SECONDARY_EVIDENCE",
+      "formal_action_critical_state": "BLOCKED",
+      "current_btc_per_diluted_share": 0.0002631691600134697,
+      "previous_btc_per_diluted_share": 0.0002547404886804994,
+      "btc_per_diluted_share_change_pct": 0.03308728571821873,
+      "btc_share_basis": "ASST_AFDS_EX_TRADITIONAL_WARRANTS_8K_NOTE4",
+      "btc_share_as_of": 1789689600000,
+      "mnav_as_of": 1790071417927,
+      "baseline_counts": {
+        "own": 0,
+        "regime": 0,
+        "benchmark": 0
+      },
+      "own_history_empirical_cdf_pct": null,
+      "regime_empirical_cdf_pct": null,
+      "benchmark_empirical_cdf_pct": null,
+      "benchmark_identity": null,
+      "five_week_mnav_change_pct": null,
+      "preferred_funding_attribution_summary": {
+        "state": "BLOCKED",
+        "research_only": true,
+        "events": []
+      },
+      "quality_state": "PARTIAL",
+      "context_hash": "9c12fb99a791c248160366cf43d575a2957e3253d032e3426b1b1c2907ae19f2",
+      "blockers": [
+        "COMPARABLE_BENCHMARK_HISTORY_UNAVAILABLE",
+        "FIVE_WEEK_COMPARABLE_OBSERVATION_UNAVAILABLE",
+        "INSUFFICIENT_BASELINE",
+        "OFFICIAL_COMPARABLE_MNAV_INPUTS_REQUIRED",
+        "PIT_REGIME_BINDING_UNAVAILABLE",
+        "VERIFIED_PREFERRED_EVENTS_MISSING"
+      ]
+    }
+  },
+  "wake_state": "NO_WAKE",
+  "operational_percentile": 95.0,
+  "acceptance_override": null,
+  "actual_handoff_state": "NO_HANDOFF",
+  "bridge_projection": "LOCAL_ONLY_VALIDATION_NO_HANDOFF_OR_DELIVERY",
+  "input_utf8_bytes": 15059,
+  "provider_requests": 0,
+  "authority": {
+    "analyst_judgment_required": true,
+    "capital_decision_authority": "USER_ONLY",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "production": "NOT_APPROVED"
+  },
+  "engineering_baseline": "74b9b0baa91a13452ee779c3f322ba94b6dabd40",
+  "implementation_commit": "ffdfe1f",
+  "implementation_pr": 109,
+  "deployed_merge_sha": "5ae2339a4ab9a4ae192494dd70e2a6c0c10cfc43",
+  "full_regression_tests": 850,
+  "targeted_tests": 136,
+  "post_deployment_transport_runtime_tests": 61,
+  "ci": "PASS",
+  "deployed_files_hash_mismatches": 0,
+  "local_live_runtime": "RECEIVING",
+  "item7": "COMPLETE",
+  "acceptance_progress": "7/8 = 87.5%",
+  "next_authorized_work": "#8 End-to-End Live Acceptance",
+  "item8_started": false,
+  "stash_hash": "64d1ecdf3fc5621eff5d42f34c1e534f1605c5bf",
+  "formal_locks": "UNCHANGED",
+  "raw_history_counts": {
+    "MSTR": 2235,
+    "ASST": 505
+  },
+  "history_exclusion": "HISTORICAL_FOUR_CLOCKS_AND_REVISION_LINEAGE_UNVERIFIED"
+}
