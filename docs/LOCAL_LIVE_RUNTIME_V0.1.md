@@ -108,3 +108,15 @@ evidence_usable = false
 歷史傳輸／斷線／恢復通過不代表本次整合版本已部署，也不代表 #7 或 #8 完成。
 
 本次離線驗證：完整 831 項通過；compileall、program registry、read-only surface、三支 PowerShell parser 通過。
+
+## 2026-09-22 部署與驗收
+
+PR #102 已合併：`0fc2f9ba108ac4077961a32dcf4e80e2822a0cda`。兩項 CI 通過。
+真正值班 checkout 與安裝來源均對齊此合併 SHA，manifest source_dirty=false，全部部署檔案雜湊一致。
+登入觸發及 pythonw 主管存活通過；實際 TCP 1 → 0 → 1、pause、子程序故障失敗關閉與恢復均通過。
+stop.request 已有序退出；排程初次輪詢逾時後確認 Ready，舊程序消失，過期 checkpoint 由新程序取代。
+SQLite quick_check=ok；現場一個主管、一個行情子程序、一條 TWS 連線，無第二套 GPT transport worker。
+握手失敗禁止訂閱、訂閱失敗清理由離線測試覆蓋，未對 TWS 注入這兩種錯誤；未執行 Windows 登出登入。
+初次實機驗收時 TWS 不在執行，正確等待並失敗關閉；TWS 恢復後完整重連驗收通過。
+#7 原始 durable receipt 已重新計算確認綁定，沒有重新傳送或重做 #7。
+詳見 `LOCAL_LIVE_RUNTIME_ACCEPTANCE_V0.1.json` 的 deployment_acceptance；#8 未開始。
