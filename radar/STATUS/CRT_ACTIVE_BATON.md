@@ -22,8 +22,8 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 - 已完成：`7`
 - 進行中：`0`
 - 完成率：`87.5%`
-- 目前唯一進行中項目：`NONE`（#7 已完成，依指示停止）
-- 目前任務：`ITEM_7_COMPLETE_STOPPED_BY_USER_SCOPE`
+- 目前唯一進行中項目：`NONE`（#7 完成；Treasury 已部署，#8 未開始）
+- 目前任務：`TREASURY_VALUATION_CONTEXT_DEPLOYED_STOP`
 
 完成率只使用：
 
@@ -267,9 +267,16 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 #7 無剩餘阻塞。#8 未開始、未宣告完成。
 
+Treasury 部署後 fresh cycle 已產生 MSTR / ASST 情境與 hash-bound GPT 精簡投影。
+本輪來源閘門另有 `LIQUIDATION_AGGREGATES_INVALID`：24H 覆蓋率約 87.35%，
+低於既有 95% 品質要求，因此整包維持 BLOCKED；未放寬政策。
+Treasury 的官方 mNAV、歷史百分位／5W、優先股淨募集證據不足者亦維持 claim-scoped BLOCKED。
+此處只記錄驗證結果，不把資料缺口改標為完整實戰驗收。
+
 ## 下一個唯一有效動作
 
-依使用者指示停止。不得施工 PR #102；不得施工 #8。沒有自動接續的工程工作。
+下一個核准工作只有 `#8 End-to-End Live Acceptance`。
+本 Work 到 Treasury 部署與新循環驗證即停止，不自動開始 #8。
 
 ## 暫緩工作
 
@@ -314,4 +321,19 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 7 / 8 = 87.5%
 Local Live Runtime deployed and accepted
 Next authorized work:
-Treasury Valuation Context V0.1
+#8 End-to-End Live Acceptance
+
+## Treasury Valuation Context V0.1 部署記錄
+
+- 實作 PR #109，CI PASS；合併 SHA `5ae2339a4ab9a4ae192494dd70e2a6c0c10cfc43`。
+- 重用 Treasury Company CT / diluted mNAV，沒有第二套引擎或 issuer fact store。
+- 完整離線回歸 850 PASS；正式鎖、Battle Map 第一屏與 Wake 90/95 不變。
+- Evidence Runtime 與 Local Live Runtime 已部署；manifest clean，部署檔案 hash 全部一致。
+- Local Live Runtime 回到 RECEIVING；既有 #7 durable receipt hash 已重算一致。
+- fresh real cycle exit 0；本輪 NO_WAKE / NO_HANDOFF，正式 percentile 95，無 override。
+- 本輪精簡投影離線 request-envelope 驗證為 15,059 bytes；#7 大型市場情境離線對照為 16,305 bytes。
+- 沒有新增 outbox delivery 或 provider request；投影驗證不宣稱真實 GPT 送達。
+- Treasury integration PASS；整包保留上述 L4 來源阻塞，不能宣稱全證據 READY。
+- 詳見 `docs/TREASURY_VALUATION_CONTEXT_ACCEPTANCE_V0.1.json`。
+- Treasury 不是第 9 項；維持 **#7 COMPLETE，7 / 8 = 87.5%**。
+- stash untouched；#8 未開始；本 Work 停止。
