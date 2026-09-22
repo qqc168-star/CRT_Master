@@ -45,6 +45,7 @@ $IssuerAnnouncementState = Join-Path $RuntimeRoot "issuer_announcements\state.js
 $IssuerAnnouncementLedger = Join-Path $RuntimeRoot "issuer_announcements\events.jsonl"
 $IssuerAnnouncementOutput = Join-Path $RuntimeRoot "issuer_announcements\latest.json"
 $MstrAsstMarketHealth = Join-Path $RuntimeRoot "market-health\latest.json"
+$TreasuryValuationInputs = Join-Path $RuntimeRoot "treasury\valuation-inputs.json"
 
 if (-not (Test-Path $RadarRoot)) {
     throw "CRT Radar repo not found: $RadarRoot"
@@ -149,6 +150,10 @@ if (Test-Path -LiteralPath $MstrAsstMarketHealth) {
 }
 else {
     Write-Host "MSTR_ASST_MARKET_HEALTH_WAITING_FOR_VALIDATED_SNAPSHOT" -ForegroundColor Yellow
+}
+
+if (Test-Path -LiteralPath $TreasuryValuationInputs) {
+    $RunnerArgs += @("--treasury-valuation-inputs", $TreasuryValuationInputs)
 }
 
 & $Python @RunnerArgs

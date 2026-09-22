@@ -25,6 +25,7 @@ FORMAL_MNAV_REF = "radar/RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md"
 REPLAY_MODES = {"DECISION_REPLAY", "AUDIT_REPLAY"}
 MNAV_SEMANTIC_IDENTITIES = {
     "CRT_FORMAL_DILUTED_EQUITY_MNAV",
+    "STRATEGYTRACKER_DILUTED_MNAV_RESEARCH",
     "SAYLORTRACKER_DILUTED_MNAV_RESEARCH",
     "STRATEGY_ISSUER_MNAV",
 }
@@ -478,11 +479,17 @@ def import_saylortracker_offline_csv(csv_text: str, admission_record: dict, *, r
                      "first_seen_time": first_seen, "retrieval_time": retrieval_time,
                      "provenance": admission["admission_ref"], "raw_hash": digest,
                      "coverage": admission["coverage"], "source_class": "RESEARCH_SECONDARY",
-                     "source_semantic": {"identity": "SAYLORTRACKER_DILUTED_MNAV_RESEARCH", "version": "OFFLINE_CSV_V1",
+                     "source_semantic": {"identity": "STRATEGYTRACKER_DILUTED_MNAV_RESEARCH", "version": "OFFLINE_CSV_V1",
                          "effective_from": effective, "effective_to": None}})
     return {"state": "RESEARCH_SECONDARY", "sensor": admission, "raw_hash": digest,
             "retrieval_time": retrieval_time, "first_seen_time": min((row["first_seen_time"] for row in rows), default=None),
             "coverage": admission["coverage"], "rows": rows, "trading_threshold_eligible": False}
+
+
+# Historical call sites remain callable; newly imported records use the corrected
+# source identity. Existing stored legacy observations are not rewritten.
+admit_strategytracker_sensor = admit_saylortracker_sensor
+import_strategytracker_offline_csv = import_saylortracker_offline_csv
 
 
 def build_treasury_company_ct(*, issuer_id: str, as_of_ms: int,
@@ -561,3 +568,284 @@ def add_treasury_company_ct(pack: dict, ct_input: dict) -> None:
     digest = hashlib.sha256(json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     for section in material.values():
         section["overlay_hash"] = digest
+
+
+# Context extends CT's validated organs; it owns neither NAV composition nor a
+# second fact store. Change percentages remain fractions; CDF ranks are 0..100.
+VALUATION_VERSION = "CRT_TREASURY_VALUATION_CONTEXT_V0.1"
+DAY_MS = 86_400_000
+MIN_BASELINE_COUNT = 20
+FORMAL_IDENTITY = "CRT_FORMAL_DILUTED_EQUITY_MNAV"
+RESEARCH_IDENTITY = "STRATEGYTRACKER_DILUTED_MNAV_RESEARCH"
+LEGACY_RESEARCH_IDENTITY = "SAYLORTRACKER_DILUTED_MNAV_RESEARCH"
+OFFICIAL_CLASSES = {"ISSUER", "SEC", "VERIFIED_DETERMINISTIC"}
+ISSUERS = {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}
+
+
+def _digest(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), allow_nan=False).encode("utf-8")).hexdigest()
+
+
+def _claim(reason: str) -> dict:
+    return {"state": "BLOCKED", "value": None, "reason": reason}
+
+
+def _valuation_row(raw: Any, asset: str, as_of: int, out: dict) -> dict | None:
+    meta = _metadata(raw, out, "mnav_history", ISSUERS[asset], as_of, "AUDIT_REPLAY")
+    if meta is None:
+        return None
+    identity = meta["source_semantic"]["identity"]
+    if identity not in {FORMAL_IDENTITY, RESEARCH_IDENTITY, LEGACY_RESEARCH_IDENTITY}:
+        _block(out, "mnav_history", "DILUTED_MNAV_SEMANTIC_MISMATCH")
+        return None
+    if not _text(raw.get("basis_ref")) or raw.get("asset_id") != asset:
+        _block(out, "mnav_history", "MNAV_ASSET_OR_BASIS_UNBOUND")
+        return None
+    if identity == FORMAL_IDENTITY:
+        if raw.get("source_class") not in OFFICIAL_CLASSES:
+            _block(out, "mnav_history", "OFFICIAL_INPUTS_REQUIRED")
+            return None
+        price = _price(raw, ISSUERS[asset], as_of)
+        out["blockers"].extend(price["blockers"])
+        value = price["mnav"]
+        authority = "FORMAL_ACTION_CRITICAL"
+    else:
+        value = raw.get("mnav")
+        authority = "RESEARCH_SECONDARY_EVIDENCE"
+    if not _number(value) or value <= 0:
+        _block(out, "mnav_history", "MNAV_VALUE_INVALID")
+        return None
+    return {**meta, "asset_id": asset, "basis_ref": raw["basis_ref"],
+            "mnav": value, "evidence_authority": authority}
+
+
+def _valuation_history(raw: Any, asset: str, as_of: int, out: dict) -> list:
+    if not isinstance(raw, list):
+        _block(out, "mnav_history", "MNAV_HISTORY_MISSING")
+        return []
+    # Only already retrieved records enter this local, reproducible view. Future
+    # records are not holes in the current view; invalid visible records are.
+    visible = [r for r in raw if not isinstance(r, dict) or
+               not _time(r.get("retrieval_time")) or r["retrieval_time"] <= as_of]
+    if any(not isinstance(r, dict) or not _time(r.get("effective_time")) for r in visible):
+        _block(out, "mnav_history", "MNAV_HISTORY_TIME_UNKNOWN")
+        return []
+    counts = Counter(r["effective_time"] for r in visible)
+    rows = []
+    for r in sorted(visible, key=lambda r: r["effective_time"]):
+        row = _valuation_row(r, asset, as_of, out)
+        if counts[r["effective_time"]] != 1:
+            _block(out, "mnav_history", "DUPLICATE_MNAV_TIME")
+            row = None
+        rows.append(row)
+    return rows
+
+
+def _same_valuation_basis(a: dict, b: dict) -> bool:
+    # The legacy label stays valid but is not silently pooled with new history.
+    return (a["basis_ref"] == b["basis_ref"] and
+            all(a["source_semantic"][k] == b["source_semantic"][k]
+                for k in ("identity", "version")))
+
+
+def _cdf(current: dict | None, baseline: list, *, reason: str = "INSUFFICIENT_BASELINE") -> dict:
+    result = {**_claim(reason), "baseline_count": len(baseline),
+        "history_start": baseline[0]["effective_time"] if baseline else None,
+        "history_end": baseline[-1]["effective_time"] if baseline else None,
+        "current_value": current["mnav"] if current else None,
+        "source_semantic": current["source_semantic"] if current else None,
+        "calculation_version": "EMPIRICAL_CDF_LE_V1_MIN20",
+        "baseline": deepcopy(baseline)}
+    if current and len(baseline) >= MIN_BASELINE_COUNT:
+        result.update(state="AVAILABLE", reason="PIT_COMPARABLE_BASELINE",
+            value=100 * sum(r["mnav"] <= current["mnav"] for r in baseline) / len(baseline))
+    return result
+
+
+def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms: int) -> dict:
+    """Per-event research accounting, never aggregate possibly overlapping events."""
+    out = _section()
+    out.update(research_only=True, events=[])
+    if not isinstance(events, list) or not events:
+        _block(out, "preferred_funding_attribution", "VERIFIED_PREFERRED_EVENTS_MISSING")
+        return out
+    ids = Counter(r.get("event_id") for r in events if isinstance(r, dict) and _text(r.get("event_id")))
+    for raw in events:
+        meta = _metadata(raw, out, "preferred_event", issuer_id, as_of_ms, "AUDIT_REPLAY")
+        if meta is None:
+            continue
+        key = raw.get("event_id")
+        if (not _text(key) or ids[key] != 1 or raw.get("source_class") not in OFFICIAL_CLASSES
+                or meta["source_semantic"]["identity"] in {RESEARCH_IDENTITY, LEGACY_RESEARCH_IDENTITY}
+                or raw.get("active_for_calculation") is not True
+                or not _text(raw.get("consequence_basis_ref"))):
+            _block(out, "preferred_event", "PREFERRED_EVENT_UNBOUND")
+            continue
+        row = {**meta, "event_id": key, "basis_ref": raw["consequence_basis_ref"],
+               "calculation_inputs": {}, "effective_preferred_funding_cost": None,
+               "claim_adjusted_reserve_delta_usd": None, "components": {}}
+        for label, field in (("ASSET_ACTION", "btc_change"), ("CLAIM_ACTION", "senior_claim_change_usd"),
+                ("CARRY", "annual_carry_change_usd"), ("RESERVE_ACTION", "liquidity_change_usd"),
+                ("SHARE_DENOMINATOR", "diluted_share_change")):
+            row["components"][label] = _numeric(raw, field, out, key, signed=True)
+            row["calculation_inputs"][field] = row["components"][label]
+        proceeds = raw.get("verified_net_proceeds_usd")
+        annual = raw.get("annual_preferred_distributions_usd")
+        if (raw.get("net_proceeds_verification_state") == "VALIDATED"
+                and _text(raw.get("net_proceeds_basis_ref"))
+                and _text(raw.get("cost_basis_ref"))
+                and _number(proceeds) and proceeds > 0 and _number(annual) and annual >= 0):
+            row["effective_preferred_funding_cost"] = _calc(out, key + ".cost",
+                [annual, proceeds], lambda a, b: a / b)
+            row["calculation_inputs"].update(verified_net_proceeds_usd=proceeds,
+                annual_preferred_distributions_usd=annual,
+                net_proceeds_basis_ref=raw["net_proceeds_basis_ref"], cost_basis_ref=raw["cost_basis_ref"])
+        else:
+            _block(out, key + ".cost", "VERIFIED_NET_PROCEEDS_AND_COST_BASIS_REQUIRED")
+        # Annual run-rate is context, not today's liability. No future carry is
+        # subtracted; only explicitly verified, realized reserve/claim deltas.
+        if raw.get("reserve_change_state") == "REALIZED_VERIFIED":
+            row["claim_adjusted_reserve_delta_usd"] = _calc(out, key + ".reserve",
+                [row["components"]["RESERVE_ACTION"], row["components"]["CLAIM_ACTION"]], lambda a, b: a - b)
+        else:
+            _block(out, key + ".reserve", "REALIZED_RESERVE_CHANGE_REQUIRED")
+        out["events"].append(row)
+    return _finish(out, bool(out["events"]))
+
+
+def build_treasury_valuation_context(*, asset_id: str, as_of_ms: int,
+        mnav_history: Any = None, asset_history: Any = None,
+        preferred_funding_events: Any = None, benchmark: Any = None,
+        history_coverage: str = "UNSPECIFIED") -> dict:
+    if asset_id not in ISSUERS or not _time(as_of_ms):
+        raise ValueError("MSTR/ASST and positive as-of required")
+    out = _section()
+    out.update(schema_version=VALUATION_VERSION, asset_id=asset_id,
+        as_of=as_of_ms, action_output="NONE", external_action_authority="NONE",
+        capital_decision_authority="USER_ONLY", machine_execution="FORBIDDEN",
+        production="NOT_APPROVED", calculation_version=VALUATION_VERSION)
+    out["history_coverage"] = history_coverage
+    rows = _valuation_history(mnav_history, asset_id, as_of_ms, out)
+    current = rows[-1] if rows else None
+    out["mnav_observations"] = rows
+    out["current_observation"] = current
+    out["diluted_mnav"] = current["mnav"] if current else None
+    out["source_semantic"] = current["source_semantic"] if current else None
+    out["evidence_authority"] = current["evidence_authority"] if current else "BLOCKED"
+    out["formal_action_critical_state"] = (
+        "AVAILABLE" if current and current["evidence_authority"] == "FORMAL_ACTION_CRITICAL" else "BLOCKED")
+    baseline = [r for r in rows[:-1] if r and current and _same_valuation_basis(r, current)]
+    out["own_history_empirical_cdf_pct"] = _cdf(current, baseline)
+    # Main has candidate weather outputs but no PIT history binding to issuer
+    # mNAV observations. Never synthesize a bull/bear router from those outputs.
+    out["regime_empirical_cdf_pct"] = {**_cdf(None, [], reason="PIT_REGIME_BINDING_UNAVAILABLE"),
+        "regime_identity": None}
+    benchmark_id = benchmark.get("identity") if isinstance(benchmark, dict) else None
+    b_rows = []
+    if _text(benchmark_id) and benchmark.get("asset_id") in ISSUERS:
+        b_rows = _valuation_history(benchmark.get("history"), benchmark["asset_id"], as_of_ms, out)
+    b_rows = [r for r in b_rows if r and current and r["effective_time"] < current["effective_time"]
+              and _same_valuation_basis(r, current)]
+    out["benchmark_empirical_cdf_pct"] = {**_cdf(current, b_rows,
+        reason="COMPARABLE_BENCHMARK_HISTORY_UNAVAILABLE"), "benchmark_identity": benchmark_id}
+    five = _claim("FIVE_WEEK_COMPARABLE_OBSERVATION_UNAVAILABLE")
+    five["policy"] = "NEAREST_35D_PLUS_MINUS_3D_TIE_EARLIER_NO_INTERPOLATION"
+    if current:
+        target = current["effective_time"] - 35 * DAY_MS
+        candidates = [r for r in baseline if abs(r["effective_time"] - target) <= 3 * DAY_MS]
+        if candidates:
+            prior = min(candidates, key=lambda r: (abs(r["effective_time"] - target), r["effective_time"]))
+            delta = _calc(out, "five_week_mnav_change_pct", [current["mnav"], prior["mnav"]], lambda a, b: a / b - 1)
+            if delta is not None:
+                five.update(state="AVAILABLE", value=delta, reason="COMPARABLE_OBSERVATIONS",
+                    previous=prior, current=current, observation_span_ms=current["effective_time"] - prior["effective_time"])
+    out["five_week_mnav_change_pct"] = five
+    # Reuse CT's ratio and comparison algorithm. Research rows cannot provide
+    # official holdings/shares; invalid visible rows remain holes, not fallbacks.
+    official_assets = []
+    for raw in asset_history if isinstance(asset_history, list) else []:
+        if isinstance(raw, dict) and _time(raw.get("retrieval_time")) and raw["retrieval_time"] > as_of_ms:
+            continue
+        record = deepcopy(raw)
+        check = _section()
+        valid = _metadata(raw, check, "btc_share", ISSUERS[asset_id], as_of_ms, "AUDIT_REPLAY")
+        if (not valid or raw.get("source_class") not in OFFICIAL_CLASSES or
+                (raw.get("source_semantic") or {}).get("identity") in {RESEARCH_IDENTITY, LEGACY_RESEARCH_IDENTITY}):
+            record = {**raw, "verification_state": "BLOCKED"} if isinstance(raw, dict) else raw
+        official_assets.append(record)
+    per_share = _asset(official_assets, ISSUERS[asset_id], as_of_ms)
+    out["btc_per_diluted_share"] = per_share
+    for label in ("current", "previous"):
+        out[label + "_btc_per_diluted_share"] = (per_share[label] or {}).get("btc_per_diluted_share")
+    out["btc_per_diluted_share_change_pct"] = per_share["btc_per_diluted_share_change_pct"]
+    out["preferred_funding_attribution"] = build_preferred_funding_attribution(
+        events=preferred_funding_events, issuer_id=ISSUERS[asset_id], as_of_ms=as_of_ms)
+    for field in ("own_history_empirical_cdf_pct", "regime_empirical_cdf_pct",
+                  "benchmark_empirical_cdf_pct", "five_week_mnav_change_pct"):
+        if out[field]["state"] == "BLOCKED":
+            _block(out, field, out[field]["reason"])
+    if out["formal_action_critical_state"] == "BLOCKED":
+        _block(out, "formal_action_critical", "OFFICIAL_COMPARABLE_MNAV_INPUTS_REQUIRED")
+    for name, section in (("btc_per_diluted_share", per_share),
+                          ("preferred_funding_attribution", out["preferred_funding_attribution"])):
+        out["blockers"].extend({**b, "claim": name + "." + b["claim"]} for b in section["blockers"])
+    _finish(out, current is not None or out["current_btc_per_diluted_share"] is not None)
+    out["context_hash"] = _digest(out)
+    return out
+
+
+def add_treasury_valuation_context(pack: dict, inputs: dict) -> None:
+    if not isinstance(inputs, dict) or set(inputs) - set(ISSUERS):
+        raise ValueError("Treasury context input must map MSTR/ASST")
+    for asset in ISSUERS:
+        context = build_treasury_valuation_context(asset_id=asset,
+            as_of_ms=pack["generated_at_ms"], **inputs.get(asset, {}))
+        pack["asset_facts"]["items"].append({"asset_fact_id": VALUATION_VERSION + ":" + asset,
+            "fact_type": "TREASURY_VALUATION_CONTEXT", "issuer_id": ISSUERS[asset],
+            "asset_id": asset, "evidence": context})
+    pack["asset_facts"].pop("empty_reason", None)
+    if pack["asset_facts"].get("section_state") == "READY":
+        pack["asset_facts"]["section_state"] = "PARTIAL"
+    # Preserve contributor provenance without claiming its old hash covers the
+    # newly attached evidence; the enclosing pack is hashed after this call.
+    if "overlay_hash" in pack["asset_facts"]:
+        pack["asset_facts"]["upstream_overlay_hash"] = pack["asset_facts"].pop("overlay_hash")
+
+
+def compact_treasury_valuation_context(pack: dict) -> dict:
+    result = {}
+    for fact in pack.get("asset_facts", {}).get("items", []):
+        if fact.get("fact_type") != "TREASURY_VALUATION_CONTEXT":
+            continue
+        context = deepcopy(fact["evidence"])
+        digest = context.pop("context_hash", None)
+        if digest != _digest(context):
+            raise ValueError("Treasury valuation context hash mismatch")
+        asset = context["asset_id"]
+        if asset in result or asset not in ISSUERS:
+            raise ValueError("Duplicate or unsupported Treasury context")
+        row = {k: context[k] for k in ("diluted_mnav", "source_semantic", "as_of",
+            "evidence_authority", "formal_action_critical_state", "current_btc_per_diluted_share",
+            "previous_btc_per_diluted_share", "btc_per_diluted_share_change_pct")}
+        row["source_semantic"] = (context["source_semantic"] or {}).get("identity")
+        current_bps = context["btc_per_diluted_share"]["current"] or {}
+        row["btc_share_basis"] = current_bps.get("basis_ref")
+        row["btc_share_as_of"] = current_bps.get("effective_time")
+        row["mnav_as_of"] = (context["current_observation"] or {}).get("effective_time")
+        row["baseline_counts"] = {}
+        for label, name in (("own", "own_history_empirical_cdf_pct"),
+                ("regime", "regime_empirical_cdf_pct"), ("benchmark", "benchmark_empirical_cdf_pct")):
+            row[name] = context[name]["value"]
+            row["baseline_counts"][label] = context[name]["baseline_count"]
+        row["benchmark_identity"] = context["benchmark_empirical_cdf_pct"]["benchmark_identity"]
+        row["five_week_mnav_change_pct"] = context["five_week_mnav_change_pct"]["value"]
+        funding = context["preferred_funding_attribution"]
+        row["preferred_funding_attribution_summary"] = {"state": funding["state"], "research_only": True,
+            "events": [{k: e[k] for k in ("event_id", "components", "effective_preferred_funding_cost",
+                "claim_adjusted_reserve_delta_usd")} for e in funding["events"]]}
+        row.update(quality_state=context["state"], context_hash=digest,
+            blockers=sorted({b["code"] for b in context["blockers"]
+                if b["claim"] != "btc_per_diluted_share.growth_direction"}))
+        result[asset] = row
+    return result

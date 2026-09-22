@@ -8,6 +8,7 @@ from typing import Any
 
 from .gpt_bridge_outbox import enqueue_bridge_payload
 from .run_ledger import GENESIS_HASH, RunLedger
+from .treasury_company_ct import compact_treasury_valuation_context
 from .season_transition_warning_overlay import (
     assert_season_transition_warning_overlay,
 )
@@ -509,6 +510,9 @@ def _bridge_market_context(
                 pack[key]
             )
 
+    treasury = compact_treasury_valuation_context(pack)
+    if treasury:
+        result["treasury_valuation_context"] = treasury
     return result
 
 
@@ -1131,6 +1135,10 @@ def build_minimized_bridge_payload(
 
     _assert_bridge_privacy(payload)
 
+    if ("treasury_valuation_context" in payload["market_context"] and
+            len(json.dumps(payload, ensure_ascii=False, sort_keys=True,
+                           separators=(",", ":")).encode("utf-8")) >= 16 * 1024):
+        raise ValueError("Treasury bridge exceeds the unchanged 16 KiB ceiling")
     return payload
 
 
@@ -1212,6 +1220,151 @@ def _bound_bridge_detail(payload: dict[str, Any], pack: dict[str, Any]) -> None:
     if len(json.dumps(payload, ensure_ascii=False, sort_keys=True,
                       separators=(",", ":")).encode("utf-8")) + 90 >= 16 * 1024:
         _compact_supporting_context(market, payload["authority"])
+    if "treasury_valuation_context" in market:
+        _compact_treasury_bridge(payload)
+
+
+def _compact_treasury_bridge(payload: dict[str, Any]) -> None:
+    """Lossless column projection plus explicit inheritance of repeated facts."""
+    market = payload["market_context"]
+    treasury = market["treasury_valuation_context"]
+    # A shared column definition avoids repeating long claim names per issuer.
+    # Every value, status, reason and hash survives the projection unchanged.
+    schemas: list[list[str]] = []
+    def encode(value: Any) -> Any:
+        if isinstance(value, dict):
+            keys = sorted(value)
+            if keys not in schemas:
+                schemas.append(keys)
+            return {"record": [schemas.index(keys), *[encode(value[k]) for k in keys]]}
+        if isinstance(value, list):
+            return [encode(v) for v in value]
+        return value
+    encoded = {asset: encode(row) for asset, row in treasury.items()}
+    candidate = {"encoding": "record=[schema_index,values_in_column_order]; arrays otherwise literal",
+                 "columns": schemas, "assets": encoded}
+    values = list(treasury.values())
+    common = {k: v for k, v in values[0].items()
+              if all(k in row and row[k] == v for row in values[1:])}
+    inherited = {
+        "encoding": "Each asset inherits common, then its own fields; null claims are BLOCKED; changes are fractions; CDF is 0..100.",
+        "common": common,
+        "assets": {asset: {k: v for k, v in row.items() if k not in common}
+                   for asset, row in treasury.items()},
+    }
+    shared_blockers = sorted(set.intersection(*(set(row.get("blockers", [])) for row in values)))
+    if shared_blockers and "blockers" not in common:
+        inherited["common"]["blockers"] = shared_blockers
+        for row in inherited["assets"].values():
+            row["additional_blockers"] = [b for b in row.pop("blockers", []) if b not in shared_blockers]
+        inherited["encoding"] += " Append additional_blockers to common.blockers."
+    if len(json.dumps(inherited)) < len(json.dumps(candidate)):
+        candidate = inherited
+    if len(json.dumps(candidate)) < len(json.dumps(treasury)):
+        market["treasury_valuation_context"] = candidate
+    # Same-as references remove only proven equal data, not supporting claims.
+    delta = market.get("asset_strategy_delta", {})
+    income = delta.get("income_engine")
+    for row in delta.get("assets", {}).values():
+        if income is not None and row.get("quantitative") == income:
+            row["quantitative"] = {"same_as": "market_context.asset_strategy_delta.income_engine"}
+    def inherit(value: Any) -> None:
+        if isinstance(value, dict):
+            for child in list(value.values()):
+                inherit(child)
+            shared = {k for k, v in payload["authority"].items() if k in value and value[k] == v}
+            if sum(len(k) + len(json.dumps(value[k])) + 4 for k in shared) > 70:
+                for k in shared:
+                    del value[k]
+                value["authority_same_as"] = "authority"
+        elif isinstance(value, list):
+            for child in value:
+                inherit(child)
+    for key in ("asset_strategy_delta", "model_status", "btc_bull_validation", "btc_entry_gate", "dvol_regime_watch"):
+        inherit(market.get(key))
+    role = payload["analysis_contract"].get("season_three_army_role_separation", {})
+    # Version/hash retain the doctrine binding; its long filename and source
+    # section labels duplicate the surrounding named contract/market sections.
+    role.pop("doctrine_artifact", None)
+    for child in role.values():
+        if isinstance(child, dict):
+            child.pop("source_section", None)
+            child.pop("source_sections", None)
+    delta.pop("schema_version", None)
+    market["minimization"]["omitted_detail"] = (
+        "Local hashes bind omitted provenance, histories/baselines, prior windows, supporting explanations, "
+        "schema/doctrine labels and duplicate displays. Omitted is not absent."
+    )
+    if role.get("source_evidence_pack_hash") == payload["event"].get("source_evidence_pack_hash"):
+        role["source_evidence_pack_hash"] = {"same_as": "event.source_evidence_pack_hash"}
+    inherit(role)
+    # Repeated plan conditions and blockers may be shared across assets/tranches.
+    # Replace exact equal structures only; an explicit reference is reversible.
+    seen: dict[str, str] = {}
+    def share(value: Any, location: str) -> Any:
+        if isinstance(value, (dict, list)):
+            literal = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            previous = seen.get(literal)
+            reference = {"same_as": previous}
+            if previous and len(literal) > len(json.dumps(reference)):
+                return reference
+            seen[literal] = location
+            if isinstance(value, dict):
+                return {k: share(v, location + "." + k) for k, v in value.items()}
+            return [share(v, location + f"[{i}]") for i, v in enumerate(value)]
+        return value
+    for section in ("capital_state", "market_context", "analysis_contract"):
+        payload[section] = share(payload[section], section)
+    # Intern repeated long literal strings, with an explicit dictionary readable
+    # by GPT. Values remain exact, including blocker codes and semantic labels.
+    from collections import Counter
+    counts: Counter[str] = Counter()
+    def count(value: Any) -> None:
+        if isinstance(value, dict):
+            for child in value.values():
+                count(child)
+        elif isinstance(value, list):
+            for child in value:
+                count(child)
+        elif isinstance(value, str):
+            counts[value] += 1
+    count(payload["market_context"])
+    strings = sorted(s for s, n in counts.items() if (len(s.encode("utf-8")) - 18) * (n - 1) > 30)
+    if strings:
+        indexes = {s: i for i, s in enumerate(strings)}
+        def intern(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {k: intern(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [intern(v) for v in value]
+            if isinstance(value, str) and value in indexes:
+                return {"text_ref": indexes[value]}
+            return value
+        payload["market_context"] = intern(payload["market_context"])
+        payload["market_context"]["literal_strings"] = strings
+        payload["market_context"]["literal_encoding"] = "text_ref indexes literal_strings (exact text)."
+    key_counts: Counter[str] = Counter()
+    def count_keys(value: Any) -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                key_counts[key] += 1
+                count_keys(child)
+        elif isinstance(value, list):
+            for child in value:
+                count_keys(child)
+    count_keys(payload["market_context"])
+    keys = sorted(k for k, n in key_counts.items() if (len(k) - 5) * (n - 1) > 20)
+    if keys:
+        aliases = {k: f"@{i}" for i, k in enumerate(keys)}
+        def alias(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {aliases.get(k, k): alias(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [alias(v) for v in value]
+            return value
+        payload["market_context"] = alias(payload["market_context"])
+        payload["market_context"]["field_names"] = keys
+        payload["market_context"]["field_encoding"] = "Keys @N mean field_names[N]; same_as paths use expanded keys."
 
 
 def _compact_supporting_context(market: dict[str, Any], authority: dict[str, Any]) -> None:
