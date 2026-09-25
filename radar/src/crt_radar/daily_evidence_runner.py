@@ -124,6 +124,7 @@ def run_daily_evidence(
     observation_db: str | Path,
     reflexivity_input: dict[str, Any] | None = None,
     treasury_valuation_inputs: dict[str, Any] | None = None,
+    portfolio_allocation_inputs: dict[str, Any] | None = None,
     fetch_overrides: dict[str, FetchResult] | None = None,
     liquidation_aggregate_payload: dict[str, Any] | None = None,
     probe_fetcher: Callable[[SourceSpec], FetchResult] | None = None,
@@ -273,6 +274,7 @@ def run_daily_evidence(
         generated_at_ms=generated_at_ms,
         reflexivity_input=reflexivity_input,
         treasury_valuation_inputs=treasury_valuation_inputs if treasury_valuation_inputs is not None else {},
+        portfolio_allocation_inputs=portfolio_allocation_inputs,
         dvol_regime_watch=dvol_regime_watch,
         reanalysis_wake=reanalysis_wake,
         transition_diagnostic=transition_diagnostic,
@@ -352,6 +354,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--private-profile", type=Path, default=default_private_profile_path())
     parser.add_argument("--treasury-valuation-inputs", type=Path, default=None,
         help="Local verified CT histories for MSTR/ASST; absent claims remain BLOCKED.")
+    parser.add_argument("--portfolio-allocation-inputs", type=Path, default=None,
+        help="Local season/allocation/side-job context; no trade or Season Router authority.")
     parser.add_argument(
         "--btc-entry-context",
         type=Path,
@@ -524,6 +528,10 @@ def main(argv: list[str] | None = None) -> int:
         treasury_valuation_inputs=(
             _load_json_object(args.treasury_valuation_inputs, label="Treasury valuation inputs")
             if args.treasury_valuation_inputs is not None else {}
+        ),
+        portfolio_allocation_inputs=(
+            _load_json_object(args.portfolio_allocation_inputs, label="Portfolio allocation inputs")
+            if args.portfolio_allocation_inputs is not None else None
         ),
         dvol_regime_runner=run_live_dvol_regime_watch,
         transition_diagnostic_runner=run_live_btc_transition_diagnostics,

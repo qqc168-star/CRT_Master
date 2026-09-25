@@ -17,6 +17,7 @@ def build_asset_strategy_delta(
     btc_entry_gate: dict[str, Any] | None,
     assumption_watch: dict[str, Any] | None,
     private_context: dict[str, Any] | None,
+    portfolio_allocation_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     gate = btc_entry_gate if isinstance(btc_entry_gate, dict) else {}
     transition = str(gate.get("transition_state", "TRANSITION_UNRESOLVED"))
@@ -36,6 +37,12 @@ def build_asset_strategy_delta(
         eligibility_guard_reason = "PROBE_DOWNGRADED_UNTIL_CONTROL_TRANSFER_LOOP_CLOSES"
     watch = assumption_watch if isinstance(assumption_watch, dict) else {}
     profile = _private_profile(private_context)
+    allocation = (
+        portfolio_allocation_context
+        if isinstance(portfolio_allocation_context, dict)
+        and portfolio_allocation_context.get("state") == "READY_FOR_ANALYST"
+        else None
+    )
 
     btc_delta = "KEEP_WAIT"
     if eligibility == "PROBE_ELIGIBLE":
@@ -92,7 +99,7 @@ def build_asset_strategy_delta(
         mstr_direction = "WATCH_STRENGTHENED"
         asst_direction = "WATCH_STRENGTHENED"
 
-    return {
+    result = {
         "schema_version": SCHEMA_VERSION,
         "state": "READY_FOR_ANALYST" if gate else "BLOCKED",
         "btc_transition_state": transition,
@@ -145,3 +152,69 @@ def build_asset_strategy_delta(
         "capital_decision_authority": "USER_ONLY",
         "analyst_judgment_required": True,
     }
+
+    if allocation is None:
+        return result
+
+    side_job = (
+        allocation.get("side_job")
+        if isinstance(allocation.get("side_job"), dict)
+        else {}
+    )
+    side_state = side_job.get("state")
+    if side_state == "EXECUTE":
+        if side_job.get("window_stage") == "D":
+            result["assets"]["STRC"]["strategy_delta"] = (
+                "SHORT_CYCLE_RETURN_TO_SATA_REVIEW"
+            )
+            result["assets"]["SATA"]["strategy_delta"] = (
+                "PRIMARY_FIXED_INCOME_CARRIER_REENTRY_REVIEW"
+            )
+        else:
+            result["assets"]["STRC"]["strategy_delta"] = (
+                "SHORT_CYCLE_SIDE_JOB_ENTRY_REVIEW"
+            )
+            result["assets"]["SATA"]["strategy_delta"] = (
+                "FIXED_INCOME_CARRIER_ROTATION_OUT_REVIEW"
+            )
+    elif side_state == "EXIT_PENDING":
+        result["assets"]["STRC"]["strategy_delta"] = (
+            "SHORT_CYCLE_EXIT_PENDING_REVIEW"
+        )
+        result["assets"]["SATA"]["strategy_delta"] = (
+            "RETURN_DESTINATION_WAIT"
+        )
+    else:
+        result["assets"]["STRC"]["strategy_delta"] = (
+            "INCOME_CORE_AND_SIDE_JOB_OPTION"
+        )
+        result["assets"]["SATA"]["strategy_delta"] = (
+            "PRIMARY_FIXED_INCOME_CARRIER"
+        )
+
+    result["assets"]["STRC"]["short_cycle_side_job"] = side_job
+    result["assets"]["SATA"]["role"] = "INCOME_CARRIER"
+    result["assets"]["SATA"]["short_cycle_side_job"] = side_job
+
+    valuation = allocation.get("valuation_constraint")
+    valuation = valuation if isinstance(valuation, dict) else {}
+    for asset in ("MSTR", "ASST"):
+        health = allocation.get(f"{asset.lower()}_health")
+        constraint = valuation.get(asset)
+        ready = (
+            health in {"IMPROVING", "STABLE", "DETERIORATING"}
+            and constraint in {"ALLOW_TILT", "BRAKE"}
+        )
+        row = result["assets"][asset]
+        row["decision_support"] = (
+            "READY_FOR_ANALYST" if ready else "BLOCKED"
+        )
+        row["health_direction"] = health
+        row["valuation_constraint"] = constraint
+        row["blocked_reasons"] = (
+            []
+            if ready
+            else ["PORTFOLIO_HEALTH_OR_VALUATION_CONTEXT_BLOCKED"]
+        )
+
+    return result
