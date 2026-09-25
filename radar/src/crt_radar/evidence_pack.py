@@ -32,6 +32,9 @@ from .season_transition_warning_overlay import (
 from .v110_candidate import evaluate_v110_candidate
 from .treasury_company_ct import add_treasury_company_ct, add_treasury_valuation_context
 
+from .portfolio_allocation_context import (
+    build_portfolio_allocation_context,
+)
 
 PACK_SCHEMA_VERSION = "CRT_EVIDENCE_PACK_V0.2"
 EXTERNAL_ACTION_AUTHORITY = "NONE"
@@ -379,6 +382,7 @@ def build_evidence_pack(
     btc_control_transfer_validation_evidence: dict[str, Any] | None = None,
     treasury_company_ct_input: dict[str, Any] | None = None,
     treasury_valuation_inputs: dict[str, Any] | None = None,
+    portfolio_allocation_inputs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
         raise ValueError("source_gate must be an object")
@@ -478,6 +482,7 @@ def build_evidence_pack(
     if fused_reanalysis_wake is not None:
         pack["reanalysis_wake"] = fused_reanalysis_wake
 
+    assumption_watch = None
     if assumption_watch_context is not None:
         assumption_watch = evaluate_assumption_watch(
             btc_entry_gate=btc_entry_gate,
@@ -526,5 +531,21 @@ def build_evidence_pack(
         add_treasury_company_ct(pack, treasury_company_ct_input)
     if treasury_valuation_inputs is not None:
         add_treasury_valuation_context(pack, treasury_valuation_inputs)
+    if portfolio_allocation_inputs is not None:
+        portfolio_bundle = build_portfolio_allocation_context(
+            pack=pack,
+            private_context=private_context,
+            inputs=portfolio_allocation_inputs,
+        )
+        pack.update(portfolio_bundle)
+        if "asset_strategy_delta" in pack:
+            pack["asset_strategy_delta"] = build_asset_strategy_delta(
+                btc_entry_gate=btc_entry_gate,
+                assumption_watch=assumption_watch,
+                private_context=private_context,
+                portfolio_allocation_context=pack[
+                    "portfolio_allocation_context"
+                ],
+            )
     pack["evidence_pack_hash"] = _sha256(pack)
     return pack

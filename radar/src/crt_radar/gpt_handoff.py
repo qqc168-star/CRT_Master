@@ -9,6 +9,9 @@ from typing import Any
 from .gpt_bridge_outbox import enqueue_bridge_payload
 from .run_ledger import GENESIS_HASH, RunLedger
 from .treasury_company_ct import compact_treasury_valuation_context
+from .portfolio_allocation_context import (
+    compact_portfolio_allocation_context_for_bridge,
+)
 from .season_transition_warning_overlay import (
     assert_season_transition_warning_overlay,
 )
@@ -513,6 +516,9 @@ def _bridge_market_context(
     treasury = compact_treasury_valuation_context(pack)
     if treasury:
         result["treasury_valuation_context"] = treasury
+    portfolio = compact_portfolio_allocation_context_for_bridge(pack)
+    if portfolio:
+        result.update(portfolio)
     return result
 
 
