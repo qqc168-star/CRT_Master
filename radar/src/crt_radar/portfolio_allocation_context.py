@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from datetime import date
 from copy import deepcopy
 from typing import Any
 
@@ -267,7 +268,7 @@ def build_common_equity_health(pack: dict[str, Any], residual_inputs: dict[str, 
     }
 
 
-def _season_destination(season_context: Any) -> tuple[dict[str, Any] | None, list[str]]:
+def _season_destination(pack: dict[str, Any], season_context: Any) -> tuple[dict[str, Any] | None, list[str]]:
     blockers: list[str] = []
     if not isinstance(season_context, dict):
         return None, ["SEASON_CONTEXT_MISSING"]
@@ -282,8 +283,17 @@ def _season_destination(season_context: Any) -> tuple[dict[str, Any] | None, lis
     if posture not in SEASONS:
         blockers.append("SEASON_POSTURE_INVALID")
     if source == "FORMAL":
-        if season_context.get("formal_state") != "AVAILABLE":
+        router = pack.get("model_status", {}).get("btc_season_router", {})
+        router = router if isinstance(router, dict) else {}
+        router_season = router.get("season")
+        router_available = (
+            router.get("state") == "AVAILABLE"
+            and router_season in SEASONS
+        )
+        if season_context.get("formal_state") != "AVAILABLE" or not router_available:
             blockers.append("FORMAL_SEASON_NOT_AVAILABLE")
+        elif posture != router_season:
+            blockers.append("FORMAL_SEASON_LINEAGE_MISMATCH")
     elif source == "LABELED_ANALYST_HYPOTHESIS":
         if season_context.get("analyst_hypothesis_evidence_state") != "INDEPENDENTLY_EVIDENCED":
             blockers.append("ANALYST_HYPOTHESIS_NOT_INDEPENDENTLY_EVIDENCED")
@@ -303,7 +313,6 @@ def _season_destination(season_context: Any) -> tuple[dict[str, Any] | None, lis
         ),
         "cash_target_pct": season_context.get("cash_target_pct"),
     }, []
-
 
 def _target_policy(destination: dict[str, Any]) -> dict[str, Any]:
     season = destination["allocation_destination"]
@@ -428,6 +437,38 @@ def _portfolio_state(private_context: Any, market_prices: Any) -> dict[str, Any]
     return result
 
 
+def _parse_iso_date(value: Any) -> date | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        return None
+
+
+def _capital_scope(side_job: dict[str, Any]) -> dict[str, Any]:
+    legacy_shares = _number(side_job.get("legacy_strc_inventory_shares"))
+    side_job_capital_usd = _number(side_job.get("side_job_capital_usd"))
+    side_job_confirmed_shares = _number(side_job.get("side_job_confirmed_strc_shares"))
+    state = "AVAILABLE"
+    reason = "LEGACY_AND_SIDE_JOB_CAPITAL_SEPARATED"
+    if legacy_shares is None or legacy_shares < 0:
+        state = "BLOCKED"
+        reason = "LEGACY_STRC_INVENTORY_SCOPE_UNAVAILABLE"
+    elif (side_job_capital_usd is None or side_job_capital_usd < 0) and (
+        side_job_confirmed_shares is None or side_job_confirmed_shares < 0
+    ):
+        state = "BLOCKED"
+        reason = "SIDE_JOB_CAPITAL_SCOPE_UNAVAILABLE"
+    return {
+        "legacy_strc_inventory_shares": legacy_shares,
+        "side_job_capital_usd": side_job_capital_usd,
+        "side_job_confirmed_strc_shares": side_job_confirmed_shares,
+        "capital_scope_state": state,
+        "capital_scope_reason": reason,
+    }
+
+
 def _side_job(side_job: Any) -> dict[str, Any]:
     base = {
         "state": "BLOCKED",
@@ -438,16 +479,98 @@ def _side_job(side_job: Any) -> dict[str, Any]:
     }
     if not isinstance(side_job, dict):
         return {**base, "reason": "SIDE_JOB_CONTEXT_MISSING"}
-    required = ("strc_dividend_per_share", "sata_daily_distribution", "d1_entry_price",
-                "trading_friction_per_share", "tax_friction_per_share", "required_edge_per_share")
-    vals = {k: _number(side_job.get(k)) for k in required}
-    if any(v is None for v in vals.values()):
-        return {**base, "reason": "SIDE_JOB_INPUT_INCOMPLETE"}
-    if vals["strc_dividend_per_share"] <= 0 or vals["sata_daily_distribution"] < 0:
-        return {**base, "reason": "SIDE_JOB_INPUT_INVALID"}
+
+    scope = _capital_scope(side_job)
+    stage = side_job.get("window_stage")
+    if stage not in {"D_MINUS_1", "D", "OUTSIDE_WINDOW", "D_PLUS"}:
+        return {**base, **scope, "reason": "SIDE_JOB_STAGE_INVALID"}
+
+    if side_job.get("window_binding_state") != "VALIDATED":
+        return {**base, **scope, "reason": "ENTITLEMENT_WINDOW_NOT_VALIDATED", "window_stage": stage}
+    basis_ref = side_job.get("window_basis_ref")
+    if not isinstance(basis_ref, str) or not basis_ref.strip():
+        return {**base, **scope, "reason": "ENTITLEMENT_WINDOW_BASIS_REF_MISSING", "window_stage": stage}
+
+    evaluation_date = _parse_iso_date(side_job.get("evaluation_date"))
+    ex_date = _parse_iso_date(side_job.get("strc_ex_date"))
+    d1_date = _parse_iso_date(side_job.get("d_minus_1_trade_date"))
+    if evaluation_date is None or ex_date is None or d1_date is None or d1_date >= ex_date:
+        return {**base, **scope, "reason": "ENTITLEMENT_WINDOW_DATES_INVALID", "window_stage": stage}
+
+    date_match = (
+        (stage == "D_MINUS_1" and evaluation_date == d1_date)
+        or (stage == "D" and evaluation_date == ex_date)
+        or (stage == "D_PLUS" and evaluation_date > ex_date)
+        or (stage == "OUTSIDE_WINDOW" and evaluation_date not in {d1_date, ex_date})
+    )
+    if not date_match:
+        return {
+            **base,
+            **scope,
+            "reason": "ENTITLEMENT_WINDOW_STAGE_DATE_MISMATCH",
+            "window_stage": stage,
+            "evaluation_date": evaluation_date.isoformat(),
+            "strc_ex_date": ex_date.isoformat(),
+            "d_minus_1_trade_date": d1_date.isoformat(),
+            "window_binding_state": "VALIDATED",
+            "window_basis_ref": basis_ref.strip(),
+        }
+
+    time_fields = {
+        "window_stage": stage,
+        "evaluation_date": evaluation_date.isoformat(),
+        "strc_ex_date": ex_date.isoformat(),
+        "d_minus_1_trade_date": d1_date.isoformat(),
+        "window_binding_state": "VALIDATED",
+        "window_basis_ref": basis_ref.strip(),
+    }
+
+    if stage in {"OUTSIDE_WINDOW", "D_PLUS"}:
+        return {
+            **base,
+            **scope,
+            **time_fields,
+            "state": "SKIP",
+            "side_job_eligibility": "SKIP",
+            "reason": "OUTSIDE_STRC_ENTITLEMENT_WINDOW",
+            "strc_dividend_per_share": _number(side_job.get("strc_dividend_per_share")),
+            "sata_daily_distribution": _number(side_job.get("sata_daily_distribution")),
+            "d1_entry_price": None,
+            "foregone_sata_carry": None,
+            "trading_friction_per_share": _number(side_job.get("trading_friction_per_share")),
+            "tax_friction_per_share": _number(side_job.get("tax_friction_per_share")),
+            "required_edge_per_share": _number(side_job.get("required_edge_per_share")),
+            "d_exit_floor": None,
+            "analyst_entry_gate_state": None,
+            "long_cycle_policy_ref": "CRT_DUAL_HAIRPIN_CAPITAL_ROTATION_MENTAL_MODEL_V0.1",
+            "short_cycle_policy": "D_MINUS_1_TO_D_ENTITLEMENT_SIDE_JOB",
+            "action_output": "NONE",
+        }
+
+    required = (
+        "strc_dividend_per_share",
+        "sata_daily_distribution",
+        "d1_entry_price",
+        "trading_friction_per_share",
+        "tax_friction_per_share",
+        "required_edge_per_share",
+    )
+    vals = {key: _number(side_job.get(key)) for key in required}
+    if any(value is None for value in vals.values()):
+        return {**base, **scope, **time_fields, "reason": "SIDE_JOB_INPUT_INCOMPLETE"}
+    if (
+        vals["strc_dividend_per_share"] <= 0
+        or vals["sata_daily_distribution"] < 0
+        or vals["d1_entry_price"] <= 0
+        or vals["trading_friction_per_share"] < 0
+        or vals["tax_friction_per_share"] < 0
+        or vals["required_edge_per_share"] < 0
+    ):
+        return {**base, **scope, **time_fields, "reason": "SIDE_JOB_INPUT_INVALID"}
+
     foregone_days = side_job.get("foregone_sata_distribution_days", 1)
     if not isinstance(foregone_days, int) or isinstance(foregone_days, bool) or foregone_days < 0:
-        return {**base, "reason": "SIDE_JOB_FOREGONE_DAYS_INVALID"}
+        return {**base, **scope, **time_fields, "reason": "SIDE_JOB_FOREGONE_DAYS_INVALID"}
     foregone = vals["sata_daily_distribution"] * foregone_days
     exit_floor = (
         vals["d1_entry_price"]
@@ -457,7 +580,7 @@ def _side_job(side_job: Any) -> dict[str, Any]:
         + vals["tax_friction_per_share"]
         + vals["required_edge_per_share"]
     )
-    stage = side_job.get("window_stage")
+
     state = "BLOCKED"
     reason = "SIDE_JOB_STAGE_INVALID"
     if stage == "D_MINUS_1":
@@ -470,7 +593,11 @@ def _side_job(side_job: Any) -> dict[str, Any]:
             state, reason = "BLOCKED", "D_MINUS_1_ANALYST_ENTRY_GATE_UNAVAILABLE"
     elif stage == "D":
         current_bid = _number(side_job.get("current_strc_bid"))
-        if side_job.get("entitlement_secured") is not True or current_bid is None:
+        if (
+            side_job.get("entitlement_secured") is not True
+            or current_bid is None
+            or current_bid <= 0
+        ):
             state, reason = "BLOCKED", "D_EXIT_INPUT_INCOMPLETE"
         elif current_bid >= exit_floor:
             state, reason = "EXECUTE", "D_EXIT_FLOOR_MET"
@@ -478,23 +605,11 @@ def _side_job(side_job: Any) -> dict[str, Any]:
             state, reason = "EXIT_PENDING", "MAX_HOLD_BOUNDARY_REACHED_HANDOFF_TO_LONG_CYCLE_REVIEW"
         else:
             state, reason = "EXIT_PENDING", "D_EXIT_FLOOR_NOT_YET_MET"
-    elif stage in {"OUTSIDE_WINDOW", "D_PLUS"}:
-        state, reason = "SKIP", "OUTSIDE_STRC_ENTITLEMENT_WINDOW"
-    legacy_shares = _number(side_job.get("legacy_strc_inventory_shares"))
-    side_job_capital_usd = _number(side_job.get("side_job_capital_usd"))
-    side_job_confirmed_shares = _number(side_job.get("side_job_confirmed_strc_shares"))
-    capital_scope_state = "AVAILABLE"
-    capital_scope_reason = "LEGACY_AND_SIDE_JOB_CAPITAL_SEPARATED"
-    if legacy_shares is None or legacy_shares < 0:
-        capital_scope_state = "BLOCKED"
-        capital_scope_reason = "LEGACY_STRC_INVENTORY_SCOPE_UNAVAILABLE"
-    elif (side_job_capital_usd is None or side_job_capital_usd < 0) and (
-        side_job_confirmed_shares is None or side_job_confirmed_shares < 0
-    ):
-        capital_scope_state = "BLOCKED"
-        capital_scope_reason = "SIDE_JOB_CAPITAL_SCOPE_UNAVAILABLE"
+
     return {
         **base,
+        **scope,
+        **time_fields,
         "state": state,
         "side_job_eligibility": state,
         "reason": reason,
@@ -506,19 +621,11 @@ def _side_job(side_job: Any) -> dict[str, Any]:
         "tax_friction_per_share": vals["tax_friction_per_share"],
         "required_edge_per_share": vals["required_edge_per_share"],
         "d_exit_floor": exit_floor,
-        "window_stage": stage,
         "analyst_entry_gate_state": side_job.get("analyst_entry_gate_state"),
-        "legacy_strc_inventory_shares": legacy_shares,
-        "side_job_capital_usd": side_job_capital_usd,
-        "side_job_confirmed_strc_shares": side_job_confirmed_shares,
-        "capital_scope_state": capital_scope_state,
-        "capital_scope_reason": capital_scope_reason,
         "long_cycle_policy_ref": "CRT_DUAL_HAIRPIN_CAPITAL_ROTATION_MENTAL_MODEL_V0.1",
         "short_cycle_policy": "D_MINUS_1_TO_D_ENTITLEMENT_SIDE_JOB",
         "action_output": "NONE",
     }
-
-
 
 def _valuation_evidence(pack: dict[str, Any]) -> dict[str, Any]:
     result: dict[str, Any] = {}
@@ -551,7 +658,7 @@ def build_portfolio_allocation_context(
         raise ValueError("pack must be an object")
     cfg = inputs if isinstance(inputs, dict) else {}
     health = build_common_equity_health(pack, cfg.get("residual_value_inputs"))
-    destination, blockers = _season_destination(cfg.get("season_context"))
+    destination, blockers = _season_destination(pack, cfg.get("season_context"))
     side_job = _side_job(cfg.get("side_job_context"))
     current = _portfolio_state(private_context, cfg.get("market_prices"))
     if destination is None:
@@ -634,6 +741,8 @@ def build_portfolio_allocation_context(
         out["blockers"].append("ASST_HEALTH_BLOCKED")
     if side_job["state"] == "BLOCKED":
         out["blockers"].append("SIDE_JOB_CONTEXT_BLOCKED")
+    if side_job.get("capital_scope_state") == "BLOCKED":
+        out["blockers"].append("SIDE_JOB_CAPITAL_SCOPE_BLOCKED")
     return {"common_equity_health": health, "portfolio_allocation_context": out}
 
 

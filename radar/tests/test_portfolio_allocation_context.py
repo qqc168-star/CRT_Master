@@ -173,6 +173,11 @@ def side_job(**changes):
         "required_edge_per_share": 0.0,
         "foregone_sata_distribution_days": 1,
         "window_stage": "D_MINUS_1",
+        "window_binding_state": "VALIDATED",
+        "window_basis_ref": "synthetic:strc-corporate-action-plus-trading-calendar",
+        "evaluation_date": "2026-09-29",
+        "strc_ex_date": "2026-09-30",
+        "d_minus_1_trade_date": "2026-09-29",
         "analyst_entry_gate_state": "PASS",
         "legacy_strc_inventory_shares": 250.0,
         "side_job_capital_usd": 5_000.0,
@@ -468,6 +473,7 @@ class PortfolioAllocationAcceptanceTests(unittest.TestCase):
         cfg = inputs(
             side_job_context=side_job(
                 window_stage="D",
+                evaluation_date="2026-09-30",
                 d1_entry_price=98.91,
                 current_strc_bid=98.32,
                 entitlement_secured=True,
@@ -493,6 +499,140 @@ class PortfolioAllocationAcceptanceTests(unittest.TestCase):
         )["portfolio_allocation_context"]
         self.assertEqual(result["state"], "BLOCKED")
         self.assertIn("FORMAL_SEASON_NOT_AVAILABLE", result["blockers"])
+
+    def test_formal_season_cannot_be_spoofed_by_local_input(self):
+        p = pack_for()
+        p["model_status"] = {
+            "btc_season_router": {
+                "state": "CANDIDATE_BLOCKED",
+                "season": None,
+                "formal_model": "NOT_APPROVED",
+            }
+        }
+        cfg = inputs()
+        cfg["season_context"] = {
+            "season_source": "FORMAL",
+            "formal_state": "AVAILABLE",
+            "season_posture": "SPRING",
+            "allocation_destination": "SPRING",
+            "deployment_phase": "BRIDGEHEAD",
+        }
+        result = build_portfolio_allocation_context(
+            pack=p, private_context=private_context(), inputs=cfg
+        )["portfolio_allocation_context"]
+        self.assertEqual(result["state"], "BLOCKED")
+        self.assertIn("FORMAL_SEASON_NOT_AVAILABLE", result["blockers"])
+
+    def test_formal_season_must_match_router_lineage(self):
+        p = pack_for()
+        p["model_status"] = {
+            "btc_season_router": {
+                "state": "AVAILABLE",
+                "season": "SPRING",
+                "formal_model": "APPROVED",
+            }
+        }
+        cfg = inputs()
+        cfg["season_context"] = {
+            "season_source": "FORMAL",
+            "formal_state": "AVAILABLE",
+            "season_posture": "WINTER",
+            "allocation_destination": "SPRING",
+            "deployment_phase": "BRIDGEHEAD",
+        }
+        result = build_portfolio_allocation_context(
+            pack=p, private_context=private_context(), inputs=cfg
+        )["portfolio_allocation_context"]
+        self.assertEqual(result["state"], "BLOCKED")
+        self.assertIn("FORMAL_SEASON_LINEAGE_MISMATCH", result["blockers"])
+
+    def test_outside_window_does_not_require_d1_economics(self):
+        raw = side_job(window_stage="OUTSIDE_WINDOW", evaluation_date="2026-09-25")
+        for field in (
+            "strc_dividend_per_share",
+            "sata_daily_distribution",
+            "d1_entry_price",
+            "trading_friction_per_share",
+            "tax_friction_per_share",
+            "required_edge_per_share",
+        ):
+            raw.pop(field)
+        result = build_portfolio_allocation_context(
+            pack=pack_for(),
+            private_context=private_context(),
+            inputs=inputs(side_job_context=raw),
+        )["portfolio_allocation_context"]["side_job"]
+        self.assertEqual(result["state"], "SKIP")
+        self.assertEqual(result["fixed_income_carrier"], "SATA")
+        self.assertIsNone(result["d_exit_floor"])
+
+    def test_entitlement_window_stage_must_match_validated_dates(self):
+        result = build_portfolio_allocation_context(
+            pack=pack_for(),
+            private_context=private_context(),
+            inputs=inputs(
+                side_job_context=side_job(
+                    window_stage="D",
+                    evaluation_date="2026-09-29",
+                    entitlement_secured=True,
+                    current_strc_bid=99.0,
+                )
+            ),
+        )["portfolio_allocation_context"]["side_job"]
+        self.assertEqual(result["state"], "BLOCKED")
+        self.assertEqual(result["reason"], "ENTITLEMENT_WINDOW_STAGE_DATE_MISMATCH")
+
+    def test_side_job_negative_friction_fails_closed(self):
+        result = build_portfolio_allocation_context(
+            pack=pack_for(),
+            private_context=private_context(),
+            inputs=inputs(
+                side_job_context=side_job(trading_friction_per_share=-0.01)
+            ),
+        )["portfolio_allocation_context"]["side_job"]
+        self.assertEqual(result["state"], "BLOCKED")
+        self.assertEqual(result["reason"], "SIDE_JOB_INPUT_INVALID")
+
+    def test_capital_scope_blocked_does_not_route_sata_out(self):
+        from crt_radar.asset_strategy_delta import build_asset_strategy_delta
+        private = {
+            "state": "AVAILABLE",
+            "profile": {
+                "cash_goal": {"six_month_target_usd": 1500.0},
+                "derived": {
+                    "six_month_cash_usd": 1643.4,
+                    "goal_covered_at_current_rate": True,
+                },
+            },
+        }
+        allocation = {
+            "state": "READY_FOR_ANALYST",
+            "mstr_health": "STABLE",
+            "asst_health": "STABLE",
+            "valuation_constraint": {"MSTR": "BRAKE", "ASST": "BRAKE"},
+            "side_job": {
+                "state": "EXECUTE",
+                "window_stage": "D_MINUS_1",
+                "capital_scope_state": "BLOCKED",
+            },
+        }
+        result = build_asset_strategy_delta(
+            btc_entry_gate={
+                "transition_state": "TRANSITION_UNRESOLVED",
+                "decision_eligibility": "WAIT",
+            },
+            assumption_watch={"state": "VALID"},
+            private_context=private,
+            portfolio_allocation_context=allocation,
+        )
+        self.assertEqual(
+            result["assets"]["STRC"]["strategy_delta"],
+            "SHORT_CYCLE_EDGE_ONLY_CAPITAL_SCOPE_BLOCKED",
+        )
+        self.assertEqual(
+            result["assets"]["SATA"]["strategy_delta"],
+            "PRIMARY_FIXED_INCOME_CARRIER",
+        )
 
     def test_action_output_and_authority_stay_locked(self):
         result = build_portfolio_allocation_context(
@@ -543,7 +683,7 @@ class AssetStrategyDeltaPortfolioIntegrationTests(unittest.TestCase):
             "mstr_health": "STABLE",
             "asst_health": "STABLE",
             "valuation_constraint": {"MSTR": "BRAKE", "ASST": "BRAKE"},
-            "side_job": {"state": "EXECUTE", "window_stage": "D"},
+            "side_job": {"state": "EXECUTE", "window_stage": "D", "capital_scope_state": "AVAILABLE"},
         }
         result = build_asset_strategy_delta(
             btc_entry_gate={"transition_state": "TRANSITION_UNRESOLVED", "decision_eligibility": "WAIT"},
@@ -577,6 +717,7 @@ class AssetStrategyDeltaPortfolioIntegrationTests(unittest.TestCase):
             "side_job": {
                 "state": "EXECUTE",
                 "window_stage": "D_MINUS_1",
+                "capital_scope_state": "AVAILABLE",
             },
         }
         result = build_asset_strategy_delta(

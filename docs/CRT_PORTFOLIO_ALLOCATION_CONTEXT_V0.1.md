@@ -75,6 +75,8 @@ D 日最低撤退價：
 
 D-1（除息前一日）machine（機器）只負責計算 `ExitFloor` 與保存可驗證輸入，不自行預測 D 日價格。是否值得進入本輪兼差由 N.S./GPT（分析主廚）依當下市場與歷史證據給 `analyst_entry_gate_state = PASS / FAIL`；缺少該判斷時為 `BLOCKED`。
 
+時間路由不得只相信呼叫端填入的 `window_stage`。每輪必須有 `window_binding_state = VALIDATED`、`window_basis_ref`、`evaluation_date`、`strc_ex_date` 與 `d_minus_1_trade_date`，由上游公司行動證據與交易日曆綁定。D-1、D、D+ 與 OUTSIDE_WINDOW（窗口外）必須與日期一致；不一致 fail-closed（失敗關閉）。窗口外平常日不要求尚不存在的 D-1 成交價或 ExitFloor（撤退底價）。
+
 狀態只有：
 
 - `EXECUTE`
@@ -82,7 +84,7 @@ D-1（除息前一日）machine（機器）只負責計算 `ExitFloor` 與保存
 - `EXIT_PENDING`
 - `BLOCKED`
 
-Existing STRC inventory（既有 STRC 庫存）與 Side-job Capital（兼差資本）分帳。輸出分列 `legacy_strc_inventory_shares`、`side_job_capital_usd`／`side_job_confirmed_strc_shares` 與 `capital_scope_state`；若兼差資本範圍尚未確認，per-share edge（每股優勢）仍可研究，但不得把既有 STRC 庫存冒充本輪快閃兵。兼差超過 max-hold boundary（最長持有邊界）只交回 long-cycle review（長週期檢視），不得偷長成新的停損／交易引擎。
+Existing STRC inventory（既有 STRC 庫存）與 Side-job Capital（兼差資本）分帳。輸出分列 `legacy_strc_inventory_shares`、`side_job_capital_usd`／`side_job_confirmed_strc_shares` 與 `capital_scope_state`；若兼差資本範圍尚未確認，per-share edge（每股優勢）仍可研究，但不得把既有 STRC 庫存冒充本輪快閃兵，也不得把 SATA 標成可立即輪出。兼差超過 max-hold boundary（最長持有邊界）只交回 long-cycle review（長週期檢視），不得偷長成新的停損／交易引擎。
 
 ## Season（季節）與提前部署
 
@@ -91,7 +93,7 @@ Existing STRC inventory（既有 STRC 庫存）與 Side-job Capital（兼差資�
 - 已可用的 Formal Season（正式季節）；或
 - `LABELED_ANALYST_HYPOTHESIS` 且有 independent evidence（相對獨立證據）的研究假說。
 
-Formal Season（正式季節）`BLOCKED` 時不得偷填 Winter（冬季）。
+Formal Season（正式季節）`BLOCKED` 時不得偷填 Winter（冬季）。即使本地輸入自稱 `season_source = FORMAL` 與 `formal_state = AVAILABLE`，仍必須回綁 Evidence Pack（證據包）內真正的 `btc_season_router`；router 未正式可用或 season lineage（季節血統）不一致時必須 `BLOCKED`。
 
 Allocation destination（配置到站）可以領先 current posture（目前姿態），因此支援：
 

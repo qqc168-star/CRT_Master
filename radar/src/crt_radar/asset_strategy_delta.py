@@ -162,7 +162,15 @@ def build_asset_strategy_delta(
         else {}
     )
     side_state = side_job.get("state")
-    if side_state == "EXECUTE":
+    capital_scope_ready = side_job.get("capital_scope_state") == "AVAILABLE"
+    if side_state == "EXECUTE" and not capital_scope_ready:
+        result["assets"]["STRC"]["strategy_delta"] = (
+            "SHORT_CYCLE_EDGE_ONLY_CAPITAL_SCOPE_BLOCKED"
+        )
+        result["assets"]["SATA"]["strategy_delta"] = (
+            "PRIMARY_FIXED_INCOME_CARRIER"
+        )
+    elif side_state == "EXECUTE":
         if side_job.get("window_stage") == "D":
             result["assets"]["STRC"]["strategy_delta"] = (
                 "SHORT_CYCLE_RETURN_TO_SATA_REVIEW"
@@ -180,6 +188,8 @@ def build_asset_strategy_delta(
     elif side_state == "EXIT_PENDING":
         result["assets"]["STRC"]["strategy_delta"] = (
             "SHORT_CYCLE_EXIT_PENDING_REVIEW"
+            if capital_scope_ready
+            else "SHORT_CYCLE_EXIT_PENDING_CAPITAL_SCOPE_BLOCKED"
         )
         result["assets"]["SATA"]["strategy_delta"] = (
             "RETURN_DESTINATION_WAIT"
