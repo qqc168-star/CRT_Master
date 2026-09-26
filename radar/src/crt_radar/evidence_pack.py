@@ -382,6 +382,7 @@ def build_evidence_pack(
     btc_control_transfer_validation_evidence: dict[str, Any] | None = None,
     treasury_company_ct_input: dict[str, Any] | None = None,
     treasury_valuation_inputs: dict[str, Any] | None = None,
+    btc_long_horizon_context: dict[str, Any] | None = None,
     portfolio_allocation_inputs: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
@@ -452,6 +453,31 @@ def build_evidence_pack(
         pack["btc_entry_gate"] = deepcopy(btc_entry_gate)
     if private_context is not None:
         pack["private_context"] = deepcopy(private_context)
+
+    if btc_long_horizon_context is not None:
+        if not isinstance(
+            btc_long_horizon_context,
+            dict,
+        ):
+            raise ValueError(
+                "btc_long_horizon_context must be an object"
+            )
+        if (
+            btc_long_horizon_context.get(
+                "action_output"
+            )
+            != "NONE"
+            or btc_long_horizon_context.get(
+                "external_action_authority"
+            )
+            != "NONE"
+        ):
+            raise ValueError(
+                "BTC long-horizon authority must remain NONE"
+            )
+        pack["btc_long_horizon_context"] = deepcopy(
+            btc_long_horizon_context
+        )
     if mstr_asst_market_health is not None:
         pack["mstr_asst_market_health"] = (
             validate_mstr_asst_market_health(

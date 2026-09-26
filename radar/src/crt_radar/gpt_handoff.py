@@ -101,6 +101,7 @@ BRIDGE_FORBIDDEN_EXACT_KEYS = {
 }
 
 BRIDGE_OPTIONAL_MARKET_SECTIONS = (
+    "btc_long_horizon_context",
     "dvol_regime_watch",
     "transition_diagnostic",
     "btc_entry_gate",

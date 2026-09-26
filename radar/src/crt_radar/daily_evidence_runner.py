@@ -22,6 +22,9 @@ from .btc_transition_diagnostics import (
     not_requested_transition_diagnostic,
     run_live_btc_transition_diagnostics,
 )
+from .btc_transition_replay_evidence import (
+    build_btc_long_horizon_context,
+)
 from .dvol_regime_watch import (
     blocked_dvol_regime_watch,
     run_live_dvol_regime_watch,
@@ -124,6 +127,7 @@ def run_daily_evidence(
     observation_db: str | Path,
     reflexivity_input: dict[str, Any] | None = None,
     treasury_valuation_inputs: dict[str, Any] | None = None,
+    btc_long_horizon_inputs: dict[str, Any] | None = None,
     portfolio_allocation_inputs: dict[str, Any] | None = None,
     fetch_overrides: dict[str, FetchResult] | None = None,
     liquidation_aggregate_payload: dict[str, Any] | None = None,
@@ -268,12 +272,21 @@ def run_daily_evidence(
             now_ms=generated_at_ms if generated_at_ms is not None else now_ms,
         )
 
+    btc_long_horizon_context = (
+        build_btc_long_horizon_context(
+            btc_long_horizon_inputs
+        )
+        if btc_long_horizon_inputs is not None
+        else None
+    )
+
     return build_evidence_pack(
         source_gate,
         observation_db=observation_db,
         generated_at_ms=generated_at_ms,
         reflexivity_input=reflexivity_input,
         treasury_valuation_inputs=treasury_valuation_inputs if treasury_valuation_inputs is not None else {},
+        btc_long_horizon_context=btc_long_horizon_context,
         portfolio_allocation_inputs=portfolio_allocation_inputs,
         dvol_regime_watch=dvol_regime_watch,
         reanalysis_wake=reanalysis_wake,
@@ -356,6 +369,15 @@ def main(argv: list[str] | None = None) -> int:
         help="Local verified CT histories for MSTR/ASST; absent claims remain BLOCKED.")
     parser.add_argument("--portfolio-allocation-inputs", type=Path, default=None,
         help="Local season/allocation/side-job context; no trade or Season Router authority.")
+    parser.add_argument(
+        "--btc-long-horizon-inputs",
+        type=Path,
+        default=None,
+        help=(
+            "Optional local research-only BTC weekly/cycle "
+            "context; no formal price-target or trade authority."
+        ),
+    )
     parser.add_argument(
         "--btc-entry-context",
         type=Path,
@@ -532,6 +554,14 @@ def main(argv: list[str] | None = None) -> int:
         portfolio_allocation_inputs=(
             _load_json_object(args.portfolio_allocation_inputs, label="Portfolio allocation inputs")
             if args.portfolio_allocation_inputs is not None else None
+        ),
+        btc_long_horizon_inputs=(
+            _load_json_object(
+                args.btc_long_horizon_inputs,
+                label="BTC long-horizon inputs",
+            )
+            if args.btc_long_horizon_inputs is not None
+            else None
         ),
         dvol_regime_runner=run_live_dvol_regime_watch,
         transition_diagnostic_runner=run_live_btc_transition_diagnostics,

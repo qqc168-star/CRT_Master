@@ -136,6 +136,39 @@ def _asset_symbol(value: Any, field: str) -> str:
     return symbol
 
 
+
+def _validate_btc_strategy(
+    payload: Any,
+) -> dict[str, Any] | None:
+    if payload is None:
+        return None
+
+    if not isinstance(payload, dict):
+        raise PrivateProfileError(
+            "btc_strategy must be an object"
+        )
+
+    target = _finite(
+        payload.get(
+            "strategic_target_btc"
+        ),
+        "btc_strategy.strategic_target_btc",
+        positive=True,
+    )
+
+    basis_ref = _text(
+        payload.get(
+            "target_basis_ref"
+        ),
+        "btc_strategy.target_basis_ref",
+    )
+
+    return {
+        "strategic_target_btc": target,
+        "target_basis_ref": basis_ref,
+    }
+
+
 def _validate_condition(payload: Any, field: str) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise PrivateProfileError(f"{field} must be an object")
@@ -536,6 +569,7 @@ def validate_private_profile(payload: dict[str, Any]) -> dict[str, Any]:
     if strc.get("tax_treatment") != "RETURN_OF_CAPITAL":
         raise PrivateProfileError("strc.tax_treatment must be RETURN_OF_CAPITAL")
     tactical_strategy = _validate_strc_tactical_strategy(strc.get("tactical_strategy"))
+    btc_strategy = _validate_btc_strategy(payload.get("btc_strategy"))
     capital_state_sections, capital_state_status = _validate_capital_state_contract(
         payload,
         strc_shares=shares,
@@ -556,6 +590,8 @@ def validate_private_profile(payload: dict[str, Any]) -> dict[str, Any]:
     result = json.loads(json.dumps(payload))
     if tactical_strategy is not None:
         result["strc"]["tactical_strategy"] = tactical_strategy
+    if btc_strategy is not None:
+        result["btc_strategy"] = btc_strategy
     if capital_state_sections is not None:
         for section_name, section_value in capital_state_sections.items():
             result[section_name] = section_value

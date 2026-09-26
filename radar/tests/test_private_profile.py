@@ -279,5 +279,67 @@ class CapitalStateProfileContractTest(unittest.TestCase):
 
 
 
+class StrategicBtcPrivateProfileTest(
+    unittest.TestCase
+):
+    def test_strategic_btc_target_is_private_and_normalized(
+        self,
+    ):
+        payload = capital_state_payload()
+
+        payload["btc_strategy"] = {
+            "strategic_target_btc": 1.0,
+            "target_basis_ref": (
+                "USER_DEFINED_FIRST_BTC_OBJECTIVE"
+            ),
+        }
+
+        result = validate_private_profile(
+            payload
+        )
+
+        self.assertEqual(
+            result[
+                "btc_strategy"
+            ][
+                "strategic_target_btc"
+            ],
+            1.0,
+        )
+        self.assertEqual(
+            result[
+                "btc_strategy"
+            ][
+                "target_basis_ref"
+            ],
+            "USER_DEFINED_FIRST_BTC_OBJECTIVE",
+        )
+        self.assertEqual(
+            result["holdings"][1][
+                "quantity"
+            ],
+            0.25,
+        )
+
+    def test_invalid_strategic_btc_target_fails_closed(
+        self,
+    ):
+        payload = capital_state_payload()
+
+        payload["btc_strategy"] = {
+            "strategic_target_btc": 0,
+            "target_basis_ref": (
+                "USER_DEFINED_FIRST_BTC_OBJECTIVE"
+            ),
+        }
+
+        with self.assertRaises(
+            PrivateProfileError
+        ):
+            validate_private_profile(
+                payload
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
