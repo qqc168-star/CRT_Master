@@ -744,5 +744,201 @@ class AssetStrategyDeltaPortfolioIntegrationTests(unittest.TestCase):
         self.assertEqual(result["assets"]["ASST"]["decision_support"], "READY_FOR_ANALYST")
 
 
+class StrategicBtcPortfolioIntegrationTests(
+    unittest.TestCase
+):
+    def test_direct_btc_holding_does_not_block_existing_policy_math(
+        self,
+    ):
+        baseline = (
+            build_portfolio_allocation_context(
+                pack=pack_for(),
+                private_context=private_context(),
+                inputs=inputs(),
+            )[
+                "portfolio_allocation_context"
+            ]
+        )
+
+        private = private_context()
+
+        private[
+            "profile"
+        ][
+            "holdings"
+        ].append(
+            {
+                "asset": "BTC",
+                "quantity": 0.25,
+            }
+        )
+
+        private[
+            "profile"
+        ][
+            "btc_strategy"
+        ] = {
+            "strategic_target_btc": 1.0,
+            "target_basis_ref": (
+                "USER_DEFINED_FIRST_BTC_OBJECTIVE"
+            ),
+        }
+
+        p = pack_for()
+
+        p[
+            "btc_long_horizon_context"
+        ] = {
+            "state": "READY_FOR_ANALYST",
+            "action_output": "NONE",
+            "external_action_authority": "NONE",
+            "formal_price_target_authority": "NONE",
+        }
+
+        result = (
+            build_portfolio_allocation_context(
+                pack=p,
+                private_context=private,
+                inputs=inputs(),
+            )[
+                "portfolio_allocation_context"
+            ]
+        )
+
+        current = result[
+            "current_allocation"
+        ]
+
+        strategic = result[
+            "strategic_btc_context"
+        ]
+
+        self.assertEqual(
+            current["state"],
+            "AVAILABLE",
+        )
+        self.assertEqual(
+            current[
+                "strategic_btc_quantity"
+            ],
+            0.25,
+        )
+        self.assertTrue(
+            current[
+                "strategic_btc_excluded_from_policy_math"
+            ]
+        )
+        self.assertAlmostEqual(
+            current[
+                "fixed_income_usd"
+            ],
+            baseline[
+                "current_allocation"
+            ][
+                "fixed_income_usd"
+            ],
+        )
+        self.assertAlmostEqual(
+            current[
+                "growth_usd"
+            ],
+            baseline[
+                "current_allocation"
+            ][
+                "growth_usd"
+            ],
+        )
+        self.assertAlmostEqual(
+            strategic[
+                "btc_acquisition_gap"
+            ],
+            0.75,
+        )
+
+    def test_summer_posture_can_lead_autumn_harvest_destination(
+        self,
+    ):
+        private = private_context()
+
+        private[
+            "profile"
+        ][
+            "holdings"
+        ].append(
+            {
+                "asset": "BTC",
+                "quantity": 0.25,
+            }
+        )
+
+        private[
+            "profile"
+        ][
+            "btc_strategy"
+        ] = {
+            "strategic_target_btc": 1.0,
+            "target_basis_ref": (
+                "USER_DEFINED_FIRST_BTC_OBJECTIVE"
+            ),
+        }
+
+        result = (
+            build_portfolio_allocation_context(
+                pack=pack_for(),
+                private_context=private,
+                inputs=inputs(
+                    season_context=season(
+                        "AUTUMN",
+                        posture="SUMMER",
+                        phase=(
+                            "TREND_HOLD_HARVEST"
+                        ),
+                    )
+                ),
+            )[
+                "portfolio_allocation_context"
+            ]
+        )
+
+        route = result[
+            "btc_acquisition_route_context"
+        ]
+
+        self.assertTrue(
+            route[
+                "peak_harvest_zone"
+            ][
+                "summer_posture_autumn_destination"
+            ]
+        )
+        self.assertFalse(
+            route[
+                "peak_harvest_zone"
+            ][
+                "machine_peak_tick_detection"
+            ]
+        )
+        self.assertEqual(
+            route[
+                "reserve_purpose"
+            ],
+            "FUTURE_BTC_ACQUISITION",
+        )
+        self.assertEqual(
+            route[
+                "carrier_candidates"
+            ],
+            [
+                "SATA",
+                "STRC",
+                "CASH",
+            ],
+        )
+        self.assertEqual(
+            route["action_output"],
+            "NONE",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

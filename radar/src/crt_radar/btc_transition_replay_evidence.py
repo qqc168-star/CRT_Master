@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
 STRUCTURE_SCHEMA_VERSION = "CRT_BTC_TRANSITION_STRUCTURE_MEASUREMENTS_V0.1"
 FIFTY_WMA_SCHEMA_VERSION = "CRT_BTC_50WMA_LONG_HORIZON_CONTEXT_V0.1"
+TWO_HUNDRED_WMA_SCHEMA_VERSION = "CRT_BTC_200WMA_LONG_HORIZON_CONTEXT_V0.1"
+BTC_LONG_HORIZON_SCHEMA_VERSION = "CRT_BTC_LONG_HORIZON_CONTEXT_V0.1"
 SNAPSHOT_SCHEMA_VERSION = "CRT_BTC_TRANSITION_REPLAY_SNAPSHOT_V0.1"
 
 ANALYST_CLASSIFICATION_FIELDS = (
@@ -482,6 +484,599 @@ def build_long_horizon_50wma_context(
         }
     except TransitionReplayEvidenceError as exc:
         return _blocked(FIFTY_WMA_SCHEMA_VERSION, str(exc), as_of=as_of)
+
+
+
+def build_long_horizon_200wma_context(
+    weekly_bars: object,
+    *,
+    as_of: datetime | str,
+    provenance: str,
+    current_price: float | None = None,
+    current_price_at: datetime | str | None = None,
+) -> dict[str, Any]:
+    """Build completed-week 200WMA context without creating a regime vote."""
+
+    try:
+        cutoff = _parse_timestamp(as_of, "as_of")
+        source = _required_text(provenance, "provenance")
+        completed = _visible_completed_weekly_bars(
+            weekly_bars,
+            as_of=cutoff,
+        )
+
+        if len(completed) < 200:
+            result = _blocked(
+                TWO_HUNDRED_WMA_SCHEMA_VERSION,
+                "INSUFFICIENT_COMPLETED_WEEKLY_BARS",
+                as_of=as_of,
+            )
+            result.update(
+                {
+                    "completed_week_count": len(completed),
+                    "required_completed_week_count": 200,
+                    "provenance": source,
+                    "blockers": [
+                        "TWO_HUNDRED_COMPLETED_WEEKS_REQUIRED"
+                    ],
+                }
+            )
+            return result
+
+        points: list[dict[str, Any]] = []
+
+        for index in range(199, len(completed)):
+            window = completed[index - 199 : index + 1]
+            moving_average = (
+                sum(row["close"] for row in window) / 200.0
+            )
+            row = completed[index]
+
+            points.append(
+                {
+                    "week_closed_at": row["week_closed_at"],
+                    "week_closed_at_dt": row["week_closed_at_dt"],
+                    "close": row["close"],
+                    "wma_200": moving_average,
+                }
+            )
+
+        latest = points[-1]
+
+        prior_target = (
+            latest["week_closed_at_dt"]
+            - timedelta(weeks=52)
+        )
+
+        prior = next(
+            (
+                point
+                for point in points
+                if point["week_closed_at_dt"] == prior_target
+            ),
+            None,
+        )
+
+        blockers: list[str] = []
+
+        wma_200_growth_yoy_pct = None
+
+        if prior is None:
+            blockers.append(
+                "EXACT_52_WEEK_200WMA_BASELINE_UNAVAILABLE"
+            )
+        else:
+            wma_200_growth_yoy_pct = (
+                (
+                    latest["wma_200"]
+                    / prior["wma_200"]
+                )
+                - 1.0
+            ) * 100.0
+
+        if (current_price is None) != (
+            current_price_at is None
+        ):
+            raise TransitionReplayEvidenceError(
+                "CURRENT_PRICE_AND_TIMESTAMP_MUST_BE_PAIRED"
+            )
+
+        current_context: dict[str, Any] | None = None
+
+        if (
+            current_price is not None
+            and current_price_at is not None
+        ):
+            observed_at = _parse_timestamp(
+                current_price_at,
+                "current_price_at",
+            )
+
+            if observed_at > cutoff:
+                raise TransitionReplayEvidenceError(
+                    "CURRENT_PRICE_NOT_VISIBLE_AT_AS_OF"
+                )
+
+            spot = _positive_number(
+                current_price,
+                "current_price",
+            )
+
+            current_context = {
+                "price": spot,
+                "observed_at": _iso_z(observed_at),
+                "distance_from_latest_completed_200wma_pct": (
+                    (
+                        spot
+                        / latest["wma_200"]
+                    )
+                    - 1.0
+                )
+                * 100.0,
+                "counts_as_completed_week": False,
+            }
+
+        return {
+            "schema_version": (
+                TWO_HUNDRED_WMA_SCHEMA_VERSION
+            ),
+            "state": "READY_FOR_ANALYST",
+            "reason": (
+                "COMPLETED_WEEK_200WMA_CONTEXT_READY"
+            ),
+            "as_of": _iso_z(cutoff),
+            "provenance": source,
+            "completed_week_count": len(completed),
+            "latest_completed_weekly_close": (
+                latest["close"]
+            ),
+            "latest_completed_week_closed_at": (
+                latest["week_closed_at"]
+            ),
+            "latest_completed_200wma": (
+                latest["wma_200"]
+            ),
+            "calculation": (
+                "ARITHMETIC_MEAN_OF_200_"
+                "COMPLETED_WEEKLY_CLOSES"
+            ),
+            "latest_completed_close_distance_from_200wma_pct": (
+                (
+                    latest["close"]
+                    / latest["wma_200"]
+                )
+                - 1.0
+            )
+            * 100.0,
+            "wma_200_growth_yoy_pct": (
+                wma_200_growth_yoy_pct
+            ),
+            "wma_200_yoy_basis": (
+                {
+                    "from_week_closed_at": (
+                        prior["week_closed_at"]
+                    ),
+                    "to_week_closed_at": (
+                        latest["week_closed_at"]
+                    ),
+                    "interpolation_used": False,
+                }
+                if prior is not None
+                else None
+            ),
+            "current_price_context": current_context,
+            "research_role": (
+                "LONG_HORIZON_CONTEXT_ONLY"
+            ),
+            "formal_price_target_authority": "NONE",
+            "blockers": blockers,
+            **_authority_envelope(),
+        }
+
+    except TransitionReplayEvidenceError as exc:
+        return _blocked(
+            TWO_HUNDRED_WMA_SCHEMA_VERSION,
+            str(exc),
+            as_of=as_of,
+        )
+
+
+def build_cycle_drawdown_context(
+    payload: object,
+) -> dict[str, Any]:
+    """Measure supplied cycle drawdowns without predicting the next cycle."""
+
+    try:
+        if not isinstance(payload, dict):
+            raise TransitionReplayEvidenceError(
+                "CYCLE_DRAWDOWN_CONTEXT_NOT_OBJECT"
+            )
+
+        historical = payload.get(
+            "historical_cycles"
+        )
+
+        if (
+            not isinstance(historical, list)
+            or not historical
+        ):
+            raise TransitionReplayEvidenceError(
+                "HISTORICAL_CYCLES_REQUIRED"
+            )
+
+        rows: list[dict[str, Any]] = []
+
+        for index, raw in enumerate(historical):
+            if not isinstance(raw, dict):
+                raise TransitionReplayEvidenceError(
+                    f"HISTORICAL_CYCLE_NOT_OBJECT:{index}"
+                )
+
+            cycle_id = _required_text(
+                raw.get("cycle_id"),
+                f"historical_cycles[{index}].cycle_id",
+            )
+
+            if raw.get("final") is not True:
+                raise TransitionReplayEvidenceError(
+                    f"HISTORICAL_CYCLE_NOT_FINAL:{index}"
+                )
+
+            peak = _positive_number(
+                raw.get("peak_price_usd"),
+                (
+                    f"historical_cycles[{index}]"
+                    ".peak_price_usd"
+                ),
+            )
+
+            trough = _positive_number(
+                raw.get("trough_price_usd"),
+                (
+                    f"historical_cycles[{index}]"
+                    ".trough_price_usd"
+                ),
+            )
+
+            if trough > peak:
+                raise TransitionReplayEvidenceError(
+                    f"CYCLE_TROUGH_EXCEEDS_PEAK:{index}"
+                )
+
+            rows.append(
+                {
+                    "cycle_id": cycle_id,
+                    "peak_price_usd": peak,
+                    "trough_price_usd": trough,
+                    "max_drawdown_pct": (
+                        (trough / peak) - 1.0
+                    )
+                    * 100.0,
+                    "final": True,
+                    "basis_ref": raw.get(
+                        "basis_ref"
+                    ),
+                }
+            )
+
+        severity = [
+            -row["max_drawdown_pct"]
+            for row in rows
+        ]
+
+        monotonic_compression = (
+            len(severity) >= 2
+            and all(
+                after < before
+                for before, after in zip(
+                    severity,
+                    severity[1:],
+                )
+            )
+        )
+
+        current_result = None
+        current = payload.get(
+            "current_cycle"
+        )
+
+        if current is not None:
+            if not isinstance(current, dict):
+                raise TransitionReplayEvidenceError(
+                    "CURRENT_CYCLE_NOT_OBJECT"
+                )
+
+            peak = _positive_number(
+                current.get("peak_price_usd"),
+                "current_cycle.peak_price_usd",
+            )
+
+            trough = _positive_number(
+                current.get("trough_price_usd"),
+                "current_cycle.trough_price_usd",
+            )
+
+            if trough > peak:
+                raise TransitionReplayEvidenceError(
+                    "CURRENT_CYCLE_TROUGH_EXCEEDS_PEAK"
+                )
+
+            final = current.get("final")
+
+            if not isinstance(final, bool):
+                raise TransitionReplayEvidenceError(
+                    "CURRENT_CYCLE_FINAL_FLAG_REQUIRED"
+                )
+
+            current_result = {
+                "cycle_id": _required_text(
+                    current.get("cycle_id"),
+                    "current_cycle.cycle_id",
+                ),
+                "peak_price_usd": peak,
+                "trough_price_usd": trough,
+                "current_cycle_max_drawdown_pct": (
+                    (trough / peak) - 1.0
+                )
+                * 100.0,
+                "current_cycle_drawdown_final": final,
+                "basis_ref": current.get(
+                    "basis_ref"
+                ),
+            }
+
+        return {
+            "state": "READY_FOR_ANALYST",
+            "historical_cycles": rows,
+            "historical_sample_count": len(rows),
+            "drawdown_compression_observation": (
+                "HISTORICAL_FINAL_DRAWDOWN_"
+                "SEVERITY_DECREASED_SEQUENTIALLY"
+                if monotonic_compression
+                else
+                "NO_MONOTONIC_HISTORICAL_"
+                "COMPRESSION_CLAIM"
+            ),
+            "current_cycle": current_result,
+            "next_cycle_drawdown_prediction": None,
+            "research_hypothesis_only": True,
+            "formal_threshold_authority": "NONE",
+            "action_output": "NONE",
+            "external_action_authority": "NONE",
+            "analyst_judgment_required": True,
+        }
+
+    except TransitionReplayEvidenceError as exc:
+        return {
+            "state": "BLOCKED",
+            "reason": str(exc),
+            "research_hypothesis_only": True,
+            "formal_threshold_authority": "NONE",
+            "action_output": "NONE",
+            "external_action_authority": "NONE",
+            "analyst_judgment_required": True,
+        }
+
+
+def build_cycle_envelope_scenarios(
+    scenarios: object,
+) -> dict[str, Any]:
+    """Perform scenario arithmetic only; never emit a formal BTC price target."""
+
+    try:
+        if (
+            not isinstance(scenarios, list)
+            or not scenarios
+        ):
+            raise TransitionReplayEvidenceError(
+                "CYCLE_ENVELOPE_SCENARIOS_REQUIRED"
+            )
+
+        results: list[dict[str, Any]] = []
+
+        for index, raw in enumerate(scenarios):
+            if not isinstance(raw, dict):
+                raise TransitionReplayEvidenceError(
+                    (
+                        "CYCLE_ENVELOPE_SCENARIO_"
+                        f"NOT_OBJECT:{index}"
+                    )
+                )
+
+            scenario_id = _required_text(
+                raw.get("scenario_id"),
+                (
+                    f"cycle_envelope_scenarios"
+                    f"[{index}].scenario_id"
+                ),
+            )
+
+            floor = _positive_number(
+                raw.get(
+                    "future_bear_floor_usd"
+                ),
+                (
+                    f"cycle_envelope_scenarios"
+                    f"[{index}]"
+                    ".future_bear_floor_usd"
+                ),
+            )
+
+            drawdown = raw.get(
+                "assumed_drawdown_pct"
+            )
+
+            if (
+                isinstance(drawdown, bool)
+                or not isinstance(
+                    drawdown,
+                    (int, float),
+                )
+                or not math.isfinite(
+                    drawdown
+                )
+                or drawdown <= 0
+                or drawdown >= 100
+            ):
+                raise TransitionReplayEvidenceError(
+                    (
+                        "INVALID_ASSUMED_"
+                        f"DRAWDOWN_PCT:{index}"
+                    )
+                )
+
+            drawdown = float(drawdown)
+
+            implied_peak = (
+                floor
+                / (
+                    1.0
+                    - drawdown / 100.0
+                )
+            )
+
+            results.append(
+                {
+                    "scenario_id": scenario_id,
+                    "future_bear_floor_usd": (
+                        floor
+                    ),
+                    "assumed_drawdown_pct": (
+                        drawdown
+                    ),
+                    "implied_cycle_peak_usd": (
+                        implied_peak
+                    ),
+                    "basis_ref": raw.get(
+                        "basis_ref"
+                    ),
+                    "scenario_only": True,
+                    "formal_price_target_authority": (
+                        "NONE"
+                    ),
+                    "dependent_evidence_warning": (
+                        True
+                    ),
+                }
+            )
+
+        return {
+            "state": "READY_FOR_ANALYST",
+            "scenarios": results,
+            "scenario_only": True,
+            "formal_price_target_authority": "NONE",
+            "dependent_evidence_warning": (
+                "FUTURE_BEAR_FLOOR_AND_"
+                "IMPLIED_PEAK_ARE_NOT_"
+                "INDEPENDENT_VOTES"
+            ),
+            "action_output": "NONE",
+            "external_action_authority": "NONE",
+            "analyst_judgment_required": True,
+        }
+
+    except TransitionReplayEvidenceError as exc:
+        return {
+            "state": "BLOCKED",
+            "reason": str(exc),
+            "scenario_only": True,
+            "formal_price_target_authority": "NONE",
+            "action_output": "NONE",
+            "external_action_authority": "NONE",
+            "analyst_judgment_required": True,
+        }
+
+
+def build_btc_long_horizon_context(
+    inputs: object,
+) -> dict[str, Any]:
+    """Compose research-only BTC long-horizon context."""
+
+    if not isinstance(inputs, dict):
+        return {
+            "schema_version": (
+                BTC_LONG_HORIZON_SCHEMA_VERSION
+            ),
+            "state": "BLOCKED",
+            "reason": (
+                "BTC_LONG_HORIZON_INPUT_NOT_OBJECT"
+            ),
+            "formal_price_target_authority": "NONE",
+            **_authority_envelope(),
+        }
+
+    wma = build_long_horizon_200wma_context(
+        inputs.get("weekly_bars"),
+        as_of=inputs.get("as_of"),
+        provenance=inputs.get(
+            "weekly_provenance"
+        ),
+        current_price=inputs.get(
+            "current_price"
+        ),
+        current_price_at=inputs.get(
+            "current_price_at"
+        ),
+    )
+
+    drawdown = build_cycle_drawdown_context(
+        inputs.get(
+            "cycle_drawdown_context"
+        )
+    )
+
+    envelope = build_cycle_envelope_scenarios(
+        inputs.get(
+            "cycle_envelope_scenarios"
+        )
+    )
+
+    blocked_components = [
+        name
+        for name, value in (
+            (
+                "long_horizon_200wma_context",
+                wma,
+            ),
+            (
+                "cycle_drawdown_context",
+                drawdown,
+            ),
+            (
+                "cycle_envelope_scenarios",
+                envelope,
+            ),
+        )
+        if value.get("state") == "BLOCKED"
+    ]
+
+    return {
+        "schema_version": (
+            BTC_LONG_HORIZON_SCHEMA_VERSION
+        ),
+        "state": (
+            "BLOCKED"
+            if wma.get("state") == "BLOCKED"
+            else "READY_FOR_ANALYST"
+        ),
+        "reason": (
+            "BTC_200WMA_CONTEXT_BLOCKED"
+            if wma.get("state") == "BLOCKED"
+            else
+            "BTC_LONG_HORIZON_RESEARCH_"
+            "CONTEXT_READY"
+        ),
+        "as_of": wma.get("as_of"),
+        "long_horizon_200wma_context": wma,
+        "cycle_drawdown_context": drawdown,
+        "cycle_envelope_scenarios": envelope,
+        "blocked_components": blocked_components,
+        "research_role": (
+            "SUPPORTING_CONTEXT_ONLY"
+        ),
+        "formal_price_target_authority": "NONE",
+        **_authority_envelope(),
+    }
 
 
 def build_transition_replay_snapshot(

@@ -139,5 +139,97 @@ class PortfolioAllocationWiringTests(unittest.TestCase):
         self.assertEqual(bridge["authority"]["action_output"], "NONE")
 
 
+    def test_btc_long_horizon_context_reaches_gpt_bridge_without_action_authority(
+        self,
+    ):
+        p = bridge_pack(
+            pack(
+                evidence_hash=(
+                    "btc-long-horizon"
+                ),
+                requested=True,
+            )
+        )
+
+        p[
+            "btc_long_horizon_context"
+        ] = {
+            "schema_version": (
+                "CRT_BTC_LONG_HORIZON_CONTEXT_V0.1"
+            ),
+            "state": "READY_FOR_ANALYST",
+            "long_horizon_200wma_context": {
+                "state": (
+                    "READY_FOR_ANALYST"
+                ),
+                "latest_completed_200wma": (
+                    62000.0
+                ),
+            },
+            "cycle_drawdown_context": {
+                "state": (
+                    "READY_FOR_ANALYST"
+                ),
+            },
+            "cycle_envelope_scenarios": {
+                "state": (
+                    "READY_FOR_ANALYST"
+                ),
+                "scenario_only": True,
+            },
+            "formal_price_target_authority": (
+                "NONE"
+            ),
+            "action_output": "NONE",
+            "external_action_authority": (
+                "NONE"
+            ),
+        }
+
+        with tempfile.TemporaryDirectory() as folder:
+            handoff = run_gpt_handoff_gate(
+                p,
+                build_plain_language_notice(
+                    p
+                ),
+                ledger_path=(
+                    Path(folder)
+                    / "ledger"
+                ),
+            )
+
+            bridge = (
+                build_minimized_bridge_payload(
+                    p,
+                    handoff,
+                )
+            )
+
+        market = bridge[
+            "market_context"
+        ]
+
+        self.assertIn(
+            "btc_long_horizon_context",
+            market,
+        )
+        self.assertEqual(
+            market[
+                "btc_long_horizon_context"
+            ][
+                "formal_price_target_authority"
+            ],
+            "NONE",
+        )
+        self.assertEqual(
+            bridge[
+                "authority"
+            ][
+                "action_output"
+            ],
+            "NONE",
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

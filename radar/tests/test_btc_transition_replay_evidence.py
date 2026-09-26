@@ -11,7 +11,11 @@ RADAR_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(RADAR_ROOT / "src"))
 
 from crt_radar.btc_transition_replay_evidence import (
+    build_btc_long_horizon_context,
+    build_cycle_drawdown_context,
+    build_cycle_envelope_scenarios,
     build_long_horizon_50wma_context,
+    build_long_horizon_200wma_context,
     build_structure_measurements,
     build_transition_replay_snapshot,
 )
@@ -406,6 +410,300 @@ class BtcTransitionReplayEvidenceTests(unittest.TestCase):
         self.assertTrue(snapshot["analyst_judgment_required"])
         self.assertNotIn("BUY", repr(snapshot))
         self.assertNotIn("SELL", repr(snapshot))
+
+
+class BtcLongHorizonContextTests(
+    unittest.TestCase
+):
+    def test_199_completed_weeks_block_200wma(
+        self,
+    ):
+        rows = weekly_bars(
+            complete_count=199
+        )
+
+        result = (
+            build_long_horizon_200wma_context(
+                rows,
+                as_of=rows[-1][
+                    "available_at"
+                ],
+                provenance=(
+                    "DETERMINISTIC_SYNTHETIC_TEST"
+                ),
+            )
+        )
+
+        self.assertEqual(
+            result["state"],
+            "BLOCKED",
+        )
+        self.assertIn(
+            "TWO_HUNDRED_COMPLETED_WEEKS_REQUIRED",
+            result["blockers"],
+        )
+
+    def test_200wma_excludes_incomplete_week_and_has_exact_yoy(
+        self,
+    ):
+        rows = weekly_bars(
+            complete_count=252,
+            include_incomplete=True,
+        )
+
+        as_of = rows[-1][
+            "available_at"
+        ]
+
+        result = (
+            build_long_horizon_200wma_context(
+                rows,
+                as_of=as_of,
+                provenance=(
+                    "DETERMINISTIC_SYNTHETIC_TEST"
+                ),
+                current_price=500.0,
+                current_price_at=as_of,
+            )
+        )
+
+        self.assertEqual(
+            result["state"],
+            "READY_FOR_ANALYST",
+        )
+        self.assertEqual(
+            result[
+                "completed_week_count"
+            ],
+            252,
+        )
+        self.assertIsNotNone(
+            result[
+                "latest_completed_200wma"
+            ]
+        )
+        self.assertIsNotNone(
+            result[
+                "wma_200_growth_yoy_pct"
+            ]
+        )
+        self.assertFalse(
+            result[
+                "current_price_context"
+            ][
+                "counts_as_completed_week"
+            ]
+        )
+        self.assertEqual(
+            result[
+                "formal_price_target_authority"
+            ],
+            "NONE",
+        )
+
+    def test_cycle_envelope_is_scenario_only(
+        self,
+    ):
+        result = (
+            build_cycle_envelope_scenarios(
+                [
+                    {
+                        "scenario_id": (
+                            "CONSERVATIVE"
+                        ),
+                        "future_bear_floor_usd": (
+                            120000
+                        ),
+                        "assumed_drawdown_pct": (
+                            40
+                        ),
+                    },
+                    {
+                        "scenario_id": "MID",
+                        "future_bear_floor_usd": (
+                            135000
+                        ),
+                        "assumed_drawdown_pct": (
+                            45
+                        ),
+                    },
+                    {
+                        "scenario_id": (
+                            "OPTIMISTIC"
+                        ),
+                        "future_bear_floor_usd": (
+                            150000
+                        ),
+                        "assumed_drawdown_pct": (
+                            50
+                        ),
+                    },
+                ]
+            )
+        )
+
+        values = [
+            row[
+                "implied_cycle_peak_usd"
+            ]
+            for row in result[
+                "scenarios"
+            ]
+        ]
+
+        self.assertAlmostEqual(
+            values[0],
+            200000.0,
+        )
+        self.assertAlmostEqual(
+            values[1],
+            245454.54545454544,
+        )
+        self.assertAlmostEqual(
+            values[2],
+            300000.0,
+        )
+        self.assertTrue(
+            result["scenario_only"]
+        )
+        self.assertEqual(
+            result[
+                "formal_price_target_authority"
+            ],
+            "NONE",
+        )
+
+    def test_current_cycle_drawdown_can_remain_provisional(
+        self,
+    ):
+        result = (
+            build_cycle_drawdown_context(
+                {
+                    "historical_cycles": [
+                        {
+                            "cycle_id": "2015",
+                            "peak_price_usd": 100,
+                            "trough_price_usd": 14,
+                            "final": True,
+                        },
+                        {
+                            "cycle_id": "2018",
+                            "peak_price_usd": 100,
+                            "trough_price_usd": 16,
+                            "final": True,
+                        },
+                        {
+                            "cycle_id": "2022",
+                            "peak_price_usd": 100,
+                            "trough_price_usd": 23,
+                            "final": True,
+                        },
+                    ],
+                    "current_cycle": {
+                        "cycle_id": "2026",
+                        "peak_price_usd": 100,
+                        "trough_price_usd": 45.5,
+                        "final": False,
+                    },
+                }
+            )
+        )
+
+        self.assertEqual(
+            result["state"],
+            "READY_FOR_ANALYST",
+        )
+        self.assertFalse(
+            result[
+                "current_cycle"
+            ][
+                "current_cycle_drawdown_final"
+            ]
+        )
+        self.assertIsNone(
+            result[
+                "next_cycle_drawdown_prediction"
+            ]
+        )
+
+    def test_composite_long_horizon_has_no_trade_authority(
+        self,
+    ):
+        rows = weekly_bars(
+            complete_count=252
+        )
+
+        result = (
+            build_btc_long_horizon_context(
+                {
+                    "as_of": rows[-1][
+                        "available_at"
+                    ],
+                    "weekly_bars": rows,
+                    "weekly_provenance": (
+                        "DETERMINISTIC_SYNTHETIC_TEST"
+                    ),
+                    "cycle_drawdown_context": {
+                        "historical_cycles": [
+                            {
+                                "cycle_id": (
+                                    "2022"
+                                ),
+                                "peak_price_usd": (
+                                    100
+                                ),
+                                "trough_price_usd": (
+                                    23
+                                ),
+                                "final": True,
+                            }
+                        ]
+                    },
+                    "cycle_envelope_scenarios": [
+                        {
+                            "scenario_id": (
+                                "MID"
+                            ),
+                            "future_bear_floor_usd": (
+                                135000
+                            ),
+                            "assumed_drawdown_pct": (
+                                45
+                            ),
+                        }
+                    ],
+                }
+            )
+        )
+
+        self.assertEqual(
+            result["state"],
+            "READY_FOR_ANALYST",
+        )
+        self.assertEqual(
+            result["action_output"],
+            "NONE",
+        )
+        self.assertEqual(
+            result[
+                "external_action_authority"
+            ],
+            "NONE",
+        )
+        self.assertEqual(
+            result[
+                "formal_price_target_authority"
+            ],
+            "NONE",
+        )
+        self.assertNotIn(
+            "BUY",
+            repr(result),
+        )
+        self.assertNotIn(
+            "SELL",
+            repr(result),
+        )
 
 
 if __name__ == "__main__":

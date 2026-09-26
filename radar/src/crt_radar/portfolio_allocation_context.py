@@ -374,6 +374,302 @@ def _health_tilt(base_mstr: float, base_asst: float, health: dict[str, Any], val
     }
 
 
+
+def _strategic_btc_context(
+    private_context: Any,
+    pack: dict[str, Any],
+) -> dict[str, Any]:
+    if (
+        not isinstance(private_context, dict)
+        or private_context.get("state")
+        != "AVAILABLE"
+    ):
+        return {
+            "state": "BLOCKED",
+            "reason": (
+                "PRIVATE_CAPITAL_STATE_UNAVAILABLE"
+            ),
+            "action_output": "NONE",
+        }
+
+    profile = private_context.get(
+        "profile"
+    )
+
+    if not isinstance(profile, dict):
+        return {
+            "state": "BLOCKED",
+            "reason": "PRIVATE_PROFILE_UNAVAILABLE",
+            "action_output": "NONE",
+        }
+
+    strategy = profile.get(
+        "btc_strategy"
+    )
+
+    if not isinstance(strategy, dict):
+        return {
+            "state": "BLOCKED",
+            "reason": (
+                "STRATEGIC_BTC_TARGET_UNAVAILABLE"
+            ),
+            "action_output": "NONE",
+        }
+
+    target = _number(
+        strategy.get(
+            "strategic_target_btc"
+        )
+    )
+
+    basis_ref = strategy.get(
+        "target_basis_ref"
+    )
+
+    if (
+        target is None
+        or target <= 0
+        or not isinstance(
+            basis_ref,
+            str,
+        )
+        or not basis_ref.strip()
+    ):
+        return {
+            "state": "BLOCKED",
+            "reason": (
+                "STRATEGIC_BTC_TARGET_INVALID"
+            ),
+            "action_output": "NONE",
+        }
+
+    holdings = profile.get(
+        "holdings"
+    )
+
+    if not isinstance(holdings, list):
+        return {
+            "state": "BLOCKED",
+            "reason": (
+                "CAPITAL_HOLDINGS_UNAVAILABLE"
+            ),
+            "action_output": "NONE",
+        }
+
+    current_btc = 0.0
+
+    for row in holdings:
+        if not isinstance(row, dict):
+            continue
+
+        if (
+            str(
+                row.get("asset", "")
+            ).upper()
+            != "BTC"
+        ):
+            continue
+
+        quantity = _number(
+            row.get("quantity")
+        )
+
+        if (
+            quantity is None
+            or quantity < 0
+        ):
+            return {
+                "state": "BLOCKED",
+                "reason": (
+                    "BTC_HOLDING_QUANTITY_INVALID"
+                ),
+                "action_output": "NONE",
+            }
+
+        current_btc += quantity
+
+    gap = max(
+        target - current_btc,
+        0.0,
+    )
+
+    long_horizon = pack.get(
+        "btc_long_horizon_context"
+    )
+
+    long_horizon_state = (
+        long_horizon.get("state")
+        if isinstance(
+            long_horizon,
+            dict,
+        )
+        else "UNAVAILABLE"
+    )
+
+    wait_risk_evidence = []
+
+    if (
+        gap > 0
+        and long_horizon_state
+        == "READY_FOR_ANALYST"
+    ):
+        wait_risk_evidence.append(
+            "BTC_LONG_HORIZON_CONTEXT_AVAILABLE"
+        )
+
+    return {
+        "state": "READY_FOR_ANALYST",
+        "strategic_target_btc": target,
+        "current_direct_btc": current_btc,
+        "btc_acquisition_gap": gap,
+        "target_basis_ref": basis_ref.strip(),
+        "long_horizon_context_state": (
+            long_horizon_state
+        ),
+        "acquisition_timing_asymmetry": {
+            "wait_risk_evidence": (
+                wait_risk_evidence
+            ),
+            "early_deployment_risk_evidence": [],
+            "score": None,
+            "analyst_judgment_required": True,
+        },
+        "action_output": "NONE",
+        "external_action_authority": "NONE",
+        "capital_decision_authority": "USER_ONLY",
+    }
+
+
+def _btc_acquisition_route_context(
+    destination: dict[str, Any] | None,
+    strategic: dict[str, Any],
+) -> dict[str, Any]:
+    if destination is None:
+        return {
+            "state": "BLOCKED",
+            "reason": (
+                "SEASON_DESTINATION_UNAVAILABLE"
+            ),
+            "action_output": "NONE",
+        }
+
+    early_deployment_risk = []
+
+    if (
+        destination.get(
+            "season_posture"
+        )
+        != "WINTER"
+    ):
+        early_deployment_risk.append(
+            "SEASON_POSTURE_NOT_WINTER"
+        )
+
+    gap = _number(
+        strategic.get(
+            "btc_acquisition_gap"
+        )
+    )
+
+    if (
+        strategic.get("state")
+        != "READY_FOR_ANALYST"
+    ):
+        state = "BLOCKED"
+        reason = (
+            "STRATEGIC_BTC_CONTEXT_BLOCKED"
+        )
+    elif gap == 0:
+        state = "READY_FOR_ANALYST"
+        reason = (
+            "STRATEGIC_BTC_TARGET_ALREADY_MET"
+        )
+    else:
+        state = "READY_FOR_ANALYST"
+        reason = (
+            "CROSS_SEASON_BTC_ACQUISITION_"
+            "ROUTE_READY_FOR_ANALYST"
+        )
+
+    asymmetry = strategic.get(
+        "acquisition_timing_asymmetry"
+    )
+
+    wait_risk_evidence = (
+        list(
+            asymmetry.get(
+                "wait_risk_evidence",
+                [],
+            )
+        )
+        if isinstance(
+            asymmetry,
+            dict,
+        )
+        else []
+    )
+
+    return {
+        "state": state,
+        "reason": reason,
+        "harvest_source_assets": [
+            "MSTR",
+            "ASST",
+        ],
+        "reserve_purpose": (
+            "FUTURE_BTC_ACQUISITION"
+        ),
+        "reserve_is_capital_purpose_not_second_ledger": (
+            True
+        ),
+        "carrier_candidates": [
+            "SATA",
+            "STRC",
+            "CASH",
+        ],
+        "carrier_selection_rule": (
+            "REVALIDATE_ROLE_HEALTH_LIQUIDITY_"
+            "CARRY_AND_RETURNABILITY"
+        ),
+        "carrier_selection_authority": (
+            "ANALYST_AND_USER"
+        ),
+        "cash_optionality_is_valid_fallback": True,
+        "winter_destination_asset": "BTC",
+        "staged_acquisition_uses_existing_capital_plan": (
+            True
+        ),
+        "peak_harvest_zone": {
+            "analyst_judgment_only": True,
+            "machine_peak_tick_detection": False,
+            "summer_posture_autumn_destination": (
+                destination.get(
+                    "season_posture"
+                )
+                == "SUMMER"
+                and destination.get(
+                    "allocation_destination"
+                )
+                == "AUTUMN"
+            ),
+        },
+        "acquisition_timing_asymmetry": {
+            "wait_risk_evidence": (
+                wait_risk_evidence
+            ),
+            "early_deployment_risk_evidence": (
+                early_deployment_risk
+            ),
+            "score": None,
+            "analyst_judgment_required": True,
+        },
+        "action_output": "NONE",
+        "external_action_authority": "NONE",
+        "capital_decision_authority": "USER_ONLY",
+        "machine_execution": "FORBIDDEN",
+    }
+
+
 def _portfolio_state(private_context: Any, market_prices: Any) -> dict[str, Any]:
     if not isinstance(private_context, dict) or private_context.get("state") != "AVAILABLE":
         return {"state": "BLOCKED", "reason": "CAPITAL_STATE_UNAVAILABLE"}
@@ -387,6 +683,7 @@ def _portfolio_state(private_context: Any, market_prices: Any) -> dict[str, Any]
         return {"state": "BLOCKED", "reason": "CAPITAL_STATE_MALFORMED"}
     fixed = growth = 0.0
     values: dict[str, float] = {}
+    strategic_btc_quantity = 0.0
     unknown = []
     for row in holdings:
         if not isinstance(row, dict):
@@ -407,6 +704,8 @@ def _portfolio_state(private_context: Any, market_prices: Any) -> dict[str, Any]
                 fixed += value
             else:
                 growth += value
+        elif asset == "BTC":
+            strategic_btc_quantity += qty
         elif qty != 0:
             unknown.append(asset)
     available = _number(cash.get("available_usd"))
@@ -433,6 +732,10 @@ def _portfolio_state(private_context: Any, market_prices: Any) -> dict[str, Any]
         "growth_bucket_pct": growth / invested * 100.0 if invested > 0 else None,
         "mstr_growth_bucket_pct": values.get("MSTR", 0.0) / growth * 100.0 if growth > 0 else None,
         "asst_growth_bucket_pct": values.get("ASST", 0.0) / growth * 100.0 if growth > 0 else None,
+        "strategic_btc_quantity": strategic_btc_quantity,
+        "strategic_btc_role": "STRATEGIC_CORE",
+        "strategic_btc_excluded_from_policy_math": True,
+        "allocation_scope": "FIXED_GROWTH_CASH_POLICY_EXCLUDES_STRATEGIC_BTC_CORE",
     }
     return result
 
@@ -661,6 +964,14 @@ def build_portfolio_allocation_context(
     destination, blockers = _season_destination(pack, cfg.get("season_context"))
     side_job = _side_job(cfg.get("side_job_context"))
     current = _portfolio_state(private_context, cfg.get("market_prices"))
+    strategic_btc = _strategic_btc_context(
+        private_context,
+        pack,
+    )
+    btc_route = _btc_acquisition_route_context(
+        destination,
+        strategic_btc,
+    )
     if destination is None:
         return {
             "common_equity_health": health,
@@ -669,6 +980,8 @@ def build_portfolio_allocation_context(
                 "state": "BLOCKED",
                 "blockers": blockers,
                 "side_job": side_job,
+                "strategic_btc_context": strategic_btc,
+                "btc_acquisition_route_context": btc_route,
                 "action_output": "NONE",
                 "external_action_authority": "NONE",
                 "capital_decision_authority": "USER_ONLY",
@@ -725,6 +1038,8 @@ def build_portfolio_allocation_context(
             "suggested_asst_pct": "growth_bucket_pct",
         },
         "side_job": side_job,
+        "strategic_btc_context": strategic_btc,
+        "btc_acquisition_route_context": btc_route,
         "reason": "SEASON_DESTINATION_WITH_HEALTH_AND_VALUATION_CONTEXT",
         "blockers": [],
         "action_output": "NONE",
@@ -799,6 +1114,10 @@ def compact_portfolio_allocation_context_for_bridge(pack: dict[str, Any]) -> dic
                     "growth_bucket_pct",
                     "mstr_growth_bucket_pct",
                     "asst_growth_bucket_pct",
+                    "strategic_btc_quantity",
+                    "strategic_btc_role",
+                    "strategic_btc_excluded_from_policy_math",
+                    "allocation_scope",
                 )
                 if key in current
             }
@@ -861,6 +1180,8 @@ def compact_portfolio_allocation_context_for_bridge(pack: dict[str, Any]) -> dic
                 "valuation_evidence",
                 "allocation_drift",
                 "target_portfolio_math",
+                "strategic_btc_context",
+                "btc_acquisition_route_context",
                 "reason",
                 "blockers",
                 "action_output",
