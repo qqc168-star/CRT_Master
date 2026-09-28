@@ -6,6 +6,8 @@ from datetime import date
 from copy import deepcopy
 from typing import Any
 
+from .company_health import build_health_dimensions, compact_health_dimensions
+
 SCHEMA_VERSION = "CRT_PORTFOLIO_ALLOCATION_CONTEXT_V0.1"
 HEALTH_SCHEMA_VERSION = "CRT_COMMON_EQUITY_HEALTH_V0.1"
 SUPPORTED_ASSETS = ("MSTR", "ASST")
@@ -225,6 +227,27 @@ def _health_row(pack: dict[str, Any], asset: str, residual_inputs: dict[str, Any
     if isinstance(conversion, dict) and isinstance(conversion.get("events"), list):
         events = deepcopy(conversion["events"])
 
+    organs = {}
+    for section in ("per_share_asset_engine", "funding_engine", "capital_burden_resilience",
+                    "capital_conversion", "management_evidence"):
+        fact = _latest_fact(pack, asset=asset, fact_type="TREASURY_COMPANY_CT", ct_section=section)
+        if isinstance(fact, dict) and isinstance(fact.get("evidence"), dict):
+            organs[section] = fact["evidence"]
+    residual_delta = None
+    if current_residual["state"] == previous_residual["state"] == "AVAILABLE":
+        residual_delta = current_residual["value"] - previous_residual["value"]
+    closure = build_health_dimensions(
+        organs=organs, issuer_id={"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}[asset],
+        as_of_ms=pack.get("generated_at_ms"), residual_change=residual_delta,
+    )
+    # Keep the legacy enum, but do not advertise company-wide improvement when
+    # independently verified organs contradict a positive per-share aggregate.
+    if health_direction == "IMPROVING" and any(
+        d["direction"] in {"DETERIORATING", "MIXED"} for d in closure["dimensions"].values()
+    ):
+        health_direction = "BLOCKED"
+        health_reasons.append("MULTIDIMENSIONAL_TRADE_OFF_REQUIRES_ANALYST")
+
     return {
         "schema_version": HEALTH_SCHEMA_VERSION,
         "asset_id": asset,
@@ -239,6 +262,7 @@ def _health_row(pack: dict[str, Any], asset: str, residual_inputs: dict[str, Any
         "liquidity_change_usd": liquidity_change,
         "cash_coverage_context": cash_coverage_context,
         "capital_conversion_evidence": events,
+        "company_health": closure,
         "health_direction": health_direction,
         "health_reasons": health_reasons,
         "blockers": sorted(set(blockers)),
@@ -1091,6 +1115,8 @@ def compact_portfolio_allocation_context_for_bridge(pack: dict[str, Any]) -> dic
                     else None
                 ),
             }
+            if isinstance(row.get("company_health"), dict):
+                assets[asset]["company_health"] = compact_health_dimensions(row["company_health"])
         result["common_equity_health"] = {
             "schema_version": health.get("schema_version"),
             "state": health.get("state"),

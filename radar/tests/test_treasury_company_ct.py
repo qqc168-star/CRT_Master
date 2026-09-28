@@ -310,7 +310,8 @@ class TreasuryCompanyCtTests(unittest.TestCase):
             baseline = build_evidence_pack(gate(0), observation_db=Path(folder) / "a.db", generated_at_ms=T2, reflexivity_input=reflexivity)
             result = build_evidence_pack(gate(0), observation_db=Path(folder) / "b.db", generated_at_ms=T2,
                 reflexivity_input=reflexivity, treasury_company_ct_input=data)
-        self.assertEqual(set(result), set(baseline))
+        self.assertEqual(set(result), set(baseline) | {"common_equity_health"})
+        self.assertIn("company_health", result["common_equity_health"]["assets"]["MSTR"])
         self.assertEqual(len(result["asset_facts"]["items"]), 6)
         self.assertEqual(len(result["decision_relevant_events"]["items"]), 1)
         self.assertNotIn("empty_reason", result["decision_relevant_events"])

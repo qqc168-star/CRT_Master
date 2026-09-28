@@ -276,6 +276,27 @@ def _funding(raw: Any, issuer: str, as_of: int, coverage: Any) -> dict:
                     "evidence_kind": absorption["evidence_kind"]}
             else:
                 _block(out, claim + ".market_absorption", "ABSORPTION_EVIDENCE_INVALID")
+        # An issuance level is not a trend. Compare explicitly bound, equal
+        # windows only; nominal authorization never substitutes for demand.
+        row["market_absorption_direction"] = None
+        comparison = record.get("absorption_comparison")
+        if comparison is not None:
+            pair = []
+            for label in ("previous", "current"):
+                item = comparison.get(label) if isinstance(comparison, dict) else None
+                meta = _metadata(item, out, claim + ".absorption." + label, issuer, as_of)
+                if meta and _text(item.get("basis_ref")) and _number(item.get("window_ms")) and item["window_ms"] > 0:
+                    value = _numeric(item, "net_proceeds_usd", out, claim + ".absorption." + label)
+                    pair.append({**meta, "basis_ref": item["basis_ref"],
+                                 "window_ms": item["window_ms"], "net_proceeds_usd": value})
+            if (len(pair) == 2 and _comparable(*pair)
+                    and pair[0]["window_ms"] == pair[1]["window_ms"]
+                    and pair[1]["effective_time"] == row["effective_time"]):
+                delta = _calc(out, claim + ".absorption", [p["net_proceeds_usd"] for p in pair], lambda a, b: b - a)
+                row["market_absorption_direction"] = _direction(delta)
+                row["absorption_comparison"] = dict(zip(("previous", "current"), pair))
+            else:
+                _block(out, claim + ".absorption", "ABSORPTION_STATES_NOT_COMPARABLE")
         out["instruments"].append(row)
     return _finish(out, bool(out["instruments"]) or out.get("empty_reason") == "VERIFIED_NO_MATCH")
 
@@ -296,6 +317,13 @@ def _burden_snapshot(raw: Any, out: dict, claim: str, issuer: str, as_of: int) -
     cash, reserve = row["usd_cash_usd"], row["usd_reserve_usd"]
     row["usable_liquidity_usd"] = cash
     row["coverage_basis"] = "USD_CASH_ONLY"
+    # Opt-in legal/use attestation for health interpretation; preserve legacy
+    # cash metrics without treating an unspecified cash balance as unrestricted.
+    row["cash_usability_basis_ref"] = (
+        raw.get("cash_usability_basis_ref")
+        if raw.get("usd_cash_usable_for_carry") is True
+        and _text(raw.get("cash_usability_basis_ref")) else None
+    )
     if reserve is not None and reserve > 0:
         usable, separate = raw.get("reserve_usable_for_carry"), raw.get("reserve_separate_from_cash")
         if usable is True and separate is True:
