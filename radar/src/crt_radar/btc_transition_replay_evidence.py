@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import math
+import hashlib
+import json
+from dataclasses import dataclass, asdict
+from fractions import Fraction
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -10,6 +14,7 @@ FIFTY_WMA_SCHEMA_VERSION = "CRT_BTC_50WMA_LONG_HORIZON_CONTEXT_V0.1"
 TWO_HUNDRED_WMA_SCHEMA_VERSION = "CRT_BTC_200WMA_LONG_HORIZON_CONTEXT_V0.1"
 BTC_LONG_HORIZON_SCHEMA_VERSION = "CRT_BTC_LONG_HORIZON_CONTEXT_V0.1"
 SNAPSHOT_SCHEMA_VERSION = "CRT_BTC_TRANSITION_REPLAY_SNAPSHOT_V0.1"
+OVERBALANCE_SCHEMA_VERSION = "CRT_PRICE_TIME_OVERBALANCE_MEASUREMENT_V0.1"
 
 ANALYST_CLASSIFICATION_FIELDS = (
     "meaningful_breakout",
@@ -1139,6 +1144,159 @@ def build_forward_200wma_context(weekly_bars: object, *, as_of: str,
         return {"state": "BLOCKED", "reason": str(exc), "path": [], **authority}
 
 
+@dataclass(frozen=True)
+class FrozenRallyReference:
+    """Immutable supplied anchors, not a pivot detector or transition state."""
+
+    reference_start_at: str
+    reference_end_at: str
+    reference_start_price: float
+    reference_high_price: float
+    reference_frozen_at: str
+    reference_provenance: str
+    candidate_start_at: str
+    candidate_start_price: float
+
+
+def _overbalance_hash(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                     allow_nan=False).encode()).hexdigest()
+
+
+def _completed_daily_measurement_bars(bars: object, *, as_of: datetime) -> list[dict[str, Any]]:
+    """Add completion clocks to the existing OHLC validator without changing it."""
+    if not isinstance(bars, list):
+        raise TransitionReplayEvidenceError("DAILY_BARS_NOT_ARRAY")
+    selected = []
+    for raw in bars:
+        if not isinstance(raw, dict):
+            raise TransitionReplayEvidenceError("DAILY_BAR_NOT_OBJECT")
+        available = _parse_timestamp(raw.get("available_at"), "daily.available_at")
+        if available > as_of:
+            continue
+        if raw.get("is_complete") is False:
+            continue
+        if raw.get("is_complete") is not True:
+            raise TransitionReplayEvidenceError("EXPLICIT_DAILY_COMPLETION_REQUIRED")
+        closed = _parse_timestamp(raw.get("day_closed_at"), "daily.day_closed_at")
+        if closed > available:
+            raise TransitionReplayEvidenceError("DAILY_COMPLETION_FUTURE_LEAKAGE")
+        selected.append((closed, raw))
+    normalized = _visible_structure_bars([raw for _, raw in selected], as_of=as_of)
+    result = []
+    for (closed, _), row in zip(selected, normalized):
+        if result and closed <= _parse_timestamp(result[-1]["day_closed_at"], "previous.daily"):
+            raise TransitionReplayEvidenceError("DUPLICATE_OR_UNSORTED_DAILY_CLOSE")
+        result.append({"day_closed_at": _iso_z(closed),
+                       **{k: v for k, v in row.items() if k != "available_at_dt"}})
+    return result
+
+
+def build_price_time_overbalance_measurement(
+    daily_bars: object, *, reference: FrozenRallyReference, as_of: datetime | str,
+    previous_measurement: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Count completed daily intervals (start, first highest-high occurrence].
+
+    Equal highs retain their first occurrence. Previous snapshots are optional
+    replay provenance checkpoints, never eligibility/state-machine transitions.
+    """
+    locks = {**_authority_envelope(), "capital_decision_authority": "USER_ONLY",
+             "production": "NOT_APPROVED", "machine_execution": "FORBIDDEN",
+             "research_state": "RESEARCH_ONLY"}
+    try:
+        cutoff = _parse_timestamp(as_of, "as_of")
+        if not isinstance(reference, FrozenRallyReference):
+            raise TransitionReplayEvidenceError("IMMUTABLE_FROZEN_REFERENCE_REQUIRED")
+        rs, re, frozen, cs = [_parse_timestamp(getattr(reference, key), key) for key in (
+            "reference_start_at", "reference_end_at", "reference_frozen_at", "candidate_start_at")]
+        if not rs <= re <= frozen <= cs <= cutoff:
+            raise TransitionReplayEvidenceError("REFERENCE_CANDIDATE_CLOCK_ORDER_INVALID")
+        start_price = _positive_number(reference.reference_start_price, "reference_start_price")
+        ref_high = _positive_number(reference.reference_high_price, "reference_high_price")
+        candidate_price = _positive_number(reference.candidate_start_price, "candidate_start_price")
+        _required_text(reference.reference_provenance, "reference_provenance")
+        reference_return = Fraction(str(ref_high))/Fraction(str(start_price))-1
+        ref_gain = float(reference_return*100)
+        if not math.isfinite(ref_gain) or ref_gain <= 0:
+            raise TransitionReplayEvidenceError("REFERENCE_GAIN_MUST_BE_POSITIVE_FINITE")
+        visible = _completed_daily_measurement_bars(daily_bars, as_of=cutoff)
+        def segment(start, end, availability):
+            rows = [r for r in visible if start < _parse_timestamp(r["day_closed_at"], "day") <= end
+                    and _parse_timestamp(r["available_at"], "available") <= availability]
+            expected = start + timedelta(days=1)
+            for row in rows:
+                if _parse_timestamp(row["day_closed_at"], "day") != expected:
+                    raise TransitionReplayEvidenceError("CONSECUTIVE_COMPLETED_DAILY_INTERVALS_REQUIRED")
+                expected += timedelta(days=1)
+            return rows
+        reference_rows = segment(rs, re, frozen)
+        if not reference_rows or _parse_timestamp(reference_rows[-1]["day_closed_at"], "end") != re:
+            raise TransitionReplayEvidenceError("REFERENCE_DURATION_OR_FROZEN_COVERAGE_INVALID")
+        measured_high = max(r["high"] for r in reference_rows)
+        if measured_high != ref_high:
+            raise TransitionReplayEvidenceError("FROZEN_REFERENCE_HIGH_NOT_SUPPORTED_BY_BARS")
+        ref_index = next(i for i, r in enumerate(reference_rows) if r["high"] == measured_high)
+        ref_duration = ref_index+1
+        candidates = segment(cs, cutoff, cutoff)
+        if not candidates:
+            raise TransitionReplayEvidenceError("NO_VISIBLE_COMPLETED_CANDIDATE_DAYS")
+        if _parse_timestamp(candidates[-1]["day_closed_at"], "last.daily") + timedelta(days=1) <= cutoff:
+            raise TransitionReplayEvidenceError("COMPLETED_CANDIDATE_DAILY_COVERAGE_INCOMPLETE")
+        material = {"anchors": asdict(reference), "reference_bars": reference_rows}
+        reference_hash = _overbalance_hash(material)
+        if previous_measurement is not None:
+            previous = previous_measurement
+            if (not isinstance(previous, dict) or previous.get("state") != "READY_FOR_ANALYST"
+                    or previous.get("measurement_hash") != _overbalance_hash({k: v for k, v in previous.items()
+                                                                              if k != "measurement_hash"})
+                    or previous.get("reference_hash") != reference_hash):
+                raise TransitionReplayEvidenceError("FROZEN_REFERENCE_OR_CHECKPOINT_CHANGED")
+            previous_at = _parse_timestamp(previous.get("as_of"), "previous.as_of")
+            if previous_at > cutoff:
+                raise TransitionReplayEvidenceError("FUTURE_REPLAY_CHECKPOINT")
+            prefix = [r for r in candidates if _parse_timestamp(r["available_at"], "available") <= previous_at]
+            if prefix != previous.get("observed_candidate_bars"):
+                raise TransitionReplayEvidenceError("PREVIOUSLY_VISIBLE_CANDIDATE_HISTORY_CHANGED")
+        high = None
+        duration = 0
+        price_first = time_first = both_first = occurrence = None
+        for index, row in enumerate(candidates):
+            if high is None or row["high"] > high:
+                high, duration, occurrence = row["high"], index+1, row["day_closed_at"]
+            candidate_return = Fraction(str(high))/Fraction(str(candidate_price))-1
+            gain = float(candidate_return*100)
+            exact_price_ratio = candidate_return/reference_return
+            price_ratio, time_ratio = float(exact_price_ratio), duration/ref_duration
+            if not all(math.isfinite(v) for v in (gain, price_ratio, time_ratio)):
+                raise TransitionReplayEvidenceError("NONFINITE_OVERBALANCE_MEASUREMENT")
+            if exact_price_ratio > 1 and price_first is None:
+                price_first = row["day_closed_at"]
+            if duration > ref_duration and time_first is None:
+                time_first = row["day_closed_at"]
+            if exact_price_ratio > 1 and duration > ref_duration and both_first is None:
+                both_first = row["day_closed_at"]
+        result = {"schema_version": OVERBALANCE_SCHEMA_VERSION, "state": "READY_FOR_ANALYST",
+            "as_of": _iso_z(cutoff), "reference": material, "reference_hash": reference_hash,
+            "reference_gain_pct": ref_gain, "reference_duration_bars": ref_duration,
+            "reference_high_at": reference_rows[ref_index]["day_closed_at"],
+            "candidate_gain_pct": gain, "candidate_duration_bars": duration,
+            "running_completed_daily_high": high, "running_high_first_at": occurrence,
+            "price_overbalance_ratio": price_ratio, "time_overbalance_ratio": time_ratio,
+            "price_overbalance_first_at": price_first, "time_overbalance_first_at": time_first,
+            "prior_rally_price_time_envelope_exceeded": both_first is not None,
+            "prior_rally_price_time_envelope_exceeded_at": both_first,
+            "interpretation": "EARLY_TRANSITION_PRESSURE_AVAILABLE_FOR_ANALYST" if both_first else None,
+            "counting_convention": "COMPLETED_DAILY_INTERVALS_START_EXCLUSIVE_FIRST_MAX_INCLUSIVE",
+            "observed_candidate_bars": candidates,
+            "limitation": "MEASUREMENT_ONLY_NOT_BULL_SEASON_CAPITAL_CONFIRMATION_OR_DURABILITY_PREDICTION",
+            **locks}
+        result["measurement_hash"] = _overbalance_hash(result)
+        return result
+    except (TransitionReplayEvidenceError, OverflowError) as exc:
+        return {**_blocked(OVERBALANCE_SCHEMA_VERSION, str(exc), as_of=as_of), **locks}
+
+
 def build_transition_replay_snapshot(
     *,
     structure_bars: object,
@@ -1154,6 +1312,9 @@ def build_transition_replay_snapshot(
     candidate_breakout_at: datetime | str | None = None,
     current_price: float | None = None,
     current_price_at: datetime | str | None = None,
+    overbalance_daily_bars: object = None,
+    overbalance_reference: FrozenRallyReference | None = None,
+    previous_overbalance_measurement: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Combine measured facts and slow-time context in one research snapshot."""
 
@@ -1183,7 +1344,7 @@ def build_transition_replay_snapshot(
         )
         if value.get("state") == "BLOCKED"
     ]
-    return {
+    result = {
         "schema_version": SNAPSHOT_SCHEMA_VERSION,
         "state": "BLOCKED" if blocked_components else "READY_FOR_ANALYST",
         "reason": (
@@ -1200,3 +1361,17 @@ def build_transition_replay_snapshot(
         "blocked_components": blocked_components,
         **_authority_envelope(),
     }
+    if overbalance_reference is not None or overbalance_daily_bars is not None:
+        measurement = build_price_time_overbalance_measurement(overbalance_daily_bars,
+            reference=overbalance_reference, as_of=as_of, previous_measurement=previous_overbalance_measurement)
+        result["price_time_overbalance_measurement"] = measurement
+        # Preserve the existing raw-breach wording: it is not a new invalidation rule.
+        candidate_matches = (isinstance(overbalance_reference, FrozenRallyReference)
+            and structure.get("candidate_breakout_at") == _iso_z(_parse_timestamp(
+                overbalance_reference.candidate_start_at, "candidate_start_at"))) if measurement["state"] != "BLOCKED" else False
+        result["overbalance_existing_structure_invalidation"] = {
+            "state": structure["state"] if candidate_matches else "BLOCKED",
+            "candidate_invalidation_anchor_raw_breach_at": structure.get("measurements", {}).get(
+                "candidate_invalidation_anchor_raw_breach_at") if candidate_matches else None,
+            "source": "structure_measurements", "limitation": "EXISTING_RAW_BREACH_NOT_NEW_CONFIRMED_INVALIDATION"}
+    return result
