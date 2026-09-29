@@ -1079,6 +1079,66 @@ def build_btc_long_horizon_context(
     }
 
 
+def build_forward_200wma_context(weekly_bars: object, *, as_of: str,
+                                provenance: str, scenario: object) -> dict[str, Any]:
+    """Roll the existing 200WMA calculation through a frozen hypothetical path.
+
+    Projected bars are synthetic scenario inputs, never historical observations.
+    The original completed-week loader and 200WMA calculator remain authoritative.
+    """
+    authority = {**_authority_envelope(), "research_state": "RESEARCH_ONLY",
+                 "formal_price_target_authority": "NONE", "production": "NOT_APPROVED",
+                 "capital_decision_authority": "USER_ONLY", "machine_execution": "FORBIDDEN"}
+    try:
+        cutoff = _parse_timestamp(as_of, "as_of")
+        completed = _visible_completed_weekly_bars(weekly_bars, as_of=cutoff)
+        if len(completed) < 200:
+            raise TransitionReplayEvidenceError("TWO_HUNDRED_COMPLETED_WEEKS_REQUIRED")
+        history = completed[-200:]
+        if any(b["week_closed_at_dt"] - a["week_closed_at_dt"] != timedelta(weeks=1)
+               for a, b in zip(history, history[1:])):
+            raise TransitionReplayEvidenceError("CONSECUTIVE_COMPLETED_WEEKS_REQUIRED")
+        if not isinstance(scenario, dict):
+            raise TransitionReplayEvidenceError("LABELED_FUTURE_SCENARIO_REQUIRED")
+        scenario_id = _required_text(scenario.get("scenario_id"), "scenario_id")
+        source = _required_text(scenario.get("source_ref"), "scenario.source_ref")
+        if _parse_timestamp(scenario.get("frozen_at"), "scenario.frozen_at") > cutoff:
+            raise TransitionReplayEvidenceError("SCENARIO_NOT_AVAILABLE_AT_REPLAY_CUTOFF")
+        points = scenario.get("weekly_path")
+        if not isinstance(points, list) or not 1 <= len(points) <= 520:
+            raise TransitionReplayEvidenceError("SCENARIO_REQUIRES_1_TO_520_WEEKLY_POINTS")
+        synthetic = [{"week_closed_at": r["week_closed_at"], "available_at": r["available_at"],
+                      "close": r["close"], "is_complete": True} for r in history]
+        baseline = build_long_horizon_200wma_context(synthetic, as_of=as_of, provenance=provenance)
+        if baseline["state"] == "BLOCKED":
+            raise TransitionReplayEvidenceError(baseline["reason"])
+        previous = history[-1]["week_closed_at_dt"]
+        projected = []
+        for point in points:
+            if not isinstance(point, dict):
+                raise TransitionReplayEvidenceError("SCENARIO_POINT_NOT_OBJECT")
+            at = _parse_timestamp(point.get("week_closed_at"), "scenario.week_closed_at")
+            if at <= cutoff or at - previous != timedelta(weeks=1):
+                raise TransitionReplayEvidenceError("CONSECUTIVE_FUTURE_WEEKLY_SCENARIO_REQUIRED")
+            price = _positive_number(point.get("close"), "scenario.close")
+            synthetic.append({"week_closed_at": _iso_z(at), "available_at": _iso_z(at),
+                              "close": price, "is_complete": True})
+            virtual = build_long_horizon_200wma_context(synthetic[-200:], as_of=_iso_z(at),
+                                                       provenance="SCENARIO:" + source)
+            projected.append({"week_closed_at": _iso_z(at), "scenario_btc_close": price,
+                              "scenario_200wma": virtual["latest_completed_200wma"]})
+            previous = at
+        return {"state": "AVAILABLE", "as_of": _iso_z(cutoff), "scenario_id": scenario_id,
+                "source_ref": source, "historical_provenance": provenance,
+                "frozen_at": scenario["frozen_at"], "baseline_200wma": baseline["latest_completed_200wma"],
+                "path": projected, "scenario_only": True,
+                "legacy_research_scenarios_usd": [120000, 135000, 150000],
+                "limitation": "HYPOTHETICAL_PRICE_PATH_NOT_FORECAST_OR_INDEPENDENT_EVIDENCE",
+                "invalidation": "REVISED_HISTORY_OR_CHANGED_SCENARIO_PATH", **authority}
+    except (TransitionReplayEvidenceError, OverflowError) as exc:
+        return {"state": "BLOCKED", "reason": str(exc), "path": [], **authority}
+
+
 def build_transition_replay_snapshot(
     *,
     structure_bars: object,
