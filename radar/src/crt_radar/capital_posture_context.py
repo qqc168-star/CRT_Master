@@ -284,11 +284,13 @@ def build_capital_posture_context(inputs, evidence_pack, gold_context=None):
                 for d in row.get("company_health", {}).get("dimensions", {}).values())):
             contradictions.append({"asset": asset, "reason": "HEALTH_REQUIRES_ANALYST", "source": deepcopy(row)})
     if _available(rail):
-        legacy = [allocation.get("fixed_income_target_pct"), allocation.get("growth_target_pct")]
-        explicit = rail["current_rail_step"]["fixed_growth_pct"]
-        if explicit is not None and legacy != explicit:
-            contradictions.append({"reason": "LEGACY_STATIC_ALLOCATION_DIFFERS_FROM_EXPLICIT_RAIL",
-                                   "legacy_fixed_growth_pct": legacy, "explicit_rail_pct": explicit})
+        upstream = [allocation.get("fixed_income_target_pct"), allocation.get("growth_target_pct")]
+        # Compare doctrine anchors, never an intermediate analyst-owned step.
+        expected = {"SPRING": [70, 30], "SUMMER_HOLD": [55, 45],
+                    "AUTUMN_PRESERVATION": [80, 20]}.get(rail["current_rail_step"]["rail"])
+        if expected is not None and all(type(v) in (int, float) for v in upstream) and upstream != expected:
+            contradictions.append({"reason": "UPSTREAM_SEASON_ANCHOR_DOCTRINE_MISMATCH",
+                                   "upstream_anchor_pct": upstream, "expected_anchor_pct": expected})
     watch = gold.get("assumption_watch", {})
     assumptions = watch.get("assumptions", [])
     challenged = [deepcopy(r) for r in assumptions if r.get("status") in {"CHALLENGED", "INVALIDATED"}]

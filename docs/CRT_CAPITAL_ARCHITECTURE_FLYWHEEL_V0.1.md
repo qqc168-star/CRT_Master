@@ -57,12 +57,13 @@ The next path point is labeled only as a strategic destination. The canonical
 NONE/SCOUT/BRIDGEHEAD/REINFORCEMENT candidate remains research-only and never
 sets the recorded rail.
 
-Legacy static allocation outputs remain upstream source material. This local
-context does not use them as current rail or next destination. Any mismatch with
-the explicit rail is shown as a contradiction. It does not silently rewrite the
-existing pack or change the GPT bridge. The authoritative new rail semantics
-are local analyst context under the N.S. ruling, not automatic replacement of
-an upstream allocation or capital plan.
+Upstream season anchors are Winter 80/20, Spring initial 70/30, Summer HOLD
+55/45 and Autumn preservation 80/20. They are neither current rail steps nor
+automatic rebalance triggers. Spring's intermediate steps are valid against its
+70/30 initial anchor. Summer/Autumn compare their doctrine anchors only; analyst
+rollover and Winter split do not compare current steps to a static target. Only
+an upstream anchor doctrine mismatch is a contradiction. The deprecated extreme
+Summer flag is a no-op. This does not advance a rail or approve a capital plan.
 
 Harvest has two review lanes. Valuation readiness requires a usable existing
 Treasury valuation or Gold next-cycle valuation for **each** MSTR and ASST;

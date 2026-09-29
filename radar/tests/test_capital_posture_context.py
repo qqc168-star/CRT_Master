@@ -114,6 +114,22 @@ class CapitalPostureTests(unittest.TestCase):
             self.assertEqual(out["eligible_next_posture"]["state"], "NOT_EVALUATED")
             self.assertEqual(out["eligible_next_posture"]["strategic_destination"],
                              RAILS["SPRING"][step+1] if step < 3 else None)
+            self.assertNotIn("UPSTREAM_SEASON_ANCHOR_DOCTRINE_MISMATCH",
+                             [r["reason"] for r in out["contradictions"]])
+            self.assertEqual(out["action_output"], "NONE")
+            self.assertEqual(out["final_eligibility"], "NOT_DETERMINED")
+
+    def test_anchor_comparison_uses_doctrine_not_rollover_step(self):
+        for rail, anchor in (("SUMMER_HOLD", [55, 45]), ("AUTUMN_PRESERVATION", [80, 20]),
+                             ("ANALYST_ROLLOVER", [70, 30]), ("WINTER_SPLIT", [80, 20])):
+            data, pack, _ = fixture(rail=rail)
+            allocation = pack["portfolio_allocation_context"]
+            allocation["fixed_income_target_pct"], allocation["growth_target_pct"] = anchor
+            pack["evidence_pack_hash"] = _hash({k: v for k, v in pack.items() if k != "evidence_pack_hash"})
+            data["current_rail"]["parent_evidence_pack_hash"] = pack["evidence_pack_hash"]
+            out = build_capital_posture_context(data, pack)
+            self.assertNotIn("UPSTREAM_SEASON_ANCHOR_DOCTRINE_MISMATCH",
+                             [r["reason"] for r in out["contradictions"]])
 
     def test_season_price_or_candidate_never_advances_recorded_step(self):
         data, pack, gold = fixture(step=1)
@@ -264,7 +280,7 @@ class CapitalPostureTests(unittest.TestCase):
     def test_legacy_static_target_not_silently_used_as_current_rail(self):
         out = build_capital_posture_context(*fixture(rail="AUTUMN_PRESERVATION"))
         self.assertEqual(out["current_rail_step"]["fixed_growth_pct"], [80, 20])
-        self.assertIn("LEGACY_STATIC_ALLOCATION_DIFFERS_FROM_EXPLICIT_RAIL",
+        self.assertIn("UPSTREAM_SEASON_ANCHOR_DOCTRINE_MISMATCH",
                       [r["reason"] for r in out["contradictions"]])
 
     def test_cli_produces_separate_local_file_and_preserves_inputs(self):
