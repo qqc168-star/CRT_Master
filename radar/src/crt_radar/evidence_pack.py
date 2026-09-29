@@ -33,6 +33,7 @@ from .v110_candidate import evaluate_v110_candidate
 from .treasury_company_ct import add_treasury_company_ct, add_treasury_valuation_context
 
 from .portfolio_allocation_context import (
+    build_common_equity_health,
     build_portfolio_allocation_context,
 )
 
@@ -381,6 +382,7 @@ def build_evidence_pack(
     season_transition_replay_context: dict[str, Any] | None = None,
     btc_control_transfer_validation_evidence: dict[str, Any] | None = None,
     treasury_company_ct_input: dict[str, Any] | None = None,
+    treasury_company_ct_inputs: dict[str, Any] | None = None,
     treasury_valuation_inputs: dict[str, Any] | None = None,
     btc_long_horizon_context: dict[str, Any] | None = None,
     portfolio_allocation_inputs: dict[str, Any] | None = None,
@@ -554,9 +556,21 @@ def build_evidence_pack(
         pack["season_transition_warning_overlay"]
     )
     if treasury_company_ct_input is not None:
+        if treasury_company_ct_inputs is not None:
+            raise ValueError("Supply singular or per-asset CT inputs, not both")
         add_treasury_company_ct(pack, treasury_company_ct_input)
+    if treasury_company_ct_inputs is not None:
+        issuers = {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}
+        if not isinstance(treasury_company_ct_inputs, dict) or set(treasury_company_ct_inputs) - set(issuers):
+            raise ValueError("CT inputs must be keyed by MSTR/ASST")
+        for asset, data in sorted(treasury_company_ct_inputs.items()):
+            if not isinstance(data, dict) or data.get("issuer_id") != issuers[asset]:
+                raise ValueError("CT asset/issuer binding mismatch")
+            add_treasury_company_ct(pack, data)
     if treasury_valuation_inputs is not None:
         add_treasury_valuation_context(pack, treasury_valuation_inputs)
+    if (treasury_company_ct_input is not None or treasury_company_ct_inputs is not None) and portfolio_allocation_inputs is None:
+        pack["common_equity_health"] = build_common_equity_health(pack)
     if portfolio_allocation_inputs is not None:
         portfolio_bundle = build_portfolio_allocation_context(
             pack=pack,
