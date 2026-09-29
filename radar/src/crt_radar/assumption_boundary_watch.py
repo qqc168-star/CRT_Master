@@ -13,6 +13,59 @@ def default_assumption_watch_context_path() -> Path:
     return Path.home() / "CRT_Runtime" / "private" / "assumption_watch_research.json"
 
 
+def evaluate_external_research_assumptions(records: object, *, as_of_ms: int) -> dict[str, Any]:
+    """Local attributed hypotheses; elapsed calendar time never invalidates one.
+
+    An explicit analyst invalidation assessment needs its own PIT-valid evidence.
+    Source claims and observed reality remain separate records.
+    """
+    import math
+    from .treasury_company_ct import validate_pit_replay
+
+    rows = []
+    for raw in records if isinstance(records, list) else []:
+        if not isinstance(raw, dict):
+            rows.append({"status": "BLOCKED", "reason": "ASSUMPTION_NOT_OBJECT"})
+            continue
+        row = {key: raw.get(key) for key in ("assumption_id", "assumption", "source", "as_of",
+                                            "research_window", "invalidation", "reference_value")}
+        row.update(status="BLOCKED", observed_reality=None, deviation=None,
+                   formal_price_target_authority="NONE")
+        if (any(not isinstance(raw.get(k), str) or not raw[k].strip()
+                for k in ("assumption_id", "assumption", "source", "invalidation"))
+                or type(raw.get("as_of")) is not int or not 0 < raw["as_of"] <= as_of_ms):
+            row["reason"] = "ATTRIBUTION_OR_SOURCE_AS_OF_MISSING"
+        else:
+            observed = raw.get("observed_reality")
+            validated = validate_pit_replay(observed, issuer_id="BTC", replay_at=as_of_ms, mode="AUDIT_REPLAY")
+            if validated["state"] != "AVAILABLE":
+                row["reason"] = "OBSERVED_REALITY_NOT_VERIFIED"
+            else:
+                row.update(status="WATCHING", observed_reality=observed, reason="HYPOTHESIS_REQUIRES_ANALYST")
+                actual, reference = observed.get("value"), raw.get("reference_value")
+                if (type(actual) in (int, float) and type(reference) in (int, float)
+                        and math.isfinite(actual) and math.isfinite(reference) and reference > 0):
+                    row["deviation"] = actual/reference-1
+                assessment = raw.get("analyst_assessment")
+                if isinstance(assessment, dict):
+                    assessment_valid = validate_pit_replay(assessment, issuer_id="BTC",
+                                                          replay_at=as_of_ms, mode="AUDIT_REPLAY")
+                    if (assessment_valid["state"] == "AVAILABLE"
+                            and assessment.get("assumption_id") == raw["assumption_id"]
+                            and assessment.get("status") in {"WATCHING", "CHALLENGED", "INVALIDATED"}
+                            and assessment.get("reason")):
+                        row.update(status=assessment["status"], reason=assessment["reason"],
+                                   analyst_assessment=assessment)
+                    else:
+                        row.update(status="BLOCKED", reason="INVALIDATION_ASSESSMENT_NOT_BOUND")
+        rows.append(row)
+    return {"schema_version": "CRT_EXTERNAL_ASSUMPTION_WATCH_V0.1", "assumptions": rows,
+            "state": "AVAILABLE" if rows and all(r["status"] != "BLOCKED" for r in rows) else "BLOCKED",
+            "research_state": "RESEARCH_ONLY", "action_output": "NONE", "external_action_authority": "NONE",
+            "capital_decision_authority": "USER_ONLY", "production": "NOT_APPROVED",
+            "machine_execution": "FORBIDDEN", "formal_price_target_authority": "NONE"}
+
+
 def _blocked(reason: str) -> dict[str, Any]:
     return {
         "schema_version": SCHEMA_VERSION,

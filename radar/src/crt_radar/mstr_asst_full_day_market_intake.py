@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from copy import deepcopy
 from datetime import date, datetime, time
 from typing import Any, Iterable
@@ -284,3 +285,85 @@ def build_mstr_asst_full_day_market_intake(
     }
     result["snapshot_hash"] = _canonical_hash(result)
     return result
+
+
+def build_btc_convexity_research(*, equity_bars: dict, btc_close_marks: list,
+                               generated_at_ms: int, source_window_contract: dict,
+                               early_close_dates=DEFAULT_EARLY_CLOSE_DATES) -> dict:
+    """Research sensitivity on the existing official-close clock, not health.
+
+    The caller supplies an approved calendar/source/split-adjustment binding.
+    Missing sessions/marks are not dropped to manufacture aligned returns.
+    All returns are fractions. Rolling windows are fixed at 20 and 60 sessions.
+    """
+    out = {"research_state": "RESEARCH_ONLY", "assets": {}, "as_of": generated_at_ms,
+           "company_health_authority": "NONE", "formal_price_target_authority": "NONE",
+           "production": "NOT_APPROVED", "capital_decision_authority": "USER_ONLY",
+           "machine_execution": "FORBIDDEN", **_authority()}
+    try:
+        contract = source_window_contract
+        if (not isinstance(contract, dict) or contract.get("state") != "VALIDATED"
+                or not contract.get("source_ref") or not contract.get("share_adjustment_basis")
+                or type(contract.get("available_at_ms")) is not int
+                or not 0 < contract["available_at_ms"] <= generated_at_ms):
+            raise ValueError("APPROVED_SOURCE_WINDOW_AND_SHARE_BASIS_REQUIRED")
+        expected = contract.get("expected_session_close_ms")
+        if (not isinstance(expected, list) or len(expected) < 2
+                or any(type(t) is not int or not 0 < t <= generated_at_ms for t in expected)
+                or expected != sorted(set(expected))):
+            raise ValueError("EXPLICIT_COMPLETED_SESSION_CALENDAR_REQUIRED")
+        marks = _btc_marks_by_close(btc_close_marks)
+        if len(marks) != len(btc_close_marks):
+            raise ValueError("DUPLICATE_BTC_CLOSE_MARK")
+        for t in expected:
+            r = marks.get(t)
+            if (r is None or not math.isfinite(r["price_usd"]) or r["price_usd"] <= 0
+                    or r["source_state"] not in {"VALID_FRESH", "VALIDATED"}):
+                raise ValueError("VERIFIED_EXACT_CLOSE_BTC_MARK_REQUIRED")
+        for asset in SUPPORTED_ASSETS:
+            try:
+                bars = _normalize_bars(asset, equity_bars.get(asset), generated_at_ms=generated_at_ms,
+                                       early_close_dates=frozenset(early_close_dates))
+                rows = [r for r in bars if r["session_state"] == "COMPLETE"]
+                if [r["session_close_ms"] for r in rows] != expected:
+                    raise ValueError("EQUITY_SESSION_COVERAGE_MISMATCH")
+                if any(not math.isfinite(r["close"]) or r["close"] <= 0
+                       or r["source_state"] not in {"REALTIME", "VALIDATED"} for r in rows):
+                    raise ValueError("VERIFIED_POSITIVE_EQUITY_CLOSE_REQUIRED")
+                pairs = [{"at": b["session_close_ms"],
+                          "equity_return": b["close"] / a["close"] - 1,
+                          "btc_return": marks[b["session_close_ms"]]["price_usd"] /
+                                        marks[a["session_close_ms"]]["price_usd"] - 1}
+                         for a, b in zip(rows, rows[1:])]
+
+                def stats(sample):
+                    x = [r["btc_return"] for r in sample]
+                    y = [r["equity_return"] for r in sample]
+                    mx, my = sum(x)/len(x), sum(y)/len(y)
+                    variance = sum((v-mx)**2 for v in x)
+                    beta = sum((a-mx)*(b-my) for a, b in zip(x, y))/variance if variance else None
+                    def capture(up):
+                        selected = [(a, b) for a, b in zip(x, y) if (a > 0 if up else a < 0)]
+                        denominator = math.prod(1+a for a, _ in selected)-1
+                        return (math.prod(1+b for _, b in selected)-1)/denominator if denominator else None
+                    values = {"rolling_btc_beta": beta, "upside_capture": capture(True),
+                              "downside_capture": capture(False),
+                              "relative_return_vs_btc": math.prod(1+v for v in y)-math.prod(1+v for v in x)}
+                    if any(v is not None and not math.isfinite(v) for v in values.values()):
+                        raise ValueError("NONFINITE_SENSITIVITY")
+                    return {**values, "sample_count": len(sample),
+                            "missing_evidence": [k for k, v in values.items() if v is None]}
+                rolling = {str(w): [dict(start_at=pairs[i-w+1]["at"], end_at=pairs[i]["at"],
+                                        **stats(pairs[i-w+1:i+1])) for i in range(w-1, len(pairs))]
+                           for w in (20, 60)}
+                out["assets"][asset] = {"state": "AVAILABLE", "sample_period": [expected[0], expected[-1]],
+                    "full_sample": stats(pairs), "rolling": rolling,
+                    "missing_windows": [w for w, values in rolling.items() if not values],
+                    "limitation": "HISTORICAL_SENSITIVITY_NOT_HEALTH_OR_FIXED_LEVERAGE"}
+            except (ValueError, TypeError, KeyError, OverflowError) as exc:
+                out["assets"][asset] = {"state": "BLOCKED", "reason": str(exc)}
+        out.update(state="AVAILABLE" if all(r["state"] == "AVAILABLE" for r in out["assets"].values()) else "PARTIAL",
+                   source_window_contract=deepcopy(contract))
+    except (ValueError, TypeError, KeyError, OverflowError) as exc:
+        out.update(state="BLOCKED", reason=str(exc))
+    return out
