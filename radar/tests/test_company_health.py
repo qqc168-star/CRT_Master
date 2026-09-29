@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from crt_radar.company_health import build_health_dimensions, compact_health_dimensions
-from crt_radar.portfolio_allocation_context import build_common_equity_health
+from crt_radar.portfolio_allocation_context import build_common_equity_health, _health_tilt
 from crt_radar.treasury_company_ct import build_treasury_company_ct
 from crt_radar.gpt_handoff import build_minimized_bridge_payload, run_gpt_handoff_gate
 from crt_radar.plain_language_notice import build_plain_language_notice
@@ -63,13 +63,31 @@ def health(data, residual=-1):
                                    as_of_ms=T2, residual_change=residual)
 
 
+def aggregate(data, asset_id):
+    ct = build_treasury_company_ct(**data)
+    before, now = data["asset_history"][-2:]
+    bps_before = before["btc_holdings"] / before["diluted_shares"]
+    bps_now = now["btc_holdings"] / now["diluted_shares"]
+    p = {"generated_at_ms": T2, "asset_facts": {"items": [
+        {"issuer_id": data["issuer_id"], "fact_type": "TREASURY_COMPANY_CT", "ct_section": k, "evidence": v}
+        for k, v in ct["organs"].items()] + [{"asset_id": asset_id, "fact_type": "TREASURY_VALUATION_CONTEXT",
+            "evidence": {"current_btc_per_diluted_share": bps_now,
+                         "btc_per_diluted_share_change_pct": bps_now / bps_before - 1}}]}}
+    residual = {label: {"btc_price_usd": 1000, "verified_other_liquid_assets_usd": 0,
+        "other_senior_claims_usd": 0, "coverage_state": "COMPLETE",
+        "capital_structure_coherence_state": "VALIDATED", "capital_structure_scenario_ref": "synthetic"}
+        for label in ("previous", "current")}
+    return build_common_equity_health(p, {asset_id: residual})["assets"][asset_id]
+
+
 class CompanyHealthTests(unittest.TestCase):
     def test_strategy_divergence_and_observed_migration(self):
         out = health(scenario())
         self.assertEqual({k: v["direction"] for k, v in out["dimensions"].items()}, {
             "per_share_asset_engine": "DETERIORATING", "common_capital_efficiency": "DETERIORATING",
             "funding_market_acceptance": "IMPROVING", "senior_claims_carry": "IMPROVING",
-            "liquidity_buffer": "DETERIORATING", "capital_conversion_efficiency": "MIXED"})
+            "liquidity_buffer": "DETERIORATING", "capital_conversion_efficiency": "BLOCKED"})
+        self.assertEqual(out["dimensions"]["capital_conversion_efficiency"]["interpretation_state"], "MIXED")
         engine = out["capital_engine"]
         self.assertEqual(engine["state"], "ANALYST_REQUIRED")
         self.assertEqual(engine["emerging_engine"][0]["destination"], "STRC_REPURCHASE")
@@ -82,20 +100,81 @@ class CompanyHealthTests(unittest.TestCase):
         self.assertEqual(out["dimensions"]["per_share_asset_engine"]["direction"], "IMPROVING")
         self.assertEqual(out["dimensions"]["funding_market_acceptance"]["direction"], "IMPROVING")
         self.assertEqual(out["dimensions"]["senior_claims_carry"]["direction"], "DETERIORATING")
-        self.assertEqual(out["dimensions"]["capital_conversion_efficiency"]["direction"], "MIXED")
-        ct = build_treasury_company_ct(**data)
-        p = {"generated_at_ms": T2, "asset_facts": {"items": [
-            {"issuer_id": data["issuer_id"], "fact_type": "TREASURY_COMPANY_CT", "ct_section": k, "evidence": v}
-            for k, v in ct["organs"].items()] + [{"asset_id": "ASST", "fact_type": "TREASURY_VALUATION_CONTEXT",
-                "evidence": {"current_btc_per_diluted_share": 120/110,
-                             "btc_per_diluted_share_change_pct": 120/110-1}}]}}
-        residual = {label: {"btc_price_usd": 1000, "verified_other_liquid_assets_usd": 0,
-            "other_senior_claims_usd": 0, "coverage_state": "COMPLETE",
-            "capital_structure_coherence_state": "VALIDATED", "capital_structure_scenario_ref": "synthetic"}
-            for label in ("previous", "current")}
-        row = build_common_equity_health(p, {"ASST": residual})["assets"]["ASST"]
+        self.assertEqual(out["dimensions"]["capital_conversion_efficiency"]["direction"], "BLOCKED")
+        self.assertEqual(out["dimensions"]["capital_conversion_efficiency"]["interpretation_state"], "MIXED")
+        row = aggregate(data, "ASST")
         self.assertEqual(row["health_direction"], "BLOCKED")
         self.assertIn("MULTIDIMENSIONAL_TRADE_OFF_REQUIRES_ANALYST", row["health_reasons"])
+
+    def test_strategy_negative_aggregate_is_also_blocked(self):
+        data = scenario()
+        data["capital_conversion_events"] = []
+        row = aggregate(data, "MSTR")
+        self.assertFalse(any(d["interpretation_state"] == "MIXED"
+                             for d in row["company_health"]["dimensions"].values()))
+        self.assertLess(row["btc_per_diluted_share_change_pct"], 0)
+        self.assertLess(row["net_residual_value_per_diluted_share_change_pct"], 0)
+        self.assertEqual(row["health_direction"], "BLOCKED")
+        self.assertIn("MULTIDIMENSIONAL_TRADE_OFF_REQUIRES_ANALYST", row["health_reasons"])
+
+    def test_trade_off_aggregates_do_not_drive_downstream_tilt(self):
+        for asset_id, data, counterpart in (("MSTR", scenario(), "IMPROVING"),
+                                             ("ASST", scenario(True), "STABLE")):
+            with self.subTest(asset=asset_id):
+                data["capital_conversion_events"] = []
+                rows = {a: {"health_direction": counterpart} for a in ("MSTR", "ASST")}
+                rows[asset_id] = aggregate(data, asset_id)
+                for persistent in (False, True):
+                    tilt = _health_tilt(65, 35, {"assets": rows},
+                                       {"MSTR": "ALLOW_TILT", "ASST": "ALLOW_TILT"}, persistent)
+                    self.assertEqual(tilt["health_tilt_pct"], 0)
+                    self.assertEqual((tilt["suggested_mstr_pct"], tilt["suggested_asst_pct"]), (65, 35))
+
+    def test_mixed_interpretation_preserves_availability_and_four_directions(self):
+        for strive in (False, True):
+            out = health(scenario(strive), 1 if strive else -1)
+            dimension = out["dimensions"]["capital_conversion_efficiency"]
+            self.assertEqual(dimension["direction"], "BLOCKED")
+            self.assertEqual(dimension["state"], "AVAILABLE")
+            self.assertEqual(dimension["interpretation_state"], "MIXED")
+            self.assertTrue(dimension["analyst_judgment_required"])
+            self.assertEqual(dimension["reason"], "OPPOSING_VERIFIED_CLAIM_DIRECTIONS")
+            for d in out["dimensions"].values():
+                for item in (d, *d["claims"].values()):
+                    self.assertIn(item["direction"], {"IMPROVING", "STABLE", "DETERIORATING", "BLOCKED"})
+        data = scenario()
+        data["capital_conversion_events"][-1]["liquidity_change_usd"] = None
+        partial = health(data)["dimensions"]["capital_conversion_efficiency"]
+        self.assertEqual(partial["state"], "PARTIAL")
+        self.assertEqual(partial["interpretation_state"], "MIXED")
+        self.assertEqual(partial["direction"], "BLOCKED")
+
+    def test_uniform_dimensions_preserve_legacy_polarity_with_unknown_claims(self):
+        for improving in (False, True):
+            data = scenario()
+            if improving:
+                data["asset_history"][-1].update(btc_holdings=120, diluted_shares=110)
+                data["burden_current"]["usd_cash_usd"] = 1200
+            else:
+                data["burden_current"]["debt_principal_usd"] = 1000
+                data["burden_current"]["annual_debt_interest_usd"] = 100
+            # Missing funding/conversion comparisons must not invent opposition.
+            data["funding_instruments"] = []
+            data["capital_conversion_events"] = []
+            row = aggregate(data, "MSTR")
+            self.assertEqual(row["health_direction"], "IMPROVING" if improving else "DETERIORATING")
+            self.assertNotIn("MULTIDIMENSIONAL_TRADE_OFF_REQUIRES_ANALYST", row["health_reasons"])
+
+    def test_compact_dimensions_keep_scope_and_interpretation_warnings(self):
+        out = health(scenario())
+        compact = compact_health_dimensions(out)
+        for name, original in out["dimensions"].items():
+            row = compact["dimensions"][name]
+            for key in ("direction", "state", "interpretation_state", "reason",
+                        "analyst_judgment_required", "claim_scope"):
+                self.assertEqual(row[key], original[key])
+        self.assertEqual(compact["dimensions"]["funding_market_acceptance"]["claim_scope"],
+                         "PRIMARY_FUNDING_ABSORPTION_AND_COST_ONLY")
 
     def test_unknown_cash_and_carry_do_not_become_zero(self):
         data = scenario()
@@ -197,8 +276,11 @@ class CompanyHealthTests(unittest.TestCase):
             handoff = run_gpt_handoff_gate(p, build_plain_language_notice(p), ledger_path=Path(folder)/"ledger")
             bridge = build_minimized_bridge_payload(p, handoff)
         serialized = json.dumps(bridge, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        self.assertLess(len(serialized.encode()), 16384)
+        self.bridge_payload_bytes = len(serialized.encode())
+        self.assertLess(self.bridge_payload_bytes, 16384)
         self.assertIn(p["common_equity_health"]["assets"]["MSTR"]["company_health"]["context_hash"], serialized)
+        self.assertIn("PRIMARY_FUNDING_ABSORPTION_AND_COST_ONLY", serialized)
+        self.assertIn("OPPOSING_VERIFIED_CLAIM_DIRECTIONS", serialized)
         self.assertNotIn('"mnav_observations":', serialized)
 
     def test_daily_runner_wires_both_issuers_without_allocation(self):

@@ -240,10 +240,12 @@ def _health_row(pack: dict[str, Any], asset: str, residual_inputs: dict[str, Any
         organs=organs, issuer_id={"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}[asset],
         as_of_ms=pack.get("generated_at_ms"), residual_change=residual_delta,
     )
-    # Keep the legacy enum, but do not advertise company-wide improvement when
-    # independently verified organs contradict a positive per-share aggregate.
-    if health_direction == "IMPROVING" and any(
-        d["direction"] in {"DETERIORATING", "MIXED"} for d in closure["dimensions"].values()
+    # Opposing verified claims prevent either legacy polarity from driving a
+    # relative-health tilt. Unknown claims alone do not establish opposition.
+    dimensions = closure["dimensions"].values()
+    directions = {d["direction"] for d in dimensions}
+    if {"IMPROVING", "DETERIORATING"} <= directions or any(
+        d["interpretation_state"] == "MIXED" for d in dimensions
     ):
         health_direction = "BLOCKED"
         health_reasons.append("MULTIDIMENSIONAL_TRADE_OFF_REQUIRES_ANALYST")

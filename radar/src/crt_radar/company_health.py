@@ -34,13 +34,17 @@ def _direction(value, lower=False):
 def _dimension(claims, refs):
     known = {v["direction"] for v in claims.values()} - {"BLOCKED", "STABLE"}
     missing = [k for k, v in claims.items() if v["direction"] == "BLOCKED"]
-    direction = ("MIXED" if len(known) > 1 else next(iter(known)) if known
+    mixed = len(known) > 1
+    direction = ("BLOCKED" if mixed else next(iter(known)) if known
                  else "STABLE" if len(missing) < len(claims) else "BLOCKED")
     return {"direction": direction,
-            "state": "BLOCKED" if direction == "BLOCKED" else "PARTIAL" if missing else "AVAILABLE",
+            "state": "BLOCKED" if len(missing) == len(claims) else "PARTIAL" if missing else "AVAILABLE",
+            "interpretation_state": "MIXED" if mixed else "INSUFFICIENT_EVIDENCE" if direction == "BLOCKED" else "CONSISTENT",
+            "reason": "OPPOSING_VERIFIED_CLAIM_DIRECTIONS" if mixed else
+                      "COMPARISON_EVIDENCE_UNAVAILABLE" if direction == "BLOCKED" else "VERIFIED_CLAIMS_SAME_DIRECTION",
             "claims": claims, "missing_evidence": missing,
             "supporting_evidence": sorted(set(refs)),
-            "analyst_judgment_required": direction in {"MIXED", "BLOCKED"} or bool(missing)}
+            "analyst_judgment_required": direction == "BLOCKED" or bool(missing)}
 
 
 def build_health_dimensions(*, organs, issuer_id, as_of_ms, residual_change=None):
@@ -198,9 +202,20 @@ def build_health_dimensions(*, organs, issuer_id, as_of_ms, residual_change=None
     }, asset_refs + refs(*common) if common else [])
     dimensions["common_capital_efficiency"]["limitation"] = "INTERVAL_OUTCOME_NOT_CAUSAL_ATTRIBUTION"
 
+    scopes = {
+        "per_share_asset_engine": "PER_SHARE_INTERVAL_CHANGE_ONLY",
+        "common_capital_efficiency": "INTERVAL_OUTCOME_NOT_CAUSAL_ATTRIBUTION",
+        "funding_market_acceptance": "PRIMARY_FUNDING_ABSORPTION_AND_COST_ONLY",
+        "senior_claims_carry": "SENIOR_CLAIMS_AND_ANNUAL_CARRY_ONLY",
+        "liquidity_buffer": "USABLE_CASH_AND_STATIC_CARRY_COVERAGE_ONLY",
+        "capital_conversion_efficiency": "COMPONENT_TRADE_OFFS_NOT_CAUSAL_RETURN_OR_FUTURE_CAPACITY",
+    }
+    for name, scope in scopes.items():
+        dimensions[name]["claim_scope"] = scope
+
     improving = [k for k in DIMENSIONS if dimensions[k]["direction"] == "IMPROVING"]
     deteriorating = [k for k in DIMENSIONS if dimensions[k]["direction"] == "DETERIORATING"]
-    mixed = [k for k in DIMENSIONS if dimensions[k]["direction"] == "MIXED"]
+    mixed = [k for k in DIMENSIONS if dimensions[k]["interpretation_state"] == "MIXED"]
     missing = [k + "." + c for k in DIMENSIONS for c in dimensions[k]["missing_evidence"]]
     events.sort(key=lambda e: (e["effective_time"], e["event_id"]))
     routes = [{"source": e["source"], "destination": e["destination"],
@@ -255,6 +270,10 @@ def compact_health_dimensions(context):
     engine = context["capital_engine"]
     return {
         "dimensions": {k: {"direction": v["direction"], "state": v["state"],
+                            "interpretation_state": v["interpretation_state"],
+                            "reason": v["reason"],
+                            "analyst_judgment_required": v["analyst_judgment_required"],
+                            "claim_scope": v["claim_scope"],
                             "missing_claim_count": len(v["missing_evidence"]),
                             "missing_evidence": v["missing_evidence"][:3]}
                        for k, v in context["dimensions"].items()},

@@ -50,8 +50,11 @@ local. Targeted tests precede full regression, compile and repository checks.
 
 ## Interpretation contract
 
-Dimensions report observed changes, not a health score or trade signal. MIXED
-means opposing verified changes; BLOCKED means no usable comparison. PARTIAL
+Dimensions report observed changes, not a health score or trade signal. Direction
+uses only IMPROVING / STABLE / DETERIORATING / BLOCKED. Opposing verified changes
+use direction=BLOCKED and interpretation_state=MIXED, with an explicit reason
+and analyst_judgment_required=true; complete evidence can remain AVAILABLE.
+Unavailable comparisons use interpretation_state=INSUFFICIENT_EVIDENCE. PARTIAL
 availability preserves known changes alongside explicitly missing claims.
 Residual value retains the existing caller-supplied coherent scenario contract.
 An observed capital route is not proof of a dominant or durable funding engine.
@@ -89,8 +92,9 @@ Optional CT extensions:
   without the attestation. Coverage years are static, not a solvency forecast.
 
 Each dimension contains direction, availability state, individual numeric
-claims, supporting source refs and missing evidence. Mixed directions stay
-MIXED, never a vote or net score. Independent known claims survive incomplete
+claims, supporting source refs and missing evidence. Mixed evidence remains a
+separate interpretation, never STABLE, a fifth direction, a vote or net score.
+Independent known claims survive incomplete
 coverage. Residual comparisons reuse the existing coherent residual-input
 contract and require aligned asset/burden endpoints; direction uses absolute
 change so a negative starting residual does not reverse its economic meaning.
@@ -104,15 +108,20 @@ observed events are emerging candidates. Both remain ANALYST_REQUIRED, with
 dominance, future capacity and management intent expressly unestablished.
 Management evidence remains in CT; no quality score is calculated.
 
-Legacy health_direction retains its four-value enum. A formerly positive
-per-share aggregate becomes BLOCKED/analyst-required when a verified dimension
-opposes improvement. New partial claims do not erase independently valid facts.
+Legacy health_direction retains its four-value enum. Opposing verified
+dimensions or a MIXED interpretation make either legacy polarity BLOCKED with
+MULTIDIMENSIONAL_TRADE_OFF_REQUIRES_ANALYST, preventing downstream health tilt.
+Consistent known dimensions preserve the legacy direction; unknown claims do
+not fabricate opposition. New partial claims do not erase independently valid facts.
 Valuation and the existing allocation/season policies are separate.
 
 Full provenance (four clocks and semantic binding), coverage, limitations,
 invalidation and canonical SHA-256 stay local. The bridge verifies that hash,
-then carries dimension direction/availability, missing-claim examples/counts,
+then carries dimension direction/availability, interpretation/reason,
+analyst_judgment_required and claim_scope, plus missing-claim examples/counts,
 observed route examples/counts, contradictions and role-review requirements.
+Funding scope is explicitly PRIMARY_FUNDING_ABSORPTION_AND_COST_ONLY; it does
+not confirm independent secondary-market acceptance.
 At most three missing-claim examples per dimension and four route examples are
 shown; counts disclose additional local details. Raw events and histories stay
 local and the existing strict 16,384-byte guard is unchanged.
@@ -126,7 +135,7 @@ local and the existing strict 16,384-byte guard is unchanged.
 | Funding / market acceptance | IMPROVING (partial) | IMPROVING (partial) |
 | Senior claims / carry | IMPROVING | DETERIORATING |
 | Liquidity buffer | DETERIORATING | DETERIORATING |
-| Capital conversion | MIXED / analyst required | MIXED / analyst required |
+| Capital conversion | BLOCKED direction / MIXED interpretation | BLOCKED direction / MIXED interpretation |
 
 These are synthetic accounting fixtures, not claims about current issuer
 health. Research transcripts supply no factual inputs to these scenarios.
@@ -147,3 +156,29 @@ On 2026-09-29, in the isolated worktree with Python 3.13.14:
 No live issuer data validation, broker operation, production deployment or
 merge is represented by these results. Missing normalized official evidence
 continues to block its own claims.
+
+## N.S. architecture review corrections
+
+Reviewed parent: ba79353124e7f3f40d20c2ec650db6e83d95e3f1.
+The existing architecture is retained. Corrections are limited to the four-value
+direction enum with separate MIXED interpretation, symmetric aggregate trade-off
+blocking, and dimension-level analyst/scope warnings in the compact bridge.
+
+Validation after corrections:
+
+- Targeted health, CT, portfolio, portfolio wiring, valuation and GPT handoff:
+  133 tests passed.
+- Full regression: 917 tests passed.
+- compileall, program registry, read-only surface and git diff --check: passed.
+- Full bridge fixture (both health contexts, portfolio and two 2,100-day
+  valuation histories): 16,155 UTF-8 bytes, strictly below 16,384. Funding scope
+  and opposing-claim reason survive the actual bridge projection.
+- Strategy and Strive aggregate/tilt cases also exclude conversion events to
+  verify cross-dimension opposition independently of within-dimension MIXED.
+- Uniform known directions preserve the legacy polarity; missing claims alone
+  do not create a trade-off. Complete mixed evidence remains AVAILABLE while
+  its direction is BLOCKED; incomplete mixed evidence remains PARTIAL.
+
+No Season Router, Commander, formal mNAV, weight/light, transport authority,
+Treasury engine or BUY/SELL changes. Submit the new commit on the same branch
+for another N.S. Architecture Review; no PR or merge is part of this correction.
