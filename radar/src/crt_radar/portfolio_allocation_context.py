@@ -19,8 +19,8 @@ SIDE_JOB_STATES = ("EXECUTE", "SKIP", "EXIT_PENDING", "BLOCKED")
 SEASON_POLICY = {
     "WINTER": {"cash_range": (12.0, 15.0), "fixed": 80.0, "growth": 20.0, "mstr": 80.0, "asst": 20.0},
     "SPRING": {"cash_range": (8.0, 10.0), "fixed": 70.0, "growth": 30.0, "mstr": 65.0, "asst": 35.0},
-    "SUMMER": {"cash_range": (5.0, 7.0), "fixed": 60.0, "growth": 40.0, "mstr": 55.0, "asst": 45.0},
-    "AUTUMN": {"cash_range": (10.0, 15.0), "fixed": 75.0, "growth": 25.0, "mstr": 75.0, "asst": 25.0},
+    "SUMMER": {"cash_range": (5.0, 7.0), "fixed": 55.0, "growth": 45.0, "mstr": 55.0, "asst": 45.0},
+    "AUTUMN": {"cash_range": (10.0, 15.0), "fixed": 80.0, "growth": 20.0, "mstr": 75.0, "asst": 25.0},
 }
 SPRING_GROWTH_SPLIT = {
     "EARLY": (70.0, 30.0),
@@ -334,6 +334,7 @@ def _season_destination(pack: dict[str, Any], season_context: Any) -> tuple[dict
         "deployment_phase": phase,
         "spring_stage": season_context.get("spring_stage"),
         "severe_stress": season_context.get("severe_stress") is True,
+        # Deprecated/no-op: retained only for legacy input compatibility.
         "extreme_summer_research_candidate": (
             season_context.get("extreme_summer_research_candidate") is True
         ),
@@ -345,11 +346,9 @@ def _target_policy(destination: dict[str, Any]) -> dict[str, Any]:
     policy = deepcopy(SEASON_POLICY[season])
     if season == "SPRING" and destination.get("spring_stage") in SPRING_GROWTH_SPLIT:
         policy["mstr"], policy["asst"] = SPRING_GROWTH_SPLIT[destination["spring_stage"]]
-    if season == "SUMMER" and destination.get("extreme_summer_research_candidate"):
-        policy["fixed"], policy["growth"] = 55.0, 45.0
-        policy["extreme_summer_research_only"] = True
-    else:
-        policy["extreme_summer_research_only"] = False
+    # Deprecated compatibility flag: Summer 55/45 is always the HOLD anchor.
+    # Season anchors never identify or advance a Capital Rail step.
+    policy["extreme_summer_research_only"] = False
     policy["cash_stress_cap"] = 20.0 if destination.get("severe_stress") else policy["cash_range"][1]
     target = _number(destination.get("cash_target_pct"))
     if target is not None:

@@ -217,8 +217,8 @@ class PortfolioAllocationAcceptanceTests(unittest.TestCase):
         expected = {
             "WINTER": ((12.0, 15.0), 80.0, 20.0),
             "SPRING": ((8.0, 10.0), 70.0, 30.0),
-            "SUMMER": ((5.0, 7.0), 60.0, 40.0),
-            "AUTUMN": ((10.0, 15.0), 75.0, 25.0),
+            "SUMMER": ((5.0, 7.0), 55.0, 45.0),
+            "AUTUMN": ((10.0, 15.0), 80.0, 20.0),
         }
         for name, (cash, fixed, growth) in expected.items():
             result = build_portfolio_allocation_context(
@@ -340,14 +340,14 @@ class PortfolioAllocationAcceptanceTests(unittest.TestCase):
                 inputs=inputs(season_context=season("WINTER", severe_stress=True, cash_target_pct=20.1)),
             )
 
-    def test_12_normal_summer_growth_is_forty(self):
+    def test_12_normal_summer_growth_is_forty_five(self):
         result = build_portfolio_allocation_context(
             pack=pack_for(), private_context=private_context(),
             inputs=inputs(season_context=season("SUMMER")),
         )["portfolio_allocation_context"]
-        self.assertEqual(result["growth_target_pct"], 40.0)
+        self.assertEqual(result["growth_target_pct"], 45.0)
 
-    def test_13_extreme_summer_forty_five_requires_explicit_candidate(self):
+    def test_13_extreme_summer_flag_is_deprecated_noop(self):
         normal = build_portfolio_allocation_context(
             pack=pack_for(), private_context=private_context(),
             inputs=inputs(season_context=season("SUMMER")),
@@ -356,8 +356,9 @@ class PortfolioAllocationAcceptanceTests(unittest.TestCase):
             pack=pack_for(), private_context=private_context(),
             inputs=inputs(season_context=season("SUMMER", extreme_summer=True)),
         )["portfolio_allocation_context"]
-        self.assertEqual(normal["growth_target_pct"], 40.0)
+        self.assertEqual(normal["growth_target_pct"], 45.0)
         self.assertEqual(extreme["growth_target_pct"], 45.0)
+        self.assertEqual(normal, extreme)
 
     def test_14_user_holdings_do_not_change_issuer_health(self):
         health_a = build_common_equity_health(pack_for(), residual_inputs())
@@ -417,11 +418,11 @@ class PortfolioAllocationAcceptanceTests(unittest.TestCase):
             ),
         )["portfolio_allocation_context"]
         math = result["target_portfolio_math"]
-        self.assertEqual(result["fixed_income_target_pct"], 60.0)
-        self.assertAlmostEqual(math["fixed_income_portfolio_pct"], 57.0)
-        self.assertAlmostEqual(math["growth_portfolio_pct"], 38.0)
-        self.assertAlmostEqual(math["mstr_portfolio_pct"], 20.9)
-        self.assertAlmostEqual(math["asst_portfolio_pct"], 17.1)
+        self.assertEqual(result["fixed_income_target_pct"], 55.0)
+        self.assertAlmostEqual(math["fixed_income_portfolio_pct"], 52.25)
+        self.assertAlmostEqual(math["growth_portfolio_pct"], 42.75)
+        self.assertAlmostEqual(math["mstr_portfolio_pct"], 23.5125)
+        self.assertAlmostEqual(math["asst_portfolio_pct"], 19.2375)
 
     def test_20_unknown_never_becomes_zero(self):
         cfg = inputs()

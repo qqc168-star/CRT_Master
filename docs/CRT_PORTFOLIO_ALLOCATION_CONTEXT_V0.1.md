@@ -20,18 +20,25 @@ Engineering SSOT（工程唯一真實來源）施工基準：`main@ffb308ae301fc
 - Fixed Income / Growth（固定收益／成長）用 invested-capital bucket percentage（已投入資本桶內百分比）。
 - MSTR / ASST 用 growth-bucket percentage（成長桶內百分比）。
 
-四季目的地：
+四季 Fixed/Growth anchors（季節基準）：
 
 | Destination（到站） | Cash | Fixed / Growth | MSTR / ASST within Growth |
 |---|---:|---:|---:|
 | Winter（冬季） | 12–15% | 80 / 20 | 80 / 20 |
 | Spring（春季） | 8–10% | 70 / 30 | 65 / 35 |
-| Summer（夏季） | 5–7% | 60 / 40 | 55 / 45 |
-| Autumn（秋季） | 10–15% | 75 / 25 | 75 / 25 |
+| Summer（夏季） | 5–7% | 55 / 45 | 55 / 45 |
+| Autumn（秋季） | 10–15% | 80 / 20 | 75 / 25 |
 
-Severe stress（嚴重壓力）可研究到 20% Cash 上限。Summer（夏季）55/45 Fixed/Growth 只在明確標示 `extreme_summer_research_candidate` 時成立，不是正常基準。
+Severe stress（嚴重壓力）可研究到 20% Cash 上限。Summer（夏季）55/45 是 HOLD anchor；`extreme_summer_research_candidate` 已棄用且為 no-op，不改變配置。
 
-Spring（春季）Growth（成長桶）可按既有研究脈絡使用 Early 70/30、Center 65/35、Mature 60/40。
+Spring Fixed/Growth 的 70/30 僅為起始 anchor。後續由 Capital Rail 保存
+70/30 → 65/35 → 60/40 → 55/45；55/45 是最大 Growth 部署目的地，不是必須完成的配額。
+Summer 為 55/45 HOLD；analyst-confirmed rollover 路徑為
+55/45 → 65/35 → 70/30 → 80/20；Autumn 80/20 為資本保存目的地。
+Season anchor != automatic rebalance trigger；Season anchor != current rail step。
+不得因 Season 名稱自行前進軌道，current rail step 必須有明確可信輸入。
+
+Spring（春季）MSTR/ASST 成長桶內比例仍可使用 Early 70/30、Center 65/35、Mature 60/40；此口徑不同於 Fixed/Growth 軌道。
 
 ## Common Equity Health（普通股健康）
 
