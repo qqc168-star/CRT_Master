@@ -10,6 +10,8 @@
 
 `Evidence Pack -> GPT Analysis -> User Decision`
 
+完整 North Star 決策鏈與工程邊界以 `CRT_CORE_CONTRACT.md` 的 Decision Closure Lock、Source Decision-Linkage Lock 與 Engineering Dispatch Discipline 為準。Radar／Evidence 是輸入，不是終點；證據允許時，完整分析必須繼續轉譯至 `BUY / SELL / HOLD / WAIT / ROTATE`，並在適用且有證據支持時列出具體價格／條件、數量／資本金額、攻擊線、第一防線、失效線、收割線、支持證據、反證／不確定性及改變判斷的條件。User 仍是唯一 Capital Decision Authority；這不授予 machine execution，也不改變下列 Production／External Action locks。
+
 Automation（自動化）負責蒐集、驗真、標準化、計算、比較、偵測與淘洗；GPT（分析主廚）負責因果推理、多證據整合、矛盾辨識、資產角色與資本建議；User（使用者）保有最終資本決策權。
 
 ### 1.1 Project Identity Lock（專案身份鎖）
