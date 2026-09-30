@@ -72,6 +72,7 @@ UTC `window_end_ms`, with every locked venue present on every day. Do not select
 an older intersection to conceal a missing day. Record coordinate-wise medians,
 per-field dispersion in basis points, summed base volume as quality metadata,
 venue count, retrieval availability, and original artifact provenance.
+Runtime intake enforces the locked doctrine's `effective_start`: the first underlying UTC bar start in the 201-day window must be on or after that date, otherwise `L6_COMPOSITE_BEFORE_EFFECTIVE_START` blocks qualification.
 
 Each artifact declares the exact locked `venue_id`, `product`, and `transport`:
 

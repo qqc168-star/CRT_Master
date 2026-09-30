@@ -202,6 +202,9 @@ def composite(root: Path, manifest: dict, now: int, authority: dict) -> tuple[li
     # Use the requested completed window, not the latest intersection (which hides missing days).
     end = integer(manifest.get("window_end_ms"), "L6_WINDOW_INVALID")
     require(end % DAY == 0 and end <= now, "L6_WINDOW_INCOMPLETE")
+    effective_start = int(datetime.strptime(doctrine["effective_start"], "%Y-%m-%d")
+                          .replace(tzinfo=timezone.utc).timestamp() * 1000)
+    require(end - 201 * DAY >= effective_start, "L6_COMPOSITE_BEFORE_EFFECTIVE_START")
     rows = []
     for at in range(end - 200 * DAY, end + 1, DAY):
         require(all(at in values for values in by_venue.values()), "L6_THREE_VENUE_DAY_MISSING")

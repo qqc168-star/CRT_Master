@@ -57,7 +57,7 @@ class L6SourceBindingTests(unittest.TestCase):
     def save(self, family, manifest):
         (self.root / f"{family}.json").write_text(json.dumps(manifest), encoding="utf-8")
 
-    def composite(self, *, missing_venue=False, missing_day=False, future=False):
+    def composite(self, *, missing_venue=False, missing_day=False, future=False, window_end=END):
         artifacts = []
         for index, venue in enumerate(self.authority["decisions"][l6.COMPOSITE]["venue_universe"]):
             if missing_venue and index == 2:
@@ -66,7 +66,7 @@ class L6SourceBindingTests(unittest.TestCase):
             for day in range(201):
                 if missing_day and index == 1 and day == 200:
                     continue
-                start = END - (201 - day) * l6.DAY
+                start = window_end - (201 - day) * l6.DAY
                 if future and index == 1 and day == 200:
                     start = NOW // l6.DAY * l6.DAY
                 base = 100 + day + index * 10
@@ -86,7 +86,10 @@ class L6SourceBindingTests(unittest.TestCase):
                     ("timestamp", "open", "high", "low", "close", "volume"), row)) for row in rows]}}).encode()
                 url = "https://www.bitstamp.net/api/v2/ohlc/btcusd/?step=86400"
             artifacts.append(self.artifact(raw, url, **extra))
-        return self.manifest(l6.COMPOSITE, artifacts)
+        manifest = self.manifest(l6.COMPOSITE, artifacts)
+        manifest["window_end_ms"] = window_end
+        self.save(l6.COMPOSITE, manifest)
+        return manifest
 
     def aggressor(self, *, unknown=False, gap=False, partial=False, boundary=False, old_units=False):
         artifacts = []
@@ -296,6 +299,20 @@ class L6SourceBindingTests(unittest.TestCase):
         self.save(l6.COMPOSITE, manifest)
         with self.assertRaisesRegex(l6.L6SourceError, "DUPLICATE_VENUE_DAY"):
             self.load(l6.COMPOSITE)
+
+    def test_composite_window_before_effective_start_blocked(self):
+        first_bar_start = 1704067200000 - l6.DAY  # 2023-12-31 UTC
+        self.composite(window_end=first_bar_start + 201 * l6.DAY)
+        with self.assertRaisesRegex(l6.L6SourceError, "^L6_COMPOSITE_BEFORE_EFFECTIVE_START$"):
+            self.load(l6.COMPOSITE)
+
+    def test_composite_window_at_effective_start_qualifies(self):
+        first_bar_start = 1704067200000  # 2024-01-01 UTC
+        self.composite(window_end=first_bar_start + 201 * l6.DAY)
+        output = self.load(l6.COMPOSITE)
+        self.assertEqual(output["state"], "READY")
+        self.assertEqual(len(output["measurement_rows"]), 201)
+        self.assertEqual(output["measurement_rows"][0]["observed_at_ms"] - l6.DAY, first_bar_start)
 
 
 if __name__ == "__main__":
