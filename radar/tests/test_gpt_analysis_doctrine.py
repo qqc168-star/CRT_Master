@@ -77,6 +77,55 @@ class GptAnalysisDoctrineTests(unittest.TestCase):
             with self.subTest(required=required):
                 self.assertIn(required, self.core)
 
+    def test_three_operating_rooms_have_distinct_authorities(self) -> None:
+        lock = self.core_lock("Project Operating Rooms Lock")
+        self.assertIn("exactly three permanent main rooms", lock)
+        rooms = lock.split("\n1. ", 1)[1].split("\n\nCRT MASTER Work", 1)[0]
+        mine, remaining_rooms = rooms.split("\n2. ", 1)
+        central, operations = remaining_rooms.split("\n3. ", 1)
+        for text in ("Research Mine", "research findings / candidate insights", "no architecture authority",
+                     "must not modify CRT architecture", "decide formal source selection",
+                     "change formal locks", "independently establish Engineering SSOT",
+                     "returns to N.S. Central"):
+            with self.subTest(room="mine", required=text):
+                self.assertIn(text, mine)
+        for text in ("N.S. Central", "architecture / integration authority", "current GitHub main",
+                     "architecture selection", "source selection", "Work dispatch", "PR architecture review",
+                     "CRT MASTER Work must not replace Central"):
+            with self.subTest(room="central", required=text):
+                self.assertIn(text, central)
+        for text in ("CRT Decision Operations", "Investment Recommendation -> User Capital Decision",
+                     "never the terminal output", "When evidence permits", "BUY / SELL / HOLD / WAIT / ROTATE",
+                     "User remains the sole Capital Decision Authority"):
+            with self.subTest(room="operations", required=text):
+                self.assertIn(text, operations)
+        self.assertIn("CRT MASTER Work is not a fourth main room", lock)
+        self.assertIn("same Work chat", lock)
+        self.assertIn("latest current main", lock)
+        self.assertIn("new clean isolated worktree", lock)
+
+    def test_validation_ownership_and_risk_triggered_reruns_are_explicit(self) -> None:
+        lock = self.core.split("#### Validation Responsibility Lock\n", 1)[1].split("\n### ", 1)[0]
+        for text in (
+            "Work owns construction validation", "targeted tests + full regression",
+            "compile / static checks", "git status", "git diff --check",
+            "must not be omitted to save quota or time", "N.S. owns architecture review",
+            "PR diff", "architecture compliance", "formal-lock preservation", "Work test evidence",
+            "verifiable CI / GitHub results", "must not routinely rerun",
+            "Rerun is risk-triggered, not ritual", "must rerun appropriate tests",
+            "new PR commit", "changed base SHA", "merge conflict / rebase",
+            "missing or unverifiable test evidence", "CI results inconsistent",
+            "important risk not covered by existing tests", "previously untested module",
+            "test configuration / dependency changes", "concrete, explainable technical reason",
+            "only tests sufficient to verify the identified risk",
+            "full regression when the risk may affect the whole repository",
+            "does not waive Work's required construction validation",
+            "Saving quota must remove duplication, not verification",
+            "never substitute N.S. architecture review for construction tests",
+        ):
+            with self.subTest(required=text):
+                self.assertIn(text, lock)
+
     def test_doctrine_is_boot_discoverable(self) -> None:
         boot = self.readme.split("## Boot sequence for a fresh GPT", 1)[1].split("\n## ", 1)[0]
         self.assertIn("Read `CRT_GPT_ANALYSIS_DOCTRINE_V0.1.md`", boot)

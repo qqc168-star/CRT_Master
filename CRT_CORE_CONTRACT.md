@@ -89,6 +89,42 @@ N.S. Central defines objective, architecture, source selection, boundaries, and 
 - Every task follows Construction -> Validation -> Seal & PR. Construction must not commit or push. Validation includes targeted tests and full regression, followed by git status and git diff --check; only after all pass may add, commit, push, and PR proceed.
 - After PR creation, return to N.S. for architecture review. Central does not rerun completed full regression without a new concrete reason. Merge still requires authorization; the next dispatch is decided only after N.S. rereads the latest current main.
 
+#### Validation Responsibility Lock
+
+Work owns construction validation. Before Seal & PR, CRT MASTER Work must complete targeted tests + full regression, compile / static checks required by the existing repository workflow, git status, and git diff --check. Tests must not be omitted to save quota or time.
+
+N.S. owns architecture review. Central reviews the PR diff, architecture compliance, formal-lock preservation, Work test evidence, and verifiable CI / GitHub results. It must not routinely rerun Work's completed full regression merely for repeated confirmation without a concrete reason.
+
+Rerun is risk-triggered, not ritual. N.S. Central or Work must rerun appropriate tests when any of these triggers occurs:
+
+- a new PR commit after the original validation;
+- a changed base SHA;
+- merge conflict / rebase;
+- missing or unverifiable test evidence;
+- CI results inconsistent with Work's report;
+- architecture review identifies an important risk not covered by existing tests;
+- changes affect a previously untested module;
+- test configuration / dependency changes;
+- another concrete, explainable technical reason.
+
+Rerun only tests sufficient to verify the identified risk; rerun full regression when the risk may affect the whole repository. This risk-scoped rerun rule does not waive Work's required construction validation before Seal & PR.
+
+Saving quota must remove duplication, not verification. Never skip targeted tests, full regression, or diff checks to save Work quota, and never substitute N.S. architecture review for construction tests. Do not make Work testing -> unjustified Central retesting -> next Work retesting a fixed repetitive process.
+
+### Project Operating Rooms Lock
+
+第一顆比特幣｜CRT has exactly three permanent main rooms:
+
+1. **礦場淘金｜Research Mine** collects external research, examines predecessor viewpoints, challenges CRT hypotheses, discovers causal mechanisms, and finds incremental decision value. Its output is research findings / candidate insights. It has no architecture authority: it must not modify CRT architecture, decide formal source selection, change formal locks, or independently establish Engineering SSOT. Valuable research returns to N.S. Central to decide whether it should be engineered.
+2. **總工程師｜N.S. Central** is the architecture / integration authority. It reads current GitHub main, understands research and engineering state, defines objective, architecture selection, source selection, module integration, engineering boundaries, and acceptance criteria, and owns Work dispatch and PR architecture review. After Merge it rereads current main and selects the next organ actually blocking the CRT decision chain. CRT MASTER Work must not replace Central in these decisions.
+3. **雷達城｜CRT Decision Operations** operates CRT against real markets through `Radar Truth -> Evidence -> Causal Analysis -> Season / Regime -> Asset / Issuer Health -> Valuation -> Capital Posture -> Portfolio Translation -> Investment Recommendation -> User Capital Decision`. Radar is a sensing / input layer, never the terminal output. When evidence permits, recommendations must reach `BUY / SELL / HOLD / WAIT / ROTATE`, with the applicable evidence-supported prices / conditions, quantities / capital amounts, attack line, first defense, invalidation, harvest, supporting evidence, contradiction / uncertainty, and what changes the view specified by Decision Closure Lock. User remains the sole Capital Decision Authority.
+
+CRT MASTER Work is not a fourth main room. It is the single continuing engineering workspace, with this permanent construction chain:
+
+`N.S. Central -> CRT MASTER Work -> Construction -> Validation -> Seal & PR -> N.S. architecture review -> Merge -> reread current main -> next N.S. dispatch`
+
+Continue using the same Work chat. After an independent task is completed and merged, the next task must use the latest current main and, as needed, a new clean isolated worktree. Existing stash remains untouched.
+
 These locks do not change the six-layer weights, light thresholds, mNAV semantics, formal Season Router semantics, Production approval, External Action Authority, or machine execution permissions. They introduce no Phase / Wave / Dashboard / Work Order framework.
 
 ## Fail-Closed Rule
