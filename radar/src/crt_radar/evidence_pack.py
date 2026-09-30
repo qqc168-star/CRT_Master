@@ -7,6 +7,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
+from .btc_etf_intake import add_to_pack as add_btc_etf_evidence
 from .assumption_boundary_watch import evaluate_assumption_watch
 from .asset_strategy_delta import build_asset_strategy_delta
 from .btc_bull_validation import evaluate_btc_bull_validation
@@ -390,6 +391,7 @@ def build_evidence_pack(
     treasury_valuation_inputs: dict[str, Any] | None = None,
     btc_long_horizon_context: dict[str, Any] | None = None,
     portfolio_allocation_inputs: dict[str, Any] | None = None,
+    btc_etf_archive: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
         raise ValueError("source_gate must be an object")
@@ -591,5 +593,7 @@ def build_evidence_pack(
                     "portfolio_allocation_context"
                 ],
             )
+    if btc_etf_archive is not None:
+        add_btc_etf_evidence(pack, btc_etf_archive)
     pack["evidence_pack_hash"] = _sha256(pack)
     return pack

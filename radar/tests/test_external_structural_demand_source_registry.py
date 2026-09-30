@@ -26,13 +26,17 @@ class ExternalStructuralDemandSourceRegistryTests(unittest.TestCase):
         )
         self.assertEqual(self.registry["status"], "SOURCE_PROOF_PARTIAL_READY")
 
-    def test_btc_primary_source_is_glassnode_and_farside_is_non_blocking(self):
+    def test_free_primary_and_deferred_sources(self):
         glassnode = self.sources["GLASSNODE_US_SPOT_BTC_ETF"]
         farside = self.sources["FARSIDE_US_BTC_ETF_FLOW"]
 
-        self.assertEqual(glassnode["role"], "PRIMARY_PROCESSED_SOURCE")
-        self.assertEqual(glassnode["state"], "READY_CANDIDATE")
-        self.assertTrue(glassnode["local_transport_proven"])
+        self.assertEqual(glassnode["role"], "DEFERRED_SECONDARY_RESEARCH_OR_AUDIT")
+        self.assertEqual(glassnode["state"], "DEFERRED_CREDENTIAL_GATED")
+        self.assertFalse(glassnode["local_transport_proven"])
+        self.assertEqual(self.sources["TFTC_US_SPOT_BTC_ETF_FLOW"]["role"], "PRIMARY_PROCESSED_FLOW_SOURCE")
+        self.assertEqual(self.sources["COINGLASS_BTC_ETF"]["role"], "DEFERRED_PAID_UPGRADE_CANDIDATE")
+        self.assertFalse(self.registry["paid_upgrade_policy"]["automatic_subscription"])
+        self.assertEqual(len(self.registry["paid_upgrade_policy"]["activation_requires"]), 3)
 
         self.assertEqual(farside["role"], "NON_BLOCKING_CROSS_CHECK")
         self.assertEqual(farside["state"], "LOCAL_FETCH_BLOCKED")
