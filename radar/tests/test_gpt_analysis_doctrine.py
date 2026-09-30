@@ -12,6 +12,70 @@ class GptAnalysisDoctrineTests(unittest.TestCase):
         cls.readme_path = cls.root / "README.md"
         cls.doctrine = cls.doctrine_path.read_text(encoding="utf-8")
         cls.readme = cls.readme_path.read_text(encoding="utf-8")
+        cls.core = (cls.root / "CRT_CORE_CONTRACT.md").read_text(encoding="utf-8")
+
+    def core_lock(self, heading: str) -> str:
+        return self.core.split(f"### {heading}\n", 1)[1].split("\n##", 1)[0]
+
+    def test_core_decision_closure_reaches_user_capital_decision(self) -> None:
+        lock = self.core_lock("Decision Closure Lock")
+        self.assertIn("CRT terminates in capital decision support, not Radar / Evidence alone", lock)
+        self.assertIn(
+            "World -> Radar -> Evidence -> Causal Analysis -> Season / Regime -> "
+            "Asset / Issuer Health -> Valuation -> Capital Posture -> Portfolio Translation -> "
+            "Investment Recommendation -> User Capital Decision", lock
+        )
+        for required in (
+            "BUY / SELL / HOLD / WAIT / ROTATE", "When evidence permits",
+            "exact price / condition", "quantity / capital amount", "attack line",
+            "first defense", "invalidation", "harvest", "supporting evidence",
+            "contradiction / uncertainty", "what changes the view",
+            "claim-scoped fail-closed", "User remains Capital Decision Authority",
+            "no machine execution authority",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, lock)
+
+    def test_source_work_requires_decision_linkage_without_unlocking_sources(self) -> None:
+        lock = self.core_lock("Source Decision-Linkage Lock")
+        for required in (
+            "No source work without decision linkage.", "existing downstream contract",
+            "scraper", "API integration", "source adapter", "anti-bot workaround",
+            "redirect / cookie / transport workaround",
+            "does not automatically become a daily runtime dependency",
+            "mature integrated source", "reliability", "provenance", "freshness",
+            "maintenance burden", "decision value", "does not override existing formal source locks",
+            "deferred until the complete CRT decision chain works end to end",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, lock)
+
+    def test_dispatch_is_serial_and_returns_architecture_decisions_to_ns(self) -> None:
+        lock = self.core_lock("Engineering Dispatch Discipline")
+        for required in (
+            "Architecture before construction.", "N.S. Central defines objective, architecture, source selection, boundaries, and acceptance criteria",
+            "must not independently redo architecture selection", "single continuing CRT MASTER engineering chat",
+            "one independently closable organ at a time", "clean isolated worktree",
+            "Never touch existing stash", "Stop construction and report to N.S.",
+            "Do not invent a solution and continue construction",
+            "Construction must not commit or push", "targeted tests and full regression",
+            "git status and git diff --check", "only after all pass",
+            "return to N.S. for architecture review", "without a new concrete reason",
+            "Merge still requires authorization", "N.S. rereads the latest current main",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, lock)
+
+    def test_core_locks_are_linked_and_preserve_formal_authority(self) -> None:
+        for heading in ("Decision Closure Lock", "Source Decision-Linkage Lock", "Engineering Dispatch Discipline"):
+            self.assertIn(heading, self.doctrine)
+        for required in (
+            "Production remains `NOT_APPROVED`", "External Action Authority remains `NONE`",
+            "No trading, account access, or fund movement is authorized",
+            "formal Season Router semantics", "machine execution permissions",
+        ):
+            with self.subTest(required=required):
+                self.assertIn(required, self.core)
 
     def test_doctrine_is_boot_discoverable(self) -> None:
         boot = self.readme.split("## Boot sequence for a fresh GPT", 1)[1].split("\n## ", 1)[0]

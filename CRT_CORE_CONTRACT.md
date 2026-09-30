@@ -51,6 +51,46 @@ The user defines objectives and risk constraints, approves formal model changes,
 
 Automation prepares evidence. GPT creates judgment. Human commits capital.
 
+### Decision Closure Lock
+
+CRT terminates in capital decision support, not Radar / Evidence alone. The complete North Star chain is:
+
+`World -> Radar -> Evidence -> Causal Analysis -> Season / Regime -> Asset / Issuer Health -> Valuation -> Capital Posture -> Portfolio Translation -> Investment Recommendation -> User Capital Decision`
+
+Radar is the sensing / input layer, not the final CRT output. When evidence permits, complete decision support must continue to `BUY / SELL / HOLD / WAIT / ROTATE` recommendations. Where applicable and supported, include:
+
+- exact price / condition and quantity / capital amount;
+- attack line, first defense, invalidation, and harvest;
+- supporting evidence, contradiction / uncertainty, and what changes the view.
+
+Unsupported claims remain subject to the claim-scoped fail-closed rule; this closure requirement never authorizes invented prices, quantities, or evidence. User remains Capital Decision Authority. Recommendations grant no machine execution authority and do not change Production approval or External Action Authority.
+
+### Source Decision-Linkage Lock
+
+No source work without decision linkage.
+
+Before adding or repairing any scraper, API integration, source adapter, anti-bot workaround, or redirect / cookie / transport workaround, identify the exact CRT decision or existing downstream contract it improves.
+
+A primary / official source does not automatically become a daily runtime dependency merely because it is more authoritative. When a mature integrated source sufficiently supports the required decision claim, weigh reliability, provenance, freshness, maintenance burden, and decision value. This principle does not override existing formal source locks or permit lower-precision evidence to replace a blocked formal claim.
+
+The comprehensive Decision-Purpose / Data-Purity Audit is deferred until the complete CRT decision chain works end to end; this lock does not authorize a general source cleanup.
+
+### Engineering Dispatch Discipline
+
+Architecture before construction.
+
+N.S. Central defines objective, architecture, source selection, boundaries, and acceptance criteria before dispatch. CRT MASTER Work implements the defined specification; it must not independently redo architecture selection.
+
+`N.S. Central decision -> one independently closable organ -> Construction -> Validation -> Seal & PR -> N.S. architecture review -> Merge -> reread current main -> next dispatch`
+
+- Use this single continuing CRT MASTER engineering chat and execute one independently closable organ at a time. Do not create another Work chat on task switches, parallel Work chats competing for main, or advance Work A / B / C / D queues.
+- One chat does not mean one permanent branch / worktree. After each independently completed and merged task, reread current GitHub main as Engineering SSOT and, as needed, create a clean isolated worktree from that main for the next task. Never touch existing stash.
+- Stop construction and report to N.S. when architecture selection, a formal lock, source selection, cross-module conflict, or a defective specification requires a decision. Do not invent a solution and continue construction.
+- Every task follows Construction -> Validation -> Seal & PR. Construction must not commit or push. Validation includes targeted tests and full regression, followed by git status and git diff --check; only after all pass may add, commit, push, and PR proceed.
+- After PR creation, return to N.S. for architecture review. Central does not rerun completed full regression without a new concrete reason. Merge still requires authorization; the next dispatch is decided only after N.S. rereads the latest current main.
+
+These locks do not change the six-layer weights, light thresholds, mNAV semantics, formal Season Router semantics, Production approval, External Action Authority, or machine execution permissions. They introduce no Phase / Wave / Dashboard / Work Order framework.
+
 ## Fail-Closed Rule
 
 Missing, stale, invalid, or unverifiable critical evidence must produce `BLOCKED` rather than a fabricated value or false certainty.
