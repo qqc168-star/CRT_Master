@@ -1,0 +1,44 @@
+{
+  "schema_version": "CRT_L6_SOURCE_BINDING_OVERLAY_V0.1",
+  "base_registry_sha256": "30ee09f0c6403c9d782a49411c61c24b91d6522d8c4960c4dfd6ef572e7375bc",
+  "sources": [
+    {
+      "authentication": "LOCAL_READ_ONLY",
+      "criticality": "CRITICAL_FAIL_CLOSED",
+      "documentation": "research/CRT_PUBLIC_SOURCE_AUTHORITY_LOCK_V0.1.json",
+      "endpoint": "runtime/l6_sources/BTC_SPOT_COMPOSITE_OHLCV.json",
+      "input_family": "BTC_SPOT_COMPOSITE_OHLCV",
+      "max_age_seconds": 172800,
+      "namespace": "AS-L6",
+      "parser_id": "CRT_L6_COMPOSITE_ARCHIVES_V1",
+      "provider": "Locked research source archives",
+      "role": "Byte-verified L6 candidate evidence only",
+      "source_id": "CRT-CONN-BTC-SPOT-THREE-VENUE-COMPOSITE-001",
+      "transport": "LOCAL_VERIFIED_PROVIDER_ARCHIVES",
+      "formal_model": "NOT_APPROVED",
+      "production": "NOT_APPROVED",
+      "external_action_authority": "NONE",
+      "action_output": "NONE",
+      "capital_decision_authority": "USER_ONLY"
+    },
+    {
+      "authentication": "LOCAL_READ_ONLY",
+      "criticality": "CRITICAL_FAIL_CLOSED",
+      "documentation": "research/CRT_PUBLIC_SOURCE_AUTHORITY_LOCK_V0.1.json",
+      "endpoint": "runtime/l6_sources/BTC_SPOT_AGGRESSOR_DAILY.json",
+      "input_family": "BTC_SPOT_AGGRESSOR_DAILY",
+      "max_age_seconds": 172800,
+      "namespace": "AS-L6",
+      "parser_id": "CRT_L6_AGGRESSOR_ARCHIVES_V1",
+      "provider": "Locked research source archives",
+      "role": "Byte-verified L6 candidate evidence only",
+      "source_id": "CRT-CONN-BTC-SPOT-AGGRESSOR-BINANCE-001",
+      "transport": "LOCAL_VERIFIED_PROVIDER_ARCHIVES",
+      "formal_model": "NOT_APPROVED",
+      "production": "NOT_APPROVED",
+      "external_action_authority": "NONE",
+      "action_output": "NONE",
+      "capital_decision_authority": "USER_ONLY"
+    }
+  ]
+}

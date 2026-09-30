@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 from .source_registry import SourceRegistry, SourceSpec, canonical_json_bytes, sha256_hex
 from .liquidation_aggregator import load_verified_snapshot, verify_snapshot, SnapshotCorruption
+from .l6_source_binding import SOURCE_IDS as L6_SOURCE_IDS, load_source as load_l6_source
 
 
 USER_AGENT = "CRT-Radar/0.4-RC1 read-only source gate"
@@ -697,13 +698,17 @@ def run_source_gate(
     liquidation_aggregate_payload: dict[str, Any] | None = None,
     probe_fetcher: Callable[[SourceSpec], FetchResult] | None = None,
     now_ms: int | None = None,
+    l6_source_root: Path | None = None,
 ) -> dict[str, Any]:
     now = int(time.time() * 1000) if now_ms is None else now_ms
+    base_registry_hash = registry.hash
+    registry = registry.with_l6_candidate_sources()
     run_id = str(uuid.uuid4())
     overrides = fetch_overrides or {}
     evidence: list[dict[str, Any]] = []
     parsed: dict[str, Any] = {}
     blocked: list[str] = []
+    l6_blocked: list[str] = []
 
     critical_families = ["DOLLAR_STRENGTH_PROXY", "OPEN_INTEREST", "FUNDING_RATE"]
     for family in critical_families:
@@ -799,6 +804,28 @@ def run_source_gate(
         if family in handled_families:
             continue
         spec = registry.by_input_family(family)
+        if family in L6_SOURCE_IDS:
+            # Formal L6 consumes byte-verified provider archives. Generic metric
+            # overrides cannot assert qualification for either locked source.
+            parsed_value = None
+            quality_error = None
+            try:
+                if fetch_overrides is not None and l6_source_root is None:
+                    raise ContractViolation("L6 explicit offline archive root missing")
+                parsed_value = load_l6_source(family, now_ms=now, root=l6_source_root)
+                _assert_fresh(parsed_value["as_of_ms"], now_ms=now, max_age_seconds=spec.max_age_seconds)
+                quality_state = "VALID_FRESH"
+                parsed[family] = parsed_value
+            except Exception as exc:
+                quality_state = "STALE" if isinstance(exc, StaleData) else "INVALID"
+                quality_error = f"{type(exc).__name__}: {exc}"
+                l6_blocked.append(f"{family}_{quality_state}")
+            fetched = FetchResult(spec.source_id, "OK" if quality_state == "VALID_FRESH" else "ERROR",
+                                  payload=parsed_value, error=quality_error)
+            evidence.append(_evidence_envelope(spec, fetched, registry_hash=registry.hash,
+                                              parsed=parsed_value, quality_state=quality_state,
+                                              quality_error=quality_error))
+            continue
         if fetch_overrides is not None:
             fetched = overrides.get(spec.source_id) or FetchResult(
                 spec.source_id, "MISSING", error="explicit offline override missing"
@@ -850,6 +877,9 @@ def run_source_gate(
         "architecture_target": registry.payload.get("architecture_target", []),
         "source_registry_id": registry.payload["registry_id"],
         "source_registry_hash": registry.hash,
+        "base_source_registry_hash": base_registry_hash,
+        "l6_candidate_state": "BLOCKED" if l6_blocked else "READY",
+        "l6_candidate_blocked_reasons": sorted(set(l6_blocked)),
         "safety_component_version": "CRT-RADAR-SOURCE-GATE-V0.8-WIP",
         "external_action_authority": "NONE",
         "external_action_performed": False,

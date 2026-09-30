@@ -9,6 +9,20 @@ from pathlib import Path
 from typing import Any, Callable
 
 
+# Load the unchanged shared L6 formulas without requiring package installation.
+import importlib.util
+_l6_spec = importlib.util.spec_from_file_location(
+    "crt_locked_l6_calculations", Path(__file__).resolve().parents[1] / "src/crt_radar/l6_calculations.py"
+)
+_l6 = importlib.util.module_from_spec(_l6_spec)
+_l6_spec.loader.exec_module(_l6)
+CandidateDataError = _l6.CandidateDataError
+_ohlcv = _l6._ohlcv
+_close_minus_sma200 = _l6._close_minus_sma200
+_sma50_minus_sma200 = _l6._sma50_minus_sma200
+_return_20d_over_atr = _l6._return_20d_over_atr
+_cvd = _l6._cvd
+
 ROOT = Path(__file__).resolve().parent
 DEFAULT_MODEL_REGISTRY = ROOT / "CRT_SIX_LAYER_CANDIDATE_V0.1.json"
 DEFAULT_PUBLIC_SOURCE_AUTHORITY = ROOT / "CRT_PUBLIC_SOURCE_AUTHORITY_LOCK_V0.1.json"
@@ -113,8 +127,6 @@ EXPECTED_ETP_REPLAY_CASES = {
 }
 
 
-class CandidateDataError(ValueError):
-    pass
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -1509,95 +1521,14 @@ def _realized_cap_change(raw: dict[str, Any], as_of_ms: int) -> float:
     )
 
 
-def _ohlcv(raw: dict[str, Any], as_of_ms: int) -> tuple[list[dict[str, float]], float]:
-    rows = _table(
-        raw,
-        "OHLCV_DAILY",
-        as_of_ms,
-        identity_fields=("observed_at_ms",),
-    )
-    rows = _last(rows, 201, "OHLCV_DAILY")
-    timestamps = [row["observed_at_ms"] for row in rows]
-    if any(right - left != DAY_MS for left, right in zip(timestamps, timestamps[1:])):
-        raise CandidateDataError("OHLCV_DAILY_PERIOD_GAP")
-    parsed: list[dict[str, float]] = []
-    for row in rows:
-        if row.get("complete") is not True:
-            raise CandidateDataError("OHLCV_DAILY_PARTIAL_BAR")
-        open_value = _positive(row.get("open"), "OHLCV_OPEN_INVALID")
-        high = _positive(row.get("high"), "OHLCV_HIGH_INVALID")
-        low = _positive(row.get("low"), "OHLCV_LOW_INVALID")
-        close = _positive(row.get("close"), "OHLCV_CLOSE_INVALID")
-        if high < max(open_value, close, low) or low > min(open_value, close, high):
-            raise CandidateDataError("OHLCV_BAR_GEOMETRY_INVALID")
-        parsed.append({"open": open_value, "high": high, "low": low, "close": close})
-    true_ranges = []
-    for index in range(len(parsed) - 20, len(parsed)):
-        current = parsed[index]
-        previous_close = parsed[index - 1]["close"]
-        true_ranges.append(
-            max(
-                current["high"] - current["low"],
-                abs(current["high"] - previous_close),
-                abs(current["low"] - previous_close),
-            )
-        )
-    atr20 = _positive(statistics.fmean(true_ranges), "ATR20_NONPOSITIVE")
-    return parsed, atr20
 
 
-def _close_minus_sma200(raw: dict[str, Any], as_of_ms: int) -> float:
-    bars, atr20 = _ohlcv(raw, as_of_ms)
-    closes = [bar["close"] for bar in bars]
-    return (closes[-1] - statistics.fmean(closes[-200:])) / atr20
 
 
-def _sma50_minus_sma200(raw: dict[str, Any], as_of_ms: int) -> float:
-    bars, atr20 = _ohlcv(raw, as_of_ms)
-    closes = [bar["close"] for bar in bars]
-    return (statistics.fmean(closes[-50:]) - statistics.fmean(closes[-200:])) / atr20
 
 
-def _return_20d_over_atr(raw: dict[str, Any], as_of_ms: int) -> float:
-    bars, atr20 = _ohlcv(raw, as_of_ms)
-    current = bars[-1]["close"]
-    lag_20 = bars[-21]["close"]
-    return math.log(current / lag_20) / ((atr20 / current) * math.sqrt(20))
 
 
-def _cvd(raw: dict[str, Any], as_of_ms: int) -> float:
-    rows = _table(
-        raw,
-        "AGGRESSOR_DAILY",
-        as_of_ms,
-        identity_fields=("observed_at_ms",),
-    )
-    rows = _last(rows, 20, "AGGRESSOR_DAILY")
-    timestamps = [row["observed_at_ms"] for row in rows]
-    if any(right - left != DAY_MS for left, right in zip(timestamps, timestamps[1:])):
-        raise CandidateDataError("AGGRESSOR_DAILY_PERIOD_GAP")
-    signed = 0.0
-    total_sum = 0.0
-    for row in rows:
-        if row.get("complete") is not True:
-            raise CandidateDataError("AGGRESSOR_DAILY_PARTIAL_BAR")
-        buyer = _nonnegative(
-            row.get("buyer_initiated_quote_volume"), "CVD_BUYER_VOLUME_INVALID"
-        )
-        seller = _nonnegative(
-            row.get("seller_initiated_quote_volume"), "CVD_SELLER_VOLUME_INVALID"
-        )
-        unknown = _nonnegative(
-            row.get("unknown_aggressor_quote_volume"), "CVD_UNKNOWN_VOLUME_INVALID"
-        )
-        total = _nonnegative(row.get("total_quote_volume"), "CVD_TOTAL_VOLUME_INVALID")
-        if unknown != 0:
-            raise CandidateDataError("CVD_UNKNOWN_AGGRESSOR_VOLUME")
-        if not math.isclose(total, buyer + seller + unknown, rel_tol=1e-12, abs_tol=1e-9):
-            raise CandidateDataError("CVD_VOLUME_SUM_MISMATCH")
-        signed += buyer - seller
-        total_sum += total
-    return signed / _positive(total_sum, "CVD_TOTAL_VOLUME_NONPOSITIVE")
 
 
 CALCULATORS: dict[str, Callable[[dict[str, Any], int], float]] = {
