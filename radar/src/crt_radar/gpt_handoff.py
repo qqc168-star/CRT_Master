@@ -8,6 +8,7 @@ from typing import Any
 
 from .gpt_bridge_outbox import enqueue_bridge_payload
 from .run_ledger import GENESIS_HASH, RunLedger
+from .btc_etf_intake import compact_for_bridge as compact_btc_etf_evidence
 from .treasury_company_ct import compact_treasury_valuation_context
 from .portfolio_allocation_context import (
     compact_portfolio_allocation_context_for_bridge,
@@ -514,6 +515,9 @@ def _bridge_market_context(
                 pack[key]
             )
 
+    btc_etf = compact_btc_etf_evidence(pack)
+    if btc_etf:
+        result["btc_etf_evidence"] = btc_etf
     treasury = compact_treasury_valuation_context(pack)
     if treasury:
         result["treasury_valuation_context"] = treasury

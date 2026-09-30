@@ -130,6 +130,7 @@ def run_daily_evidence(
     treasury_company_ct_inputs: dict[str, Any] | None = None,
     btc_long_horizon_inputs: dict[str, Any] | None = None,
     portfolio_allocation_inputs: dict[str, Any] | None = None,
+    btc_etf_archive: dict[str, Any] | None = None,
     fetch_overrides: dict[str, FetchResult] | None = None,
     liquidation_aggregate_payload: dict[str, Any] | None = None,
     probe_fetcher: Callable[[SourceSpec], FetchResult] | None = None,
@@ -290,6 +291,7 @@ def run_daily_evidence(
         treasury_company_ct_inputs=treasury_company_ct_inputs,
         btc_long_horizon_context=btc_long_horizon_context,
         portfolio_allocation_inputs=portfolio_allocation_inputs,
+        btc_etf_archive=btc_etf_archive,
         dvol_regime_watch=dvol_regime_watch,
         reanalysis_wake=reanalysis_wake,
         transition_diagnostic=transition_diagnostic,
@@ -369,6 +371,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--private-profile", type=Path, default=default_private_profile_path())
     parser.add_argument("--treasury-valuation-inputs", type=Path, default=None,
         help="Local verified CT histories for MSTR/ASST; absent claims remain BLOCKED.")
+    parser.add_argument("--btc-etf-archive", type=Path, default=None,
+        help="Exact TFTC JSON retrieval envelope; research-only flow evidence.")
     parser.add_argument("--treasury-company-ct-inputs", type=Path, default=None,
         help="Local verified CT organs keyed by MSTR/ASST; company health evidence only.")
     parser.add_argument("--portfolio-allocation-inputs", type=Path, default=None,
@@ -559,6 +563,8 @@ def main(argv: list[str] | None = None) -> int:
             _load_json_object(args.treasury_company_ct_inputs, label="Treasury Company CT inputs")
             if args.treasury_company_ct_inputs is not None else None
         ),
+        btc_etf_archive=(_load_json_object(args.btc_etf_archive, label="BTC ETF archive")
+            if args.btc_etf_archive is not None else None),
         portfolio_allocation_inputs=(
             _load_json_object(args.portfolio_allocation_inputs, label="Portfolio allocation inputs")
             if args.portfolio_allocation_inputs is not None else None

@@ -5,17 +5,31 @@
   "status": "SOURCE_PROOF_PARTIAL_READY",
   "sources": [
     {
+      "source_id": "TFTC_US_SPOT_BTC_ETF_FLOW",
+      "asset": "BTC",
+      "role": "PRIMARY_PROCESSED_FLOW_SOURCE",
+      "state": "READY_CANDIDATE",
+      "metrics": [
+        "BTC_ETF_NET_FLOW_USD",
+        "BTC_ETF_FLOW_BREADTH"
+      ],
+      "url": "https://www.tftc.io/bitcoin-etf-flows/data.json",
+      "license": "https://creativecommons.org/licenses/by/4.0/",
+      "local_transport_proven": true,
+      "notes": "Processed research evidence only; retrieval-vintage history is not historical publication proof or formal L3 authority."
+    },
+    {
       "source_id": "GLASSNODE_US_SPOT_BTC_ETF",
       "asset": "BTC",
-      "role": "PRIMARY_PROCESSED_SOURCE",
-      "state": "READY_CANDIDATE",
+      "role": "DEFERRED_SECONDARY_RESEARCH_OR_AUDIT",
+      "state": "DEFERRED_CREDENTIAL_GATED",
       "metrics": [
         "BTC_ETF_BALANCE_BTC",
         "BTC_ETF_NET_FLOW_USD",
         "BTC_ETF_FLOW_BREADTH"
       ],
-      "local_transport_proven": true,
-      "notes": "Mature processed source; total values require contributing ETF coverage completeness."
+      "local_transport_proven": false,
+      "notes": "Not a daily runtime dependency; no credential work authorized."
     },
     {
       "source_id": "FARSIDE_US_BTC_ETF_FLOW",
@@ -27,6 +41,15 @@
         "BTC_ETF_FLOW_BREADTH"
       ],
       "local_transport_proven": false
+    },
+    {
+      "source_id": "COINGLASS_BTC_ETF",
+      "asset": "BTC",
+      "role": "DEFERRED_PAID_UPGRADE_CANDIDATE",
+      "state": "DEFERRED",
+      "metrics": [],
+      "local_transport_proven": false,
+      "runtime_dependency": false
     },
     {
       "source_id": "STRIVE_STXT",
@@ -72,5 +95,20 @@
     "action_output": "NONE",
     "production": "NOT_APPROVED",
     "external_action_authority": "NONE"
+  },
+  "paid_upgrade_policy": {
+    "principle": "No subscription without decision value.",
+    "candidate_triggers": [
+      "Actual CRT analysis/replay proves missing BTC_ETF_BALANCE_BTC 7D/30D blocks or materially weakens BUY/SELL/HOLD/WAIT/ROTATE capital judgment.",
+      "A future approved formal/action-critical balance input exceeds free coverage/provenance/history.",
+      "Observed free-source maintenance burden exceeds demonstrated paid integration engineering savings."
+    ],
+    "on_trigger": "REPORT_TO_NS_CENTRAL_ONLY",
+    "activation_requires": [
+      "DECISION_VALUE_PROOF",
+      "NS_ARCHITECTURE_REVIEW",
+      "EXPLICIT_USER_APPROVAL"
+    ],
+    "automatic_subscription": false
   }
 }
