@@ -30,6 +30,7 @@ from .season_transition_warning_overlay import (
     build_season_transition_warning_overlay,
 )
 from .v110_candidate import evaluate_v110_candidate
+from .l6_source_binding import METRICS as L6_FORMAL_METRICS
 from .treasury_company_ct import add_treasury_company_ct, add_treasury_valuation_context
 
 from .portfolio_allocation_context import (
@@ -116,6 +117,9 @@ def _group_layers(observations: list[Observation]) -> dict[str, Any]:
     for obs in observations:
         layer_name = obs.layer_id.removeprefix("AS-")
         layer = layers.setdefault(layer_name, {"status": "VALID", "metrics": {}})
+        existing = layer["metrics"].get(obs.metric)
+        if existing and existing["input_family"] in L6_FORMAL_METRICS and obs.input_family == "PRICE_STRUCTURE_CONTEXT":
+            continue
         layer["metrics"][obs.metric] = {
             "value": obs.value_num,
             "as_of_ms": obs.as_of_ms,

@@ -13,6 +13,7 @@ from .oi_revision_policy import (
     expected_source_id,
     is_scoped_metric,
 )
+from .l6_source_binding import METRICS as L6_FORMAL_METRICS
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ COMPARABLE_METRICS = {
     ("PRICE_STRUCTURE_CONTEXT", "return_20d_over_atr_vol"),
     ("PRICE_STRUCTURE_CONTEXT", "cvd_20d_share"),
 }
+COMPARABLE_METRICS.update((family, metric) for family, metrics in L6_FORMAL_METRICS.items() for metric in metrics)
 
 
 def _finite(value: Any) -> float:
@@ -91,6 +93,8 @@ def _family_evidence(source_gate: dict[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _metric_rows(family: str, parsed: dict[str, Any]) -> list[tuple[str, float]]:
+    if family in L6_FORMAL_METRICS:
+        return [(metric, _finite(parsed.get(metric))) for metric in L6_FORMAL_METRICS[family]]
     if family == "MACRO_CONTEXT":
         return [
             ("core_inflation_acceleration", _finite(parsed.get("core_inflation_acceleration"))),

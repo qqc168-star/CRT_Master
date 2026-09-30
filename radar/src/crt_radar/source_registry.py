@@ -82,6 +82,31 @@ class SourceRegistry:
             )
         return matches[0]
 
+    def with_l6_candidate_sources(self) -> "SourceRegistry":
+        """Overlay L6 without mutating the base registry pinned by L4 OI policy."""
+        from copy import deepcopy
+        from .l6_source_binding import SOURCE_IDS
+        overlay = json.loads((Path(__file__).resolve().parents[2] /
+                              "CONFIG/L6_SOURCE_BINDING_OVERLAY_V0.1.json").read_text(encoding="utf-8"))
+        payload = deepcopy(self.payload)
+        # Other approved overlays may already be present; compare the exact base projection.
+        base_ids = {x["source_id"] for x in json.loads((Path(__file__).resolve().parents[2] /
+                    "CONFIG/SOURCE_REGISTRY_V1.2.json").read_text(encoding="utf-8"))["sources"]}
+        base = deepcopy(payload)
+        base["sources"] = [x for x in base["sources"] if x["source_id"] in base_ids]
+        if sha256_hex(canonical_json_bytes(base)) != overlay["base_registry_sha256"]:
+            raise RegistryError("L6 overlay base registry hash mismatch")
+        present = {x["input_family"]: x for x in payload["sources"]}
+        if {x["input_family"] for x in overlay["sources"]} != set(SOURCE_IDS):
+            raise RegistryError("L6 overlay must contain exactly the two locked families")
+        for item in overlay["sources"]:
+            existing = present.get(item["input_family"])
+            if existing is not None and existing != item:
+                raise RegistryError("L6 overlay source conflict")
+            if existing is None:
+                payload["sources"].append(item)
+        return SourceRegistry(payload)
+
     def _validate(self) -> None:
         required_root = {
             "registry_id",
@@ -152,6 +177,22 @@ class SourceRegistry:
             raise RegistryError("Persistent liquidation aggregate source is required")
         if aggregate.get("criticality") != "CRITICAL_FAIL_CLOSED":
             raise RegistryError("Liquidation aggregate must remain critical fail-closed")
+
+        from .l6_source_binding import SOURCE_IDS
+        for item in self.payload["sources"]:
+            family = item["input_family"]
+            if family in SOURCE_IDS:
+                if (item["source_id"] != SOURCE_IDS[family]
+                        or item["namespace"] != "AS-L6"
+                        or item["transport"] != "LOCAL_VERIFIED_PROVIDER_ARCHIVES"
+                        or item["authentication"] != "LOCAL_READ_ONLY"
+                        or item["criticality"] != "CRITICAL_FAIL_CLOSED"):
+                    raise RegistryError("L6 locked source binding changed")
+                for key, expected in {"formal_model": "NOT_APPROVED", "production": "NOT_APPROVED",
+                                      "action_output": "NONE", "external_action_authority": "NONE",
+                                      "capital_decision_authority": "USER_ONLY"}.items():
+                    if item.get(key) != expected:
+                        raise RegistryError(f"L6 authority changed: {key}")
 
     @staticmethod
     def _validate_liquidation_route(item: dict[str, Any]) -> None:
