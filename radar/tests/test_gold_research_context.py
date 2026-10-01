@@ -418,7 +418,7 @@ class GoldResearchTests(unittest.TestCase):
     def test_existing_full_bridge_still_fits_without_gold_payload(self):
         fixture = health_fixtures.CompanyHealthTests("test_full_portfolio_and_long_valuation_history_fit_bridge")
         fixture.test_full_portfolio_and_long_valuation_history_fit_bridge()
-        self.assertEqual(fixture.bridge_payload_bytes, 16155)
+        self.assertLessEqual(fixture.bridge_payload_bytes, 15 * 1024)
 
     def test_invalid_values_and_unverified_source_fail_closed(self):
         for value in (None, True, float("nan"), float("inf"), -1):

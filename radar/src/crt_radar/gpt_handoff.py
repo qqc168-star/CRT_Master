@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import string
+from collections import Counter
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -103,6 +106,10 @@ BRIDGE_FORBIDDEN_EXACT_KEYS = {
     "credential",
     "credentials",
 }
+
+BRIDGE_OPERATIONAL_BUDGET_BYTES = 15 * 1024
+BRIDGE_CEILING_BYTES = 16 * 1024
+
 
 BRIDGE_OPTIONAL_MARKET_SECTIONS = (
     "btc_long_horizon_context",
@@ -641,14 +648,11 @@ def _bridge_capital_state(
                 "holding must be an object"
             )
 
-        holdings.append(
-            {
-                "asset": row.get("asset"),
-                "quantity": row.get(
-                    "quantity"
-                ),
-            }
-        )
+        holding = {"asset": row.get("asset"), "quantity": row.get("quantity")}
+        for key in ("cost_basis_usd", "cost_basis", "cost_basis_per_share"):
+            if key in row:
+                holding[key] = deepcopy(row[key])
+        holdings.append(holding)
 
     cash_raw = profile.get("cash")
 
@@ -801,7 +805,7 @@ def _bridge_capital_state(
         if str(asset) in referenced_assets
     }
 
-    return {
+    result = {
         "capital_state": capital_state,
         "holdings": holdings,
         "cash": cash,
@@ -809,6 +813,14 @@ def _bridge_capital_state(
         "active_plans": plans,
         "execution_authority": "USER_ONLY",
     }
+    # Carry supplied assessments, never infer freshness or refresh private capital.
+    for key in ("snapshot_state", "STALE_CAPITAL_FIELDS", "stale_flags"):
+        supplied = [source[key] for source in (profile, meta, status) if key in source]
+        if supplied:
+            if any(_canonical_hash(value) != _canonical_hash(supplied[0]) for value in supplied[1:]):
+                raise ValueError(f"Conflicting Capital State {key}")
+            result[key] = deepcopy(supplied[0])
+    return result
 
 
 def _bridge_plan_drift(
@@ -1152,323 +1164,432 @@ def build_minimized_bridge_payload(
         "bridge_payload_hash"
     ] = _canonical_hash(payload)
 
-    _assert_bridge_privacy(payload)
+    _assert_bridge_privacy(expand_bridge_field_names(payload))
 
-    if ("treasury_valuation_context" in payload["market_context"] and
-            len(json.dumps(payload, ensure_ascii=False, sort_keys=True,
-                           separators=(",", ":")).encode("utf-8")) >= 16 * 1024):
-        raise ValueError("Treasury bridge exceeds the unchanged 16 KiB ceiling")
+    if _bridge_size(payload) >= BRIDGE_CEILING_BYTES:
+        raise ValueError("Decision-critical bridge exceeds the unchanged 16 KiB ceiling")
     return payload
 
 
-def _bound_bridge_detail(payload: dict[str, Any], pack: dict[str, Any]) -> None:
-    """Project oversized research detail, never mutate evidence or an outbox.
+def _bridge_size(value: Any) -> int:
+    return len(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                          separators=(",", ":")).encode("utf-8"))
 
-    Keep capital, analysis semantics, formal locks, current metric values/times/
-    quality and every layer's missing inputs. Omitted research detail is explicitly
-    distinguished from absent evidence and bound to the original market hash.
-    The provider's independent 16 KiB validation remains the final fail-closed gate.
+
+def _compact_tranche_fields(payload: dict[str, Any]) -> None:
+    """Share exact-equal tranche fields; budgets/statuses stay literal in common."""
+    for plan in payload.get("capital_state", {}).get("active_plans", []):
+        tranches = plan.get("tranches", [])
+        if len(tranches) < 2:
+            continue
+        common = {key: deepcopy(tranches[0][key]) for key in (
+            "budget_usd", "status", "validity_conditions") if key in tranches[0]
+            and all(key in row and _canonical_hash(row[key]) == _canonical_hash(tranches[0][key]) for row in tranches)}
+        candidate = {**plan, "tranche_common": common,
+            "tranche_encoding": "Each tranche inherits tranche_common then its literal fields.",
+            "tranches": [{key: deepcopy(value) for key, value in row.items() if key not in common}
+                         for row in tranches]}
+        if common and _bridge_size(candidate) < _bridge_size(plan):
+            if _canonical_hash(_expand_tranche_fields(deepcopy(candidate))) != _canonical_hash(plan):
+                raise ValueError("Bridge tranche roundtrip mismatch")
+            plan.clear()
+            plan.update(candidate)
+
+
+def _expand_tranche_fields(plan: dict[str, Any]) -> dict[str, Any]:
+    common = plan.pop("tranche_common", None)
+    if common is not None:
+        plan.pop("tranche_encoding")
+        plan["tranches"] = [{**deepcopy(common), **row} for row in plan["tranches"]]
+    return plan
+
+
+def _compact_field_names(payload: dict[str, Any]) -> None:
+    """Reversible field-name glossary; every observation/lock value stays literal.
+
+    This extends the existing bridge's field-name references. Top-level keys,
+    event, authority and privacy remain directly readable by the outbox/worker.
+    Choose tokens absent from ALL original keys, so expansion cannot collide.
     """
-    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True,
-                            separators=(",", ":")).encode("utf-8")
-    # Reserve the final bridge_payload_hash field before computing that hash.
-    if len(serialized) + 90 <= 16 * 1024:
+    sections = ("market_context", "analysis_contract", "capital_state", "issuer_ratio_observation")
+    keys: Counter[str] = Counter()
+
+    def count(value: Any) -> None:
+        if isinstance(value, dict):
+            for name, child in value.items():
+                keys[name] += 1
+                count(child)
+        elif isinstance(value, list):
+            for child in value:
+                count(child)
+
+    for section in sections:
+        count(payload.get(section))
+    current = keys.copy()
+    keys.clear()
+    count(payload)
+    # A legal source key containing the delimiter stays unencoded, never lost.
+    if any("|" in name for name in keys):
+        return
+    symbols = "".join(char for char in string.ascii_uppercase + string.digits + string.punctuation
+                      if char not in '_"\\@' and all(char not in name for name in keys))
+    alphabet = string.digits + string.ascii_uppercase + string.ascii_lowercase
+    tokens = list(symbols)
+    if all("@" not in name for name in keys):
+        tokens += ["@" + char for char in alphabet]
+    boundaries = re.compile("(?:@[" + alphabet + "]|[" + re.escape(symbols) + "])") if symbols else re.compile("@[0-9A-Za-z]")
+    fragments: list[str] = []
+    used_tokens: list[str] = []
+    for token in tokens:
+        candidates: Counter[str] = Counter()
+        for name, frequency in current.items():
+            for part in boundaries.split(name):
+                unique = {part[start:stop] for start in range(len(part))
+                          for stop in range(start + 3, len(part) + 1)}
+                for fragment in unique:
+                    candidates[fragment] += part.count(fragment) * frequency
+        scored = [(frequency * (len(fragment.encode("utf-8")) - len(token))
+                   - len(fragment.encode("utf-8")) - 1, fragment)
+                  for fragment, frequency in candidates.items()]
+        gain, fragment = max(scored, default=(0, ""))
+        if gain <= 0:
+            break
+        fragments.append(fragment)
+        used_tokens.append(token)
+        rewritten: Counter[str] = Counter()
+        for name, frequency in current.items():
+            rewritten[name.replace(fragment, token)] += frequency
+        current = rewritten
+    if not fragments:
+        return
+
+    def encode(value: Any) -> Any:
+        if isinstance(value, dict):
+            result = {}
+            for name, child in sorted(value.items()):
+                encoded = name
+                for token, fragment in zip(used_tokens, fragments):
+                    encoded = encoded.replace(fragment, token)
+                if encoded in result:
+                    raise ValueError("Bridge field-name collision")
+                result[encoded] = encode(child)
+            return result
+        if isinstance(value, list):
+            return [encode(child) for child in value]
+        return value
+
+    candidate = deepcopy(payload)
+    for section in sections:
+        if section in candidate:
+            candidate[section] = encode(candidate[section])
+    candidate["market_context"]["key_encoding"] = [symbols, "|".join(fragments),
+        "Keys: chars index |-split fields then @0-9A-Za-z. Expand once; values literal."]
+    if _canonical_hash(expand_bridge_field_names(candidate)) != _canonical_hash(expand_bridge_field_names(payload)):
+        raise ValueError("Bridge field-name roundtrip mismatch")
+    if _bridge_size(candidate) < _bridge_size(payload):
+        payload.clear()
+        payload.update(candidate)
+
+
+def expand_bridge_field_names(payload: dict[str, Any]) -> dict[str, Any]:
+    """Expand keys and exact tranche inheritance; literal values never change."""
+    result = deepcopy(payload)
+    codec = result.get("market_context", {}).pop("key_encoding", None)
+    if codec is None:
+        for plan in result.get("capital_state", {}).get("active_plans", []):
+            _expand_tranche_fields(plan)
+        _expand_authority_references(result)
+        return result
+    symbols, glossary, _ = codec
+    tokens = list(symbols) + ["@" + char for char in string.digits + string.ascii_uppercase + string.ascii_lowercase]
+    mapping = dict(zip(tokens, glossary.split("|")))
+    matcher = re.compile("|".join(re.escape(token) for token in sorted(mapping, key=lambda item: (-len(item), item))))
+
+    def decode(value: Any) -> Any:
+        if isinstance(value, dict):
+            decoded = {}
+            for name, child in value.items():
+                expanded = matcher.sub(lambda match: mapping[match.group()], name)
+                if expanded in decoded:
+                    raise ValueError("Expanded bridge field collision")
+                decoded[expanded] = decode(child)
+            return decoded
+        if isinstance(value, list):
+            return [decode(child) for child in value]
+        return value
+
+    result = decode(result)
+    for plan in result.get("capital_state", {}).get("active_plans", []):
+        _expand_tranche_fields(plan)
+    _expand_authority_references(result)
+    return result
+
+
+def _expand_authority_references(payload: dict[str, Any]) -> None:
+    authority = payload.get("authority", {})
+    keys = sorted(authority)
+    market = payload.get("market_context", {})
+    pairs = market.pop("authority_field_values", [])
+    market.pop("authority_field_encoding", None)
+
+    def expand(value: Any) -> None:
+        if isinstance(value, dict):
+            mask = value.get("authority_same_as")
+            if isinstance(mask, int) and not isinstance(mask, bool):
+                if mask < 0 or mask >= 1 << len(keys):
+                    raise ValueError("Invalid authority reference bits")
+                value.pop("authority_same_as")
+                for index, key in enumerate(keys):
+                    if mask & (1 << index):
+                        if key in value:
+                            raise ValueError("Inherited authority field collision")
+                        value[key] = deepcopy(authority[key])
+            for index in (value.pop("authority_fields", []) if pairs else []):
+                key, literal = pairs[index]
+                if key in value:
+                    raise ValueError("Shared authority field collision")
+                value[key] = deepcopy(literal)
+            for child in value.values():
+                expand(child)
+        elif isinstance(value, list):
+            for child in value:
+                expand(child)
+
+    expand(payload)
+
+
+def _inherit_equal_authority(value: Any, authority: dict[str, Any]) -> None:
+    """Reference only exactly equal repeated fields; different locks stay literal."""
+    if isinstance(value, dict):
+        for key in sorted(value):
+            _inherit_equal_authority(value[key], authority)
+        shared = sorted(k for k in authority if k in value and _canonical_hash(value[k]) == _canonical_hash(authority[k]))
+        if sum(_bridge_size({k: value[k]}) for k in shared) > 70:
+            mask = sum(1 << index for index, key in enumerate(sorted(authority)) if key in shared)
+            for key in shared:
+                del value[key]
+            value["authority_same_as"] = mask
+    elif isinstance(value, list):
+        for child in value:
+            _inherit_equal_authority(child, authority)
+
+
+def _share_authority_fields(market: dict[str, Any]) -> None:
+    """Lossless exact field/value references; never inherit unspecified locks."""
+    names = {"analyst_judgment_required", "formal_model", "production",
+        "formal_model_authority", "formal_threshold_authority", "formal_weight_authority",
+        "machine_may_confirm_bull_transition", "machine_may_output_trade_action",
+        "score_may_determine_btc_season", "season_transition_authority", "formal_season_authority"}
+    occurrences: dict[str, list[dict[str, Any]]] = {}
+    pairs: dict[str, list[Any]] = {}
+    def visit(value: Any) -> None:
+        if isinstance(value, dict):
+            for key in sorted(value):
+                child = value[key]
+                if key in names:
+                    pair = [key, child]
+                    token = json.dumps(pair, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                    occurrences.setdefault(token, []).append(value)
+                    pairs[token] = pair
+                visit(child)
+        elif isinstance(value, list):
+            for child in value:
+                visit(child)
+    visit(market)
+    columns = []
+    for token in sorted(occurrences):
+        rows = occurrences[token]
+        key, value = pairs[token]
+        if len(rows) >= 3 and (_bridge_size({key: value}) - 8) * len(rows) > _bridge_size(pairs[token]) + 40:
+            index = len(columns)
+            columns.append(pairs[token])
+            for row in rows:
+                del row[key]
+                row.setdefault("authority_fields", []).append(index)
+    if columns:
+        market["authority_field_values"] = columns
+        market["authority_field_encoding"] = "authority_fields indexes [field,literal_value]; inherit ONLY listed fields."
+
+
+def _bound_bridge_detail(payload: dict[str, Any], pack: dict[str, Any]) -> None:
+    """One bridge, fixed ceiling: omit audit detail, preserve decision semantics.
+
+    15 KiB is operational headroom, not a new CRT formal lock. The final hash
+    costs exactly 89 additional bytes. Critical inputs are never truncated.
+    """
+    if _bridge_size(payload) + 89 <= BRIDGE_OPERATIONAL_BUDGET_BYTES:
         return
     market = payload["market_context"]
     original_hash = _canonical_hash(market)
+    # These are non-trigger history/ranking displays; current layer facts and
+    # the trigger's current/previous/change remain separately literal.
+    changes = market.get("changes", {})
+    market["changes"] = {"section_hash": _canonical_hash(changes),
+        "detail": "OMITTED_FROM_BRIDGE_NOT_ABSENT_FROM_EVIDENCE"}
+    for key in ("top_changes", "note"):
+        market.get("distillation", {}).pop(key, None)
+    scoring = market.get("model_status", {}).get("locked_formal_scoring", {})
+    for key in ("candidate_contract_hash", "candidate_output_hash", "candidate_score",
+                "candidate_threshold_bucket", "score"):
+        scoring.pop(key, None)
+    audit_metrics = {
+        "core_inflation_acceleration", "real_policy_rate", "unemployment_deterioration",
+        "market_cap_usd", "mvrv", "nupl", "realized_cap_30d_log_change", "realized_cap_usd",
+        "close_minus_sma200_over_atr20", "return_20d_over_atr_vol", "sma50_minus_sma200_over_atr20",
+        "mark_price", "open_interest_contracts",
+    }
+    trigger_metric = pack.get("reanalysis_wake", {}).get("metric")
     for layer in market.get("layers", {}).values():
         if not isinstance(layer, dict):
             raise ValueError("Bridge layer must be an object")
         layer.pop("required_metrics", None)
-        for name, row in layer.get("metrics", {}).items():
-            layer["metrics"][name] = {
-                key: deepcopy(row[key]) for key in ("value", "quality_state", "as_of_ms")
-                if key in row
-            }
-    market["changes"] = {}
-    for key in ("top_changes", "note"):
-        market.get("distillation", {}).pop(key, None)
-    # Source pack + market hash bind the omitted repeated per-metric provenance.
-    scoring = market.get("model_status", {}).get("locked_formal_scoring", {})
-    for key in ("candidate_contract_hash", "candidate_output_hash"):
-        scoring.pop(key, None)
+        for name, row in list(layer.get("metrics", {}).items()):
+            # Only known non-trigger, fresh scoring support is audit-only.
+            # Unknown/missing/stale/partial/blocked observations never disappear.
+            if (name in audit_metrics and name != trigger_metric
+                    and row.get("quality_state") == "VALID_FRESH" and row.get("value") is not None):
+                del layer["metrics"][name]
+                continue
+            layer["metrics"][name] = {key: deepcopy(row[key]) for key in
+                ("value", "quality_state", "as_of_ms") if key in row}
     diagnostic = market.get("transition_diagnostic")
     if isinstance(diagnostic, dict):
-        diagnostic.pop("gpt_handoff", None)
-        diagnostic.pop("wake", None)
-        diagnostic.pop("mechanism_findings", None)
+        for key in ("gpt_handoff", "wake", "mechanism_findings"):
+            diagnostic.pop(key, None)
         diagnostic.get("data_health", {}).pop("provenance", None)
-        if "windows" in diagnostic:
-            diagnostic["windows"] = {
-                key: value for key, value in diagnostic["windows"].items()
-                if key in {"impulse_window", "prior_60m", "recent_60m"}
-            }
     bull = market.get("btc_bull_validation")
     if isinstance(bull, dict):
-        market["btc_bull_validation"] = {
-            key: value for key, value in bull.items() if key in {
-                "state", "reason", "scope", "authority", "blocked_checks",
-                "pending_checks", "mixed_checks", "adverse_checks", "supportive_checks",
-                "machine_may_confirm_bull_transition", "control_transfer_loop_closed",
-            }
-        }
-    # Preserve DVOL detail when it is the trigger, otherwise include its status.
-    wake = pack.get("reanalysis_wake", {})
+        # Category lists retain every blocked/pending check. Contradictions keep
+        # their exact reason and current values; duplicate pending display goes.
+        retained = {key: deepcopy(bull[key]) for key in (
+            "generated_at_ms", "state", "reason", "scope", "authority", "blocked_checks",
+            "pending_checks", "mixed_checks", "adverse_checks", "supportive_checks",
+            "machine_may_confirm_bull_transition", "control_transfer_loop_closed") if key in bull}
+        blocked = [row for row in bull.get("checks", []) if row.get("status") == "BLOCKED"]
+        reasons = {row.get("reason") for row in blocked}
+        if len(reasons) == 1:
+            retained["blocked_check_reason"] = next(iter(reasons))
+        elif reasons:
+            retained["blocked_check_reasons"] = {row["check_id"]: row.get("reason") for row in blocked}
+        retained["checks"] = [row for row in bull.get("checks", [])
+            if row.get("status") in {"ADVERSE", "MIXED", "SUPPORTIVE"}]
+        for row in retained["checks"]:
+            value = row.get("value")
+            if isinstance(value, dict):
+                for key in ("baseline_meaning", "natural_research_baselines"):
+                    value.pop(key, None)
+        market["btc_bull_validation"] = retained
     dvol = market.get("dvol_regime_watch")
-    if isinstance(dvol, dict) and "DVOL" not in str(wake.get("wake_sources", [])):
-        market["dvol_regime_watch"] = {
-            key: value for key, value in dvol.items() if key in {
-                "state", "reason", "scope", "current_dvol", "as_of_ms", "direction",
-                "formal_model_authority", "season_transition_authority",
-            }
-        }
-    market["wake_observation"] = {
-        key: deepcopy(wake[key]) for key in (
-            "current_value", "previous_value", "percent_change", "historical_percentile",
-            "baseline_count", "metric", "input_family",
-        ) if key in wake
-    }
+    if isinstance(dvol, dict):
+        for key in ("provenance", "research_parameters", "schema_version",
+                    "scale_normalization", "investment_threshold_authority"):
+            dvol.pop(key, None)
+        if "DVOL" not in str(pack.get("reanalysis_wake", {}).get("wake_sources", [])):
+            for key in ("baseline_count", "dvol_30d_low", "dvol_30d_low_as_of_ms",
+                        "hours_since_30d_low", "low_30d_percentile_1y",
+                        "recommended_wake_operational_percentile"):
+                dvol.pop(key, None)
+    wake = pack.get("reanalysis_wake", {})
+    market["wake_observation"] = {key: deepcopy(wake[key]) for key in (
+        "current_value", "previous_value", "percent_change", "historical_percentile",
+        "baseline_count", "metric", "input_family") if key in wake}
     market["minimization"] = {
         "source_market_context_hash": original_hash,
-        "omitted_detail": (
-            "Omitted: metric provenance/required lists, history/rankings, scoring hashes, "
-            "non-trigger DVOL detail, transition 30m/prompts/machine hypotheses, bull values. "
-            "Omitted is not absent; do not infer. See source evidence."
-        ),
+        "source_evidence_pack_hash": payload["event"]["source_evidence_pack_hash"],
+        "provenance": "FULL_PROVENANCE_IN_EVIDENCE_PACK",
+        "omitted_detail": "OMITTED_FROM_BRIDGE_NOT_ABSENT_FROM_EVIDENCE; Omitted is not absent.",
+        "audit_only": "HISTORY_RANKINGS_NON_TRIGGER_SCORING_AND_TREASURY_BASELINE_CDF_BENCHMARK_COLUMNS",
     }
-    if len(json.dumps(payload, ensure_ascii=False, sort_keys=True,
-                      separators=(",", ":")).encode("utf-8")) + 90 >= 16 * 1024:
+    if market["minimization"]["source_evidence_pack_hash"] == payload["event"]["source_evidence_pack_hash"]:
+        market["minimization"]["source_evidence_pack_hash"] = {"same_as": "event.source_evidence_pack_hash"}
+    if _bridge_size(payload) + 89 > BRIDGE_OPERATIONAL_BUDGET_BYTES:
         _compact_supporting_context(market, payload["authority"])
-    if "treasury_valuation_context" in market:
-        _compact_treasury_bridge(payload)
-
-
-def _compact_treasury_bridge(payload: dict[str, Any]) -> None:
-    """Lossless column projection plus explicit inheritance of repeated facts."""
-    market = payload["market_context"]
-    treasury = market["treasury_valuation_context"]
-    # A shared column definition avoids repeating long claim names per issuer.
-    # Every value, status, reason and hash survives the projection unchanged.
-    schemas: list[list[str]] = []
-    def encode(value: Any) -> Any:
-        if isinstance(value, dict):
-            keys = sorted(value)
-            if keys not in schemas:
-                schemas.append(keys)
-            return {"record": [schemas.index(keys), *[encode(value[k]) for k in keys]]}
-        if isinstance(value, list):
-            return [encode(v) for v in value]
-        return value
-    encoded = {asset: encode(row) for asset, row in treasury.items()}
-    candidate = {"encoding": "record=[schema_index,values_in_column_order]; arrays otherwise literal",
-                 "columns": schemas, "assets": encoded}
-    values = list(treasury.values())
-    common = {k: v for k, v in values[0].items()
-              if all(k in row and row[k] == v for row in values[1:])}
-    inherited = {
-        "encoding": "Each asset inherits common, then its own fields; null claims are BLOCKED; changes are fractions; CDF is 0..100.",
-        "common": common,
-        "assets": {asset: {k: v for k, v in row.items() if k not in common}
-                   for asset, row in treasury.items()},
-    }
-    shared_blockers = sorted(set.intersection(*(set(row.get("blockers", [])) for row in values)))
-    if shared_blockers and "blockers" not in common:
-        inherited["common"]["blockers"] = shared_blockers
-        for row in inherited["assets"].values():
-            row["additional_blockers"] = [b for b in row.pop("blockers", []) if b not in shared_blockers]
-        inherited["encoding"] += " Append additional_blockers to common.blockers."
-    if len(json.dumps(inherited)) < len(json.dumps(candidate)):
-        candidate = inherited
-    if len(json.dumps(candidate)) < len(json.dumps(treasury)):
-        market["treasury_valuation_context"] = candidate
-    # Same-as references remove only proven equal data, not supporting claims.
-    delta = market.get("asset_strategy_delta", {})
-    income = delta.get("income_engine")
-    for row in delta.get("assets", {}).values():
-        if income is not None and row.get("quantitative") == income:
-            row["quantitative"] = {"same_as": "market_context.asset_strategy_delta.income_engine"}
-    def inherit(value: Any) -> None:
-        if isinstance(value, dict):
-            for child in list(value.values()):
-                inherit(child)
-            shared = {k for k, v in payload["authority"].items() if k in value and value[k] == v}
-            if sum(len(k) + len(json.dumps(value[k])) + 4 for k in shared) > 70:
-                for k in shared:
-                    del value[k]
-                value["authority_same_as"] = "authority"
-        elif isinstance(value, list):
-            for child in value:
-                inherit(child)
-    for key in ("asset_strategy_delta", "model_status", "btc_bull_validation", "btc_entry_gate", "dvol_regime_watch"):
-        inherit(market.get(key))
-    role = payload["analysis_contract"].get("season_three_army_role_separation", {})
-    # Version/hash retain the doctrine binding; its long filename and source
-    # section labels duplicate the surrounding named contract/market sections.
+    role = (payload["analysis_contract"].get("season_three_army_role_separation", {})
+            if "treasury_valuation_context" in market else {})
     role.pop("doctrine_artifact", None)
     for child in role.values():
         if isinstance(child, dict):
             child.pop("source_section", None)
             child.pop("source_sections", None)
-    delta.pop("schema_version", None)
-    market["minimization"]["omitted_detail"] = (
-        "Local hashes bind omitted provenance, histories/baselines, prior windows, supporting explanations, "
-        "schema/doctrine labels and duplicate displays. Omitted is not absent."
-    )
-    if role.get("source_evidence_pack_hash") == payload["event"].get("source_evidence_pack_hash"):
-        role["source_evidence_pack_hash"] = {"same_as": "event.source_evidence_pack_hash"}
-    inherit(role)
-    # Repeated plan conditions and blockers may be shared across assets/tranches.
-    # Replace exact equal structures only; an explicit reference is reversible.
-    seen: dict[str, str] = {}
-    def share(value: Any, location: str) -> Any:
-        if isinstance(value, (dict, list)):
-            literal = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-            previous = seen.get(literal)
-            reference = {"same_as": previous}
-            if previous and len(literal) > len(json.dumps(reference)):
-                return reference
-            seen[literal] = location
-            if isinstance(value, dict):
-                return {k: share(v, location + "." + k) for k, v in value.items()}
-            return [share(v, location + f"[{i}]") for i, v in enumerate(value)]
-        return value
-    for section in ("capital_state", "market_context", "analysis_contract"):
-        payload[section] = share(payload[section], section)
-    # Intern repeated long literal strings, with an explicit dictionary readable
-    # by GPT. Values remain exact, including blocker codes and semantic labels.
-    from collections import Counter
-    counts: Counter[str] = Counter()
-    def count(value: Any) -> None:
-        if isinstance(value, dict):
-            for child in value.values():
-                count(child)
-        elif isinstance(value, list):
-            for child in value:
-                count(child)
-        elif isinstance(value, str):
-            counts[value] += 1
-    count(payload["market_context"])
-    strings = sorted(s for s, n in counts.items() if (len(s.encode("utf-8")) - 18) * (n - 1) > 30)
-    if strings:
-        indexes = {s: i for i, s in enumerate(strings)}
-        def intern(value: Any) -> Any:
-            if isinstance(value, dict):
-                return {k: intern(v) for k, v in value.items()}
-            if isinstance(value, list):
-                return [intern(v) for v in value]
-            if isinstance(value, str) and value in indexes:
-                return {"text_ref": indexes[value]}
-            return value
-        payload["market_context"] = intern(payload["market_context"])
-        payload["market_context"]["literal_strings"] = strings
-        payload["market_context"]["literal_encoding"] = "text_ref indexes literal_strings (exact text)."
-    key_counts: Counter[str] = Counter()
-    def count_keys(value: Any) -> None:
-        if isinstance(value, dict):
-            for key, child in value.items():
-                key_counts[key] += 1
-                count_keys(child)
-        elif isinstance(value, list):
-            for child in value:
-                count_keys(child)
-    count_keys(payload["market_context"])
-    keys = sorted(k for k, n in key_counts.items() if (len(k) - 5) * (n - 1) > 20)
-    if keys:
-        aliases = {k: f"@{i}" for i, k in enumerate(keys)}
-        def alias(value: Any) -> Any:
-            if isinstance(value, dict):
-                return {aliases.get(k, k): alias(v) for k, v in value.items()}
-            if isinstance(value, list):
-                return [alias(v) for v in value]
-            return value
-        payload["market_context"] = alias(payload["market_context"])
-        payload["market_context"]["field_names"] = keys
-        payload["market_context"]["field_encoding"] = "Keys @N mean field_names[N]; same_as paths use expanded keys."
+    _inherit_equal_authority(role, payload["authority"])
+    if role or "metric_encoding" in market:
+        market["metric_encoding"] = market.get("metric_encoding", "") + " authority_same_as=bits(sorted authority keys)."
+    if "treasury_valuation_context" in market:
+        _compact_treasury_bridge(payload)
+    if _bridge_size(payload) + 89 > BRIDGE_OPERATIONAL_BUDGET_BYTES:
+        _share_authority_fields(market)
+        _compact_tranche_fields(payload)
+        _compact_field_names(payload)
+
+
+def _compact_treasury_bridge(payload: dict[str, Any]) -> None:
+    """Shared exact-equal context only; critical states/values are not interned."""
+    market = payload["market_context"]
+    treasury = market["treasury_valuation_context"]
+    # Omit ONLY explicitly declared audit columns, bound to the original full
+    # market hash. Current mNAV/BTC-share values, clocks, quality/action states,
+    # context_hash and EVERY blocker remain literal. Direct helper calls without
+    # this declaration are completely lossless, including historical columns.
+    minimization = market.get("minimization", {})
+    if (minimization.get("audit_only") == "HISTORY_RANKINGS_NON_TRIGGER_SCORING_AND_TREASURY_BASELINE_CDF_BENCHMARK_COLUMNS"
+            and isinstance(minimization.get("source_market_context_hash"), str)):
+        for row in treasury.values():
+            for key in ("baseline_counts", "own_history_empirical_cdf_pct",
+                        "regime_empirical_cdf_pct", "benchmark_empirical_cdf_pct", "benchmark_identity"):
+                row.pop(key, None)
+    assets = sorted(treasury)
+    if not assets:
+        return
+    first = treasury[assets[0]]
+    common = {k: deepcopy(first[k]) for k in sorted(first)
+              if all(k in treasury[a] and _canonical_hash(treasury[a][k]) == _canonical_hash(first[k]) for a in assets)}
+    inherited = {"encoding": "Each asset inherits common then its literal fields.",
+        "common": common, "assets": {a: {k: v for k, v in sorted(treasury[a].items())
+            if k not in common} for a in assets}}
+    if _bridge_size(inherited) < _bridge_size(treasury):
+        market["treasury_valuation_context"] = inherited
 
 
 def _compact_supporting_context(market: dict[str, Any], authority: dict[str, Any]) -> None:
-    """Second-stage projection; current facts stay explicit, detail stays hash-bound."""
-    for section in ("transition_diagnostic", "btc_entry_gate",
-                    "btc_bull_validation", "dvol_regime_watch"):
-        if isinstance(market.get(section), dict):
-            market[section].pop("schema_version", None)
+    """Only audited supporting displays go; states, contradictions and locks stay."""
     overlay = market.get("season_transition_warning_overlay")
     if isinstance(overlay, dict):
-        # The overlay repeats layer inputs, model explanations and display cards.
-        # Keep formal status, blockers, veto evidence and authority locks.
         summary = {key: deepcopy(overlay[key]) for key in (
-            "authority", "inherited_locks", "formal_season", "formal_season_status",
-        ) if key in overlay}
+            "generated_at_ms", "scope", "authority", "formal_season",
+            "formal_season_status", "research_season", "transition_warning", "evidence_momentum")
+            if key in overlay}
         summary["source_overlay_hash"] = overlay.get("overlay_hash")
-        overlay_authority = summary.get("authority", {})
-        summary["authority"] = {
-            "same_as": "authority",
-            **{key: value for key, value in overlay_authority.items()
-               if key not in authority or authority[key] != value},
-        }
-        summary["light_evidence_status"] = {
-            name: row.get("evidence_status")
-            for name, row in overlay.get("lights", {}).items()
-        }
+        summary["lights"] = {name: {key: deepcopy(row[key]) for key in
+            ("light", "evidence_status") if key in row}
+            for name, row in sorted(overlay.get("lights", {}).items())}
         gate = overlay.get("gate_core_veto", {})
-        summary["gate_reasons"] = {
-            name: row["reason"]
-            for name, row in gate.items() if isinstance(row, dict)
-            and "reason" in row
-        }
-        summary["veto"] = gate.get("veto", {})
-        summary.get("inherited_locks", {}).pop("light_buckets", None)
-        summary["conflict_evidence"] = overlay.get("lights", {}).get(
-            "conflict_veto", {}).get("raw_metrics", {})
+        summary["gate_core_veto"] = {name: {k: deepcopy(row[k]) for k in
+            ("state", "reason") if k in row} for name, row in sorted(gate.items())
+            if isinstance(row, dict)}
+        summary["gate_core_veto"]["veto"] = deepcopy(gate.get("veto", {}))
+        summary["conflict_evidence"] = deepcopy(overlay.get("lights", {}).get(
+            "conflict_veto", {}).get("raw_metrics", {}))
+        summary["inherited_locks"] = {k: deepcopy(v) for k, v in
+            overlay.get("inherited_locks", {}).items() if k != "light_buckets"}
         market["season_transition_warning_overlay"] = summary
-
-    # Column names explicitly define every value; no precision loss or truncation.
-    # Missing fields remain distinguishable from explicit nulls by field presence.
-    columns = ["value", "as_of_ms", "quality_state"]
     metadata: list[list[Any]] = []
     for layer_name in sorted(market.get("layers", {})):
         layer = market["layers"][layer_name]
         for name, row in sorted(layer.get("metrics", {}).items()):
-            if set(row) == set(columns):
+            if set(row) == {"value", "as_of_ms", "quality_state"}:
                 pair = [row["as_of_ms"], row["quality_state"]]
                 if pair not in metadata:
                     metadata.append(pair)
                 layer["metrics"][name] = [row["value"], metadata.index(pair)]
     market["metric_metadata"] = metadata
-
-    diagnostic = market.get("transition_diagnostic")
-    if isinstance(diagnostic, dict):
-        diagnostic.get("windows", {}).pop("prior_60m", None)
-        diagnostic.get("data_health", {}).pop("limitations", None)
-        diagnostic.pop("source_mode", None)
-    dvol = market.get("dvol_regime_watch")
-    if isinstance(dvol, dict):
-        # Even when DVOL is the trigger, retain every observation, baseline,
-        # timestamp, state/reason and authority. Only supporting descriptions go.
-        dvol.pop("provenance", None)
-        dvol.pop("research_parameters", None)
-    health = market.get("data_health", {})
-    distillation = market.get("distillation", {})
-    if ("data_quality_conflicts" in distillation and
-            distillation["data_quality_conflicts"] == health.get("critical_blockers")):
-        distillation["data_quality_conflicts"] = {"same_as": "market_context.data_health.critical_blockers"}
-        if (set(distillation) <= {"data_quality_conflicts", "divergences", "formal_extremes"}
-                and not distillation.get("divergences") and not distillation.get("formal_extremes")):
-            market.pop("distillation", None)
-    six_layer = market.get("model_status", {}).get("six_layer_evidence", {})
-    missing = {name: layer["missing_required_metrics"]
-               for name, layer in market.get("layers", {}).items()
-               if layer.get("missing_required_metrics")}
-    if "missing_by_layer" in six_layer and six_layer["missing_by_layer"] == missing:
-        six_layer["missing_by_layer"] = {"same_as": "layers.*.missing_required_metrics"}
-    market["minimization"]["omitted_detail"] = (
-        "Omitted is not absent: provenance/lists/history/hashes, non-trigger DVOL detail, "
-        "diagnostic explanations/prior windows, bull values, overlay support/schema labels, "
-        "DVOL research parameters, duplicate distillation."
-    )
-    market["metric_encoding"] = (
-        "Arrays=[value,metadata_index]; metric_metadata=[as_of_ms,quality_state]; objects=literal; same_as=inherit reference then literal fields."
-    )
+    market["metric_encoding"] = "Arrays=[value,metadata_index]; metric_metadata=[as_of_ms,quality_state]; objects=literal."
+    for key in BRIDGE_OPTIONAL_MARKET_SECTIONS:
+        _inherit_equal_authority(market.get(key), authority)
+    _inherit_equal_authority(market.get("model_status"), authority)
+    for key in ("btc_entry_gate", "transition_diagnostic"):
+        if isinstance(market.get(key), dict):
+            market[key].pop("schema_version", None)
+    # Literal issuer/capital/analysis/top-level authority/privacy are untouched.
 
 
 def _assert_optional_authority(

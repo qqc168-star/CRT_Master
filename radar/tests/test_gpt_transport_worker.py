@@ -10,7 +10,9 @@ from unittest.mock import Mock, patch
 
 from crt_radar import gpt_transport_worker as worker
 from crt_radar.gpt_bridge_outbox import enqueue_bridge_payload, _canonical_hash
-from crt_radar.gpt_handoff import build_minimized_bridge_payload, run_gpt_handoff_gate
+from crt_radar.gpt_handoff import (
+    build_minimized_bridge_payload, expand_bridge_field_names, run_gpt_handoff_gate,
+)
 from crt_radar.plain_language_notice import build_plain_language_notice
 from crt_radar.gpt_transport_boundary import (
     _read_json, _write_no_clobber, _seal_state, build_pending_state,
@@ -198,7 +200,10 @@ class WorkerTests(unittest.TestCase):
         original = copy.deepcopy(evidence)
         handoff = run_gpt_handoff_gate(evidence, build_plain_language_notice(evidence),
                                       ledger_path=self.root / "large.jsonl")
-        with patch("crt_radar.gpt_handoff._bound_bridge_detail"):
+        # Inspect the unbounded oracle only; ordinary construction below still
+        # enforces the unchanged production ceiling and must never drop facts.
+        with patch("crt_radar.gpt_handoff._bound_bridge_detail"), \
+             patch("crt_radar.gpt_handoff.BRIDGE_CEILING_BYTES", 10 ** 9):
             full = build_minimized_bridge_payload(evidence, handoff)
         minimized = build_minimized_bridge_payload(evidence, handoff)
         self.assertEqual(evidence, original)
@@ -221,10 +226,12 @@ class WorkerTests(unittest.TestCase):
         handoff = run_gpt_handoff_gate(evidence, build_plain_language_notice(evidence),
                                       ledger_path=self.root / "required.jsonl")
         handoff["instruction_for_gpt"] = "x" * 20000
-        candidate = build_minimized_bridge_payload(evidence, handoff)
-        self.assertEqual(candidate["analysis_contract"]["instruction_for_gpt"], "x" * 20000)
-        with self.assertRaisesRegex(ValueError, "byte ceiling"):
-            build_request_envelope(candidate, model=SMOKE_MODEL)
+        original_evidence, original_handoff = copy.deepcopy(evidence), copy.deepcopy(handoff)
+        with self.assertRaisesRegex(ValueError, "16 KiB"):
+            build_minimized_bridge_payload(evidence, handoff)
+        self.assertEqual(evidence, original_evidence)
+        self.assertEqual(handoff, original_handoff)
+        self.assertEqual(handoff["instruction_for_gpt"], "x" * 20000)
 
     def test_large_overlay_projection_round_trips_six_layer_facts(self):
         from test_season_transition_warning_overlay import build
@@ -268,7 +275,8 @@ class WorkerTests(unittest.TestCase):
         original = copy.deepcopy(evidence)
         handoff = run_gpt_handoff_gate(evidence, build_plain_language_notice(evidence),
                                       ledger_path=self.root / "overlay.jsonl")
-        with patch("crt_radar.gpt_handoff._bound_bridge_detail"):
+        with patch("crt_radar.gpt_handoff._bound_bridge_detail"), \
+             patch("crt_radar.gpt_handoff.BRIDGE_CEILING_BYTES", 10 ** 9):
             full = build_minimized_bridge_payload(evidence, handoff)
         reduced = build_minimized_bridge_payload(evidence, handoff)
         self.assertEqual(evidence, original)
@@ -278,9 +286,10 @@ class WorkerTests(unittest.TestCase):
         for layer in reordered["layers"].values():
             layer["metrics"] = dict(reversed(list(layer["metrics"].items())))
         self.assertEqual(reduced, build_minimized_bridge_payload(reordered, handoff))
+        expanded = expand_bridge_field_names(reduced)
         for key in ("capital_state", "analysis_contract", "authority", "privacy", "event"):
-            self.assertEqual(reduced[key], full[key])
-        market = reduced["market_context"]
+            self.assertEqual(expanded[key], full[key])
+        market = expanded["market_context"]
         self.assertEqual(market["minimization"]["source_market_context_hash"],
                          _canonical_hash(full["market_context"]))
         self.assertEqual(market["mstr_asst_market_health"], evidence["mstr_asst_market_health"])
@@ -299,7 +308,7 @@ class WorkerTests(unittest.TestCase):
         resolved_authority = {**reduced["authority"], **compact_overlay["authority"]}
         for key, value in overlay["authority"].items():
             self.assertEqual(resolved_authority[key], value)
-        self.assertEqual(compact_overlay["veto"], overlay["gate_core_veto"]["veto"])
+        self.assertEqual(compact_overlay["gate_core_veto"]["veto"], overlay["gate_core_veto"]["veto"])
         self.assertEqual(compact_overlay["conflict_evidence"], overlay["lights"]["conflict_veto"]["raw_metrics"])
         encoded = build_request_envelope(reduced, model=SMOKE_MODEL)["request_body"]["input"]
         self.assertLess(len(encoded.encode("utf-8")), 16384)
