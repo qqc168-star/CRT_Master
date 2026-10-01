@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -144,6 +145,7 @@ def run_daily_evidence(
     btc_entry_gate_runner: Callable[..., dict[str, Any]] | None = None,
     assumption_watch_context: dict[str, Any] | None = None,
     mstr_asst_market_health: dict[str, Any] | None = None,
+    issuer_ratio_observation: dict[str, Any] | None = None,
     institutional_flow_context: dict[str, Any] | None = None,
     previous_season_transition_overlay: dict[str, Any] | None = None,
     season_transition_replay_context: dict[str, Any] | None = None,
@@ -299,6 +301,7 @@ def run_daily_evidence(
         assumption_watch_context=assumption_watch_context,
         private_context=private_context,
         mstr_asst_market_health=mstr_asst_market_health,
+        issuer_ratio_observation=issuer_ratio_observation,
         institutional_flow_context=institutional_flow_context,
         previous_season_transition_overlay=previous_season_transition_overlay,
         season_transition_replay_context=season_transition_replay_context,
@@ -469,6 +472,8 @@ def main(argv: list[str] | None = None) -> int:
         default=300,
         help="Transport-only freshness limit for --phone-l4-freshness-path. Source-level freshness remains authoritative.",
     )
+    parser.add_argument("--issuer-ratio-proof", type=Path, default=None,
+        help="Existing sealed issuer proof; independent reported observation lane, no Commander requirement.")
     args = parser.parse_args(argv)
 
     if (
@@ -548,6 +553,13 @@ def main(argv: list[str] | None = None) -> int:
     previous_season_transition_overlay = (
         _load_previous_season_transition_overlay(args.output)
     )
+    issuer_observation = None
+    if args.issuer_ratio_proof is not None:
+        from .mstr_asst_market_health import build_issuer_ratio_observation
+        issuer_observation = build_issuer_ratio_observation(
+            _load_json_object(args.issuer_ratio_proof, label="Issuer ratio source proof"),
+            generated_at_ms=int(time.time() * 1000),
+        )
     pack = run_daily_evidence(
         registry,
         observation_db=args.observation_db,
@@ -583,6 +595,7 @@ def main(argv: list[str] | None = None) -> int:
         btc_entry_gate_runner=run_live_btc_entry_gate,
         assumption_watch_context=assumption_watch_context,
         mstr_asst_market_health=mstr_asst_market_health,
+        issuer_ratio_observation=issuer_observation,
         institutional_flow_context=institutional_flow_context,
         previous_season_transition_overlay=(
             previous_season_transition_overlay

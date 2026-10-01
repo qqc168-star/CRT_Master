@@ -129,6 +129,133 @@ def issuer_ratio_observation(
     return result, reasons
 
 
+ISSUER_OBSERVATION_SCHEMA_VERSION = "CRT_ISSUER_RATIO_OBSERVATION_V0.1"
+
+
+def build_issuer_ratio_observation(
+    source_proof: Any, *, generated_at_ms: int,
+) -> dict[str, Any]:
+    """Consume the existing issuer proof without requiring the other four sources."""
+    # Local import avoids the runtime -> daily runner -> evidence pack import cycle.
+    from .mstr_asst_market_health_runtime import _validated_source
+
+    data = _validated_source(
+        "issuer_btc_per_diluted_share", source_proof,
+        generated_at_ms=generated_at_ms,
+    )
+    provenance = {key: deepcopy(source_proof[key]) for key in
+                  ("source_id", "data_hash", "observed_at_ms")}
+    return _issuer_observation_section(data, provenance, generated_at_ms)
+
+
+def _issuer_observation_section(
+    data: Any, provenance: Any, generated_at_ms: int,
+) -> dict[str, Any]:
+    if type(generated_at_ms) is not int or generated_at_ms <= 0:
+        raise ValueError("issuer observation generated_at_ms must be positive integer")
+    if not isinstance(data, dict) or not data or set(data) - set(SUPPORTED_ASSETS):
+        raise ValueError("issuer observations must be keyed by MSTR/ASST")
+    if (not isinstance(provenance, dict)
+            or provenance.get("source_id") != "CRT-CONN-MSTR-ASST-OFFICIAL-ISSUER-RATIO-001"
+            or not re.fullmatch(r"[0-9a-f]{64}", str(provenance.get("data_hash", "")))
+            or type(provenance.get("observed_at_ms")) is not int
+            or not 0 < provenance["observed_at_ms"] <= generated_at_ms):
+        raise ValueError("issuer observation source provenance invalid")
+    observations = {}
+    for asset, issuer in sorted(data.items()):
+        if not isinstance(issuer, dict):
+            raise ValueError("issuer observation row must be an object")
+        if asset == "MSTR" and issuer.get("time_semantic") != "REPORTED_OBSERVATION_NOT_EFFECTIVE_TIME":
+            raise ValueError("MSTR observation requires the locked Ledger reported semantics")
+        checked, _ = issuer_ratio_observation(asset, issuer, generated_at_ms=provenance["observed_at_ms"])
+        if asset == "ASST":
+            # Keep the existing SEC effective clocks; never coerce them to Ledger clocks.
+            times = [issuer.get(f"{prefix}_effective_at_ms") for prefix in ("previous", "current")]
+            if (any(type(value) is not int for value in times)
+                    or not 0 < times[0] < times[1] <= provenance["observed_at_ms"]):
+                raise ValueError("ASST effective clock ordering invalid")
+            for prefix, ratio in (("previous", checked["previous"]), ("current", checked["current"])):
+                btc = _number(issuer.get(f"{prefix}_btc_holdings"), "ASST BTC")
+                shares = _number(issuer.get(f"{prefix}_diluted_shares"), "ASST diluted shares")
+                if (not all(math.isfinite(v) and v > 0 for v in (btc, shares))
+                        or not math.isclose(ratio, btc / shares, rel_tol=1e-12)):
+                    raise ValueError("ASST ratio must use same-state BTC/shares")
+        row = {}
+        for prefix in ("previous", "current"):
+            for field in ("btc_holdings", "diluted_shares", "btc_per_diluted_share", "source_url", "evidence_hash"):
+                key = f"{prefix}_{field}"
+                row[key] = deepcopy(issuer[key])
+            if not re.fullmatch(r"[0-9a-f]{64}", str(row[f"{prefix}_evidence_hash"])):
+                raise ValueError("issuer raw evidence hash invalid")
+            if not isinstance(row[f"{prefix}_source_url"], str) or not row[f"{prefix}_source_url"].startswith("https://"):
+                raise ValueError("issuer source URL invalid")
+            clocks = ("reported_date", "reported_at_ms", "first_seen_at_ms", "retrieved_at_ms") if asset == "MSTR" else ("effective_at_ms",)
+            for field in clocks:
+                row[f"{prefix}_{field}"] = deepcopy(issuer[f"{prefix}_{field}"])
+        if asset == "MSTR":
+            for field in ("source_role", "time_semantic", "reported_at_rule", "comparison_horizon",
+                          "ct_binding_state", "ct_blocker", "semantic_source_url", "semantic_authority", "sec_authority"):
+                row[field] = checked[field]
+            row.update({"source_url": row["current_source_url"], "evidence_hash": row["current_evidence_hash"],
+                        "retrieved_at_ms": row["current_retrieved_at_ms"], "first_seen_at_ms": row["current_first_seen_at_ms"]})
+        row["latest_to_previous_change_pct"] = (checked["current"] / checked["previous"] - 1) * 100
+        row["wake_authority"] = "OBSERVATION_ONLY"
+        row["machine_execution"] = "FORBIDDEN"
+        observations[asset] = row
+    result = {
+        "schema_version": ISSUER_OBSERVATION_SCHEMA_VERSION,
+        "state": "VALID", "generated_at_ms": generated_at_ms,
+        "observations": observations, "source_provenance": deepcopy(provenance),
+        "analyst_judgment_required": True, **_authority(),
+    }
+    result["observation_hash"] = _canonical_hash(result)
+    return result
+
+
+def validate_issuer_ratio_observation(
+    payload: Any, *, generated_at_ms: int | None = None,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise ValueError("issuer_ratio_observation must be an object")
+    observed = payload.get("generated_at_ms")
+    if generated_at_ms is not None and (type(observed) is not int or observed > generated_at_ms):
+        raise ValueError("issuer observation cannot be in the future")
+    expected = _issuer_observation_section(
+        payload.get("observations"), payload.get("source_provenance"), observed,
+    )
+    if payload != expected:
+        raise ValueError("issuer observation contract/hash mismatch")
+    return expected
+
+
+def compact_issuer_ratio_observation(payload: Any, *, generated_at_ms: int) -> dict[str, Any]:
+    """Keep paired facts literal; full provenance remains in the sealed pack."""
+    checked = validate_issuer_ratio_observation(payload, generated_at_ms=generated_at_ms)
+    rows = {}
+    for asset, row in checked["observations"].items():
+        if asset == "MSTR":
+            keys = (
+                "previous_reported_date", "current_reported_date", "previous_btc_holdings",
+                "current_btc_holdings", "previous_diluted_shares", "current_diluted_shares",
+                "previous_btc_per_diluted_share", "current_btc_per_diluted_share",
+                "latest_to_previous_change_pct", "source_url", "evidence_hash",
+                "retrieved_at_ms", "first_seen_at_ms", "time_semantic", "comparison_horizon",
+                "ct_binding_state", "ct_blocker", "wake_authority", "machine_execution",
+            )
+            rows[asset] = {key: deepcopy(row[key]) for key in keys}
+        else:
+            rows[asset] = deepcopy(row)
+            for key in ("source_url", "evidence_hash"):
+                if row[f"previous_{key}"] == row[f"current_{key}"]:
+                    rows[asset][key] = rows[asset].pop(f"current_{key}")
+                    rows[asset].pop(f"previous_{key}")
+            rows[asset]["shared_source_fields_scope"] = "BOTH_SEC_PAIRED_STATES"
+    return {
+        "observation_hash": checked["observation_hash"], "observations": rows,
+        "provenance_scope": "FULL_TIME_AND_SOURCE_PROVENANCE_IN_EVIDENCE_PACK",
+    }
+
+
 def _asset_health(
     asset: str,
     market: dict[str, Any],
