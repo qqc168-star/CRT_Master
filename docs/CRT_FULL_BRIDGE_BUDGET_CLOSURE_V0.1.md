@@ -180,3 +180,45 @@ rebound to its own hash. Final bridge hash:
 `292e7d6b9b046bfc3ec96faf7e44dd1cf978b8c8d223ef4ef536f1e22934d41b`.
 The replay performed no fresh retrieval or GPT network send. Validation is complete;
 merge remains outside this dispatch's authorization.
+
+## PR #122 transport/qualified-price review delta
+
+Worker validation previously rejected the actual 15,334-byte payload because its
+exact top-level allowlist omitted `issuer_ratio_observation`. It now accepts that
+one optional section while retaining the required legacy fields and rejecting
+unknown sections. Privacy and sensitive-text checks inspect both the raw payload
+and expanded key/authority/tranche representation; an encoded name cannot hide a
+forbidden field, and discarded descriptor text is still checked.
+
+The additive full Market Health/premarket test measures 16,984 bytes. That remains
+a legitimate critical-overflow rejection, not permission to drop its facts.
+Actual decision prices do not require a complete Market Health/Commander bundle.
+An explicit optional Evidence Pack field, `qualified_equity_daily_source`, carries
+the existing `equity_daily` proof. The bridge reuses the existing source-proof
+validator and completed RTH-session intake, carrying only the required price,
+session/as-of, qualification and source hash in `market_context.qualified_equity_prices`.
+Qualification uses the proof's observation clock, not a later replay clock.
+Wrong identities/hashes, future or invalid source clocks, unqualified quotes and
+invalid closes fail closed. No completed session yields explicit BLOCKED without
+an imputed price. No new collector, network request, registry entry, live quote
+qualification or Market Health inference is introduced. Callers must explicitly
+supply the proof in the sealed pack; the bridge does not read a retained file or
+silently recover missing inputs.
+
+Real retained-source verification used the existing IBKR proof and reproduced
+MSTR **153.09** and ASST **29.41**, both USD RTH close on **2026-09-30**,
+as-of **1790798400000**. The same payload retains issuer/capital/ETF/Treasury and
+formal states. Worker validation, local enqueue and offline request-envelope
+validation PASS; recursively reversed dictionary order produces the same hash.
+Raw four-asset quotes remain unqualified, and full Market Health remains blocked.
+
+With the required qualified prices, the bridge is **15,852 / 16,384 bytes**, leaving
+**532 bytes** of ceiling headroom. It exceeds the original 15,360-byte operational
+target by **492 bytes**; this is explicitly retained as a supporting engineering
+risk, not hidden by raising the ceiling or deleting facts. The earlier original
+context replay remains 15,334 bytes. New price-inclusive bridge hash:
+`7b8d66edc0792e9434f3eb1a66534fbee341bdc1a268cf11718fce659cf5aca2`.
+
+Review-delta validation: seven targeted tests passed; the single final full
+regression passed **1,084 tests**. Compileall, program registry, read-only surface
+and git diff --check PASS. PR #122 remains unmerged for N.S. review.

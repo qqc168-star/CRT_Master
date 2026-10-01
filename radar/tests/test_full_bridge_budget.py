@@ -10,12 +10,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from crt_radar.gpt_bridge_outbox import enqueue_bridge_payload
+from crt_radar.gpt_transport_worker import validate_transport_payload
 from crt_radar.gpt_handoff import (
     _compact_field_names, _compact_tranche_fields, _inherit_equal_authority,
     build_minimized_bridge_payload,
     expand_bridge_field_names, run_gpt_handoff_gate,
 )
 from crt_radar.mstr_asst_market_health import compact_issuer_ratio_observation
+from crt_radar.mstr_asst_market_health_runtime import seal_runtime_source
+from crt_radar.openai_responses_adapter_contract import build_request_envelope, SMOKE_MODEL
 from crt_radar.plain_language_notice import build_plain_language_notice
 from tests.test_gpt_handoff import bridge_pack, pack as handoff_pack
 from tests.test_mstr_asst_gpt_wake_closure import market_health
@@ -72,6 +75,22 @@ def handoff_for(pack: dict, root: Path) -> dict:
     return result
 
 
+def synthetic_daily_price_source(generated: int) -> dict:
+    """Offline test source only; never evidence of an actual market retrieval."""
+    bars = {asset: [{"session_date": day, "open": close, "high": close + 1,
+                    "low": close - 1, "close": close, "volume": 100.0,
+                    "source_state": "IBKR_HISTORICAL_TRADES_RTH"}
+                   for day in ("2026-09-29", "2026-09-30", "2026-10-02")]
+            for asset, close in (("MSTR", 153.09), ("ASST", 29.41))}
+    return seal_runtime_source(source_key="equity_daily", data=bars,
+                               observed_at_ms=generated - 1)
+
+
+def bind_pack(pack: dict) -> None:
+    pack["evidence_pack_hash"] = hashlib.sha256(canonical_bytes(
+        {key: value for key, value in pack.items() if key != "evidence_pack_hash"})).hexdigest()
+
+
 def metric_facts(market: dict, layer: str, metric: str) -> dict:
     row = market["layers"][layer]["metrics"][metric]
     if isinstance(row, dict):
@@ -104,6 +123,138 @@ def semantic_payload(payload: dict) -> dict:
 
 
 class FullBridgeBudgetTests(unittest.TestCase):
+    def test_full_issuer_bridge_passes_worker_with_legacy_payload_compatibility(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            pack = captured_pack()
+            payload = build_minimized_bridge_payload(pack, handoff_for(pack, root))
+            self.assertEqual(validate_transport_payload(payload),
+                             (payload["event"]["event_id"], payload["bridge_payload_hash"]))
+            legacy = deepcopy(payload)
+            legacy.pop("issuer_ratio_observation")
+            legacy.pop("bridge_payload_hash")
+            legacy["bridge_payload_hash"] = hashlib.sha256(canonical_bytes(legacy)).hexdigest()
+            validate_transport_payload(legacy)
+
+    def test_worker_rejects_unknown_root_fields_and_missing_required_fields(self):
+        with tempfile.TemporaryDirectory() as td:
+            pack = captured_pack()
+            payload = build_minimized_bridge_payload(pack, handoff_for(pack, Path(td)))
+            for change in ("extra", "missing"):
+                candidate = deepcopy(payload)
+                if change == "extra":
+                    candidate["uncontracted_section"] = {"value": 1}
+                else:
+                    candidate.pop("capital_state")
+                candidate.pop("bridge_payload_hash")
+                candidate["bridge_payload_hash"] = hashlib.sha256(canonical_bytes(candidate)).hexdigest()
+                with self.assertRaisesRegex(ValueError, "field set"):
+                    validate_transport_payload(candidate)
+
+    def test_worker_checks_encoded_names_and_raw_descriptor_text(self):
+        with tempfile.TemporaryDirectory() as td:
+            pack = captured_pack()
+            payload = build_minimized_bridge_payload(pack, handoff_for(pack, Path(td)))
+            candidate = deepcopy(payload)
+            codec = candidate["market_context"]["key_encoding"]
+            first_token = codec[0][0]
+            codec[1] = "broker_account|" + codec[1].split("|", 1)[1]
+            candidate["market_context"][first_token] = "NEVER_EXPORT"
+            candidate.pop("bridge_payload_hash")
+            candidate["bridge_payload_hash"] = hashlib.sha256(canonical_bytes(candidate)).hexdigest()
+            with self.assertRaises(ValueError):
+                validate_transport_payload(candidate)
+            candidate = deepcopy(payload)
+            candidate["market_context"]["key_encoding"][2] = "private@example.test"
+            candidate.pop("bridge_payload_hash")
+            candidate["bridge_payload_hash"] = hashlib.sha256(canonical_bytes(candidate)).hexdigest()
+            with self.assertRaisesRegex(ValueError, "Forbidden transport text"):
+                validate_transport_payload(candidate)
+
+    def test_qualified_prices_coexist_with_full_issuer_capital_etf_and_blocked_health(self):
+        with tempfile.TemporaryDirectory() as td:
+            pack = captured_pack()
+            source = synthetic_daily_price_source(pack["generated_at_ms"])
+            pack["qualified_equity_daily_source"] = source
+            # Explicit blocked contexts remain blocked; price evidence is independent.
+            pack["mstr_asst_market_health"] = {"state": "BLOCKED", "reason": "COMMANDER_PROOF_MISSING"}
+            pack["premarket_market_data"] = {"state": "BLOCKED", "reason": "PREMARKET_PRICE_UNQUALIFIED",
+                                            "battle_map": {"first_screen": []}}
+            bind_pack(pack)
+            original = deepcopy(pack)
+            payload = build_minimized_bridge_payload(pack, handoff_for(pack, Path(td)))
+            expanded = semantic_payload(payload)
+            prices = expanded["market_context"]["qualified_equity_prices"]
+            self.assertEqual(prices["source_hash"], source["data_hash"])
+            self.assertEqual(prices["source_id"], source["source_id"])
+            self.assertEqual(prices["observed_at_ms"], source["observed_at_ms"])
+            self.assertEqual(prices["scope"], "LAST_COMPLETED_RTH_CLOSE_NOT_LIVE_QUOTE")
+            for asset, value in (("MSTR", 153.09), ("ASST", 29.41)):
+                row = prices["assets"][asset]
+                self.assertEqual(row, {"state": "VALID", "price_usd": value,
+                    "as_of_ms": 1790798400000, "session_date": "2026-09-30",
+                    "session_state": "COMPLETE", "source_state": "IBKR_HISTORICAL_TRADES_RTH"})
+            for section in ("mstr_asst_market_health", "premarket_market_data"):
+                self.assertEqual(expanded["market_context"][section], pack[section])
+            self.assertIn("btc_etf_evidence", expanded["market_context"])
+            self.assertEqual(expanded["capital_state"]["snapshot_state"], "STALE")
+            self.assertEqual(expanded["issuer_ratio_observation"], compact_issuer_ratio_observation(
+                pack["issuer_ratio_observation"], generated_at_ms=pack["generated_at_ms"]))
+            self.assertLess(len(canonical_bytes(payload)), 16384)
+            validate_transport_payload(payload)
+            self.assertEqual(build_request_envelope(payload, model=SMOKE_MODEL)["request_body"]["input"],
+                             canonical_bytes(payload).decode("utf-8"))
+            self.assertEqual(enqueue_bridge_payload(Path(td) / "outbox", payload)["state"], "OUTBOX_ENQUEUED")
+            self.assertEqual(payload, build_minimized_bridge_payload(reverse_dict_order(pack),
+                                                                    reverse_dict_order(handoff_for(pack, Path(td) / "second"))))
+            self.assertEqual(pack, original)
+
+    def test_price_proof_rejects_wrong_source_hash_clock_quality_and_non_rth(self):
+        for mode in ("source", "hash", "future", "clock", "quality", "non_rth", "invalid_price"):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as td:
+                pack = captured_pack()
+                source = synthetic_daily_price_source(pack["generated_at_ms"])
+                if mode == "source": source["source_id"] = "UNAPPROVED_SOURCE"
+                elif mode == "hash": source["data_hash"] = "0" * 64
+                elif mode == "future": source["observed_at_ms"] = pack["generated_at_ms"] + 1
+                elif mode == "clock": source["observed_at_ms"] = True
+                elif mode == "quality": source["validation_state"] = "BLOCKED"
+                else:
+                    row = source["data"]["MSTR"][1]
+                    if mode == "non_rth": row["source_state"] = "UNQUALIFIED_L1_QUOTE"
+                    else: row["close"] = 0.0
+                    source["data_hash"] = hashlib.sha256(canonical_bytes(source["data"])).hexdigest()
+                pack["qualified_equity_daily_source"] = source
+                bind_pack(pack)
+                with self.assertRaises(ValueError):
+                    build_minimized_bridge_payload(pack, handoff_for(pack, Path(td)))
+
+    def test_price_with_no_completed_session_stays_blocked_without_imputed_price(self):
+        with tempfile.TemporaryDirectory() as td:
+            pack = captured_pack()
+            source = synthetic_daily_price_source(pack["generated_at_ms"])
+            for asset in source["data"]:
+                source["data"][asset] = source["data"][asset][-1:]
+            source["data_hash"] = hashlib.sha256(canonical_bytes(source["data"])).hexdigest()
+            pack["qualified_equity_daily_source"] = source
+            bind_pack(pack)
+            payload = semantic_payload(build_minimized_bridge_payload(pack, handoff_for(pack, Path(td))))
+            prices = payload["market_context"]["qualified_equity_prices"]
+            self.assertEqual(prices["state"], "BLOCKED")
+            for row in prices["assets"].values():
+                self.assertEqual(row, {"state": "BLOCKED", "reason": "NO_COMPLETE_EQUITY_SESSION"})
+
+    def test_later_replay_cannot_promote_a_source_incomplete_session(self):
+        with tempfile.TemporaryDirectory() as td:
+            pack = captured_pack()
+            source = synthetic_daily_price_source(pack["generated_at_ms"])
+            pack["qualified_equity_daily_source"] = source
+            pack["generated_at_ms"] += 7 * 86400000
+            bind_pack(pack)
+            payload = semantic_payload(build_minimized_bridge_payload(pack, handoff_for(pack, Path(td))))
+            for row in payload["market_context"]["qualified_equity_prices"]["assets"].values():
+                self.assertEqual(row["session_date"], "2026-09-30")
+
     def test_realistic_full_context_reaches_validated_outbox_with_headroom(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)

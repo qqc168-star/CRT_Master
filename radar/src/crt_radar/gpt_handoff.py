@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import re
 import string
 from collections import Counter
@@ -534,7 +535,45 @@ def _bridge_market_context(
     portfolio = compact_portfolio_allocation_context_for_bridge(pack)
     if portfolio:
         result.update(portfolio)
+    if "qualified_equity_daily_source" in pack:
+        result["qualified_equity_prices"] = _bridge_qualified_equity_prices(pack)
     return result
+
+
+def _bridge_qualified_equity_prices(pack: dict[str, Any]) -> dict[str, Any]:
+    """Carry existing qualified RTH closes independently of full Market Health.
+
+    The full source proof belongs to the sealed Evidence Pack, not transport.
+    This is a completed-session price observation, never a live/premarket quote.
+    """
+    from .mstr_asst_market_health_runtime import _validated_source
+    from .mstr_asst_full_day_market_intake import build_mstr_asst_full_day_market_intake
+
+    proof = pack["qualified_equity_daily_source"]
+    generated = pack["generated_at_ms"]
+    if (type(generated) is not int or generated <= 0
+            or not isinstance(proof, dict)
+            or type(proof.get("observed_at_ms")) is not int
+            or proof["observed_at_ms"] <= 0):
+        raise ValueError("Qualified equity source requires positive integer clocks")
+    bars = _validated_source("equity_daily", proof, generated_at_ms=generated)
+    intake = build_mstr_asst_full_day_market_intake(
+        equity_bars=bars, btc_close_marks=[], generated_at_ms=proof["observed_at_ms"])
+    assets = {}
+    for asset, row in sorted(intake["assets"].items()):
+        if row["state"] != "VALID":
+            assets[asset] = {"state": row["state"], "reason": row["reason"]}
+            continue
+        session = row["latest_complete_session"]
+        if (session["source_state"] != "IBKR_HISTORICAL_TRADES_RTH"
+                or not math.isfinite(session["close"]) or session["close"] <= 0):
+            raise ValueError("Qualified equity price requires a finite positive IBKR RTH close")
+        assets[asset] = {"state": row["state"], "price_usd": session["close"],
+            "as_of_ms": session["session_close_ms"], "session_date": session["session_date"],
+            "session_state": session["session_state"], "source_state": session["source_state"]}
+    return {"state": intake["state"], "scope": "LAST_COMPLETED_RTH_CLOSE_NOT_LIVE_QUOTE",
+        "source_id": proof["source_id"], "source_hash": proof["data_hash"],
+        "observed_at_ms": proof["observed_at_ms"], "assets": assets}
 
 
 def _bridge_capital_condition(
