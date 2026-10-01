@@ -14,6 +14,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from .mstr_asst_market_health_runtime import seal_runtime_source
+from .mstr_asst_market_health import issuer_ratio_observation
 
 
 SEC_SUBMISSIONS = "https://data.sec.gov/submissions"
@@ -31,6 +32,145 @@ ASSETS = {
 }
 
 NY = ZoneInfo("America/New_York")
+
+
+class _LedgerTable(HTMLParser):
+    """Keep cells within their own table/row; totals are not observations."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tables: list[list[list[str]]] = []
+        self.table: list[list[str]] | None = None
+        self.row: list[str] | None = None
+        self.cell: list[str] | None = None
+
+    def handle_starttag(self, tag: str, attrs: Any) -> None:
+        if tag == "table":
+            if self.table is not None:
+                raise ValueError("nested Ledger table is unsupported")
+            self.table = []
+        elif tag == "tr" and self.table is not None:
+            self.row = []
+        elif tag in {"td", "th"} and self.row is not None:
+            self.cell = []
+
+    def handle_data(self, data: str) -> None:
+        if self.cell is not None:
+            self.cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"td", "th"} and self.cell is not None:
+            self.row.append(re.sub(r"\s+", " ", "".join(self.cell)).strip())
+            self.cell = None
+        elif tag == "tr" and self.row is not None:
+            self.table.append(self.row)
+            self.row = None
+        elif tag == "table" and self.table is not None:
+            self.tables.append(self.table)
+            self.table = None
+
+
+def parse_strategy_ledger(raw: bytes, *, source_url: str,
+                          retrieved_at_ms: int) -> list[dict[str, Any]]:
+    parser = _LedgerTable()
+    parser.feed(raw.decode("utf-8", errors="strict"))
+    required = ("Count", "Reported", "BTC", "ADSO ('000)")
+    matches = [(table, row) for table in parser.tables for row in table
+               if all(row.count(name) == 1 for name in required)]
+    if len(matches) != 1:
+        raise ValueError("Ledger requires one unambiguous Reported/BTC/ADSO table")
+    table, header = matches[0]
+    indexes = [header.index(name) for name in required]
+    digest = hashlib.sha256(raw).hexdigest()
+    observations: dict[str, dict[str, Any]] = {}
+    for row in table:
+        if len(row) <= max(indexes):
+            continue
+        count, reported, btc_text, adso_text = [row[index] for index in indexes]
+        if not count.isdecimal() or not reported:
+            continue  # Headers and totals cannot supply a paired observation.
+        reported_dt = datetime.strptime(reported, "%m/%d/%Y").replace(tzinfo=timezone.utc)
+        reported_ms = int(reported_dt.timestamp() * 1000)
+        if reported_ms > retrieved_at_ms:
+            raise ValueError("Ledger reported date is in the future")
+        if btc_text in {"", "-", "—"} or adso_text in {"", "-", "—"}:
+            continue  # Earlier history may not publish ADSO.
+        if not all(re.fullmatch(r"\d+(?:,\d{3})*(?:\.\d+)?", text)
+                   for text in (btc_text, adso_text)):
+            raise ValueError("Ledger paired BTC/ADSO numeric schema invalid")
+        btc = float(btc_text.replace(",", ""))
+        shares = float(adso_text.replace(",", "")) * 1000
+        if btc <= 0 or shares <= 0:
+            raise ValueError("Ledger paired BTC/ADSO must be positive")
+        date_text = reported_dt.date().isoformat()
+        observation = {
+            "reported_date": date_text,
+            "reported_at_ms": reported_ms,
+            "btc_holdings": btc,
+            "diluted_shares": shares,
+            "btc_per_diluted_share": btc / shares,
+            "retrieved_at_ms": retrieved_at_ms,
+            "first_seen_at_ms": retrieved_at_ms,
+            "source_url": source_url,
+            "evidence_hash": digest,
+        }
+        if date_text in observations and observations[date_text] != observation:
+            raise ValueError("Ledger conflicting observations for one reported date")
+        observations[date_text] = observation
+    return sorted(observations.values(), key=lambda row: row["reported_date"])
+
+
+def build_ledger_ratio_data(history: list[dict[str, Any]]) -> dict[str, Any]:
+    if len(history) < 2:
+        raise ValueError("MSTR Ledger requires two valid reported observations")
+    ordered = sorted(history, key=lambda row: row["reported_date"])
+    if len({row["reported_date"] for row in ordered}) != len(ordered):
+        raise ValueError("Ledger reported dates must be unique")
+    previous, current = ordered[-2:]
+    return {
+        **{f"{prefix}_{key}": value for prefix, row in
+           (("previous", previous), ("current", current)) for key, value in row.items()},
+        "source_role": "PRIMARY_OFFICIAL_MSTR_BTC_ADSO_HISTORY",
+        "time_semantic": "REPORTED_OBSERVATION_NOT_EFFECTIVE_TIME",
+        "reported_at_rule": "REPORTED_DATE_UTC_MIDNIGHT_SORT_KEY_ONLY",
+        "comparison_horizon": "ADJACENT_REPORTED_OBSERVATIONS",
+        "ct_binding_state": "NOT_CT_BOUND",
+        "ct_blocker": "ADSO_EFFECTIVE_TIME_UNRESOLVED",
+        "wake_authority": "OBSERVATION_ONLY",
+        "machine_execution": "FORBIDDEN",
+        "semantic_source_url": "https://www.strategy.com/notes",
+        "semantic_authority": "METRIC_SEMANTIC_AUTHORITY",
+        "sec_authority": "DISCLOSURE_AND_CAPITAL_EVENT_AUTHORITY",
+    }
+
+
+def collect_ledger_states(*, raw_archive_dir: Path | None = None) -> list[dict[str, Any]]:
+    contract_path = Path(__file__).resolve().parents[2] / "CONFIG" / "MSTR_ASST_MARKET_HEALTH_SOURCE_V0.1.json"
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    url = contract["sources"]["issuer_btc_per_diluted_share"]["MSTR"]["ledger"]["source_url"]
+    # The private SEC contact identity is never sent to an issuer or CDN.
+    request = urllib.request.Request(url, headers={
+        "User-Agent": "CRT-Radar/0.4-RC1 read-only source gate",
+        "Accept": "text/html", "Accept-Encoding": "identity",
+    })
+    with urllib.request.urlopen(request, timeout=20) as response:
+        if response.status != 200 or response.geturl() != url:
+            raise ValueError("Ledger transport requires direct HTTP 200")
+        content_type = response.headers.get("Content-Type", "")
+        if not content_type.lower().startswith("text/html"):
+            raise ValueError("Ledger transport requires HTML")
+        raw = response.read()
+    retrieved = int(time.time() * 1000)
+    digest = hashlib.sha256(raw).hexdigest()
+    if raw_archive_dir is not None:
+        raw_archive_dir.mkdir(parents=True, exist_ok=True)
+        (raw_archive_dir / f"ledger-{digest}.html").write_bytes(raw)
+        (raw_archive_dir / f"retrieval-{retrieved}.json").write_text(json.dumps({
+            "source_url": url, "http_status": 200, "content_type": content_type,
+            "evidence_hash": digest, "retrieved_at_ms": retrieved,
+            "first_seen_at_ms": retrieved,
+        }, indent=2), encoding="utf-8")
+    return parse_strategy_ledger(raw, source_url=url, retrieved_at_ms=retrieved)
 
 MONTHS = {
     "jan": 1, "january": 1,
@@ -482,11 +622,12 @@ def collect_states(
 
 
 def build_ratio_data(
-    histories: dict[str, list[dict[str, Any]]]
+    histories: dict[str, list[dict[str, Any]]],
+    *, assets: tuple[str, ...] = ("MSTR", "ASST"),
 ) -> dict[str, Any]:
     data: dict[str, Any] = {}
 
-    for asset in ("MSTR", "ASST"):
+    for asset in assets:
         history = histories[asset]
 
         if len(history) < 2:
@@ -550,14 +691,20 @@ def build_live_issuer_ratio_proof(
     *,
     user_agent: str,
     max_filings: int = 30,
+    raw_archive_dir: Path | None = None,
+    mstr_source: str = "LEDGER",
 ) -> dict[str, Any]:
+    if mstr_source not in {"LEDGER", "SEC"}:
+        raise ValueError("MSTR source must be LEDGER or SEC")
+    ledger_history = collect_ledger_states(raw_archive_dir=raw_archive_dir) if mstr_source == "LEDGER" else None
+    sec_assets = ("MSTR", "ASST") if mstr_source == "SEC" else ("ASST",)
     histories = {
         asset: collect_states(
             asset,
             user_agent=user_agent,
             max_filings=max_filings,
         )
-        for asset in ("MSTR", "ASST")
+        for asset in sec_assets
     }
 
     for asset, history in histories.items():
@@ -576,7 +723,10 @@ def build_live_issuer_ratio_proof(
             )
             print(" SOURCE=", row["source_url"])
 
-    data = build_ratio_data(histories)
+    data = build_ratio_data(histories, assets=sec_assets)
+    if mstr_source == "LEDGER":
+        data["MSTR"] = build_ledger_ratio_data(ledger_history)
+        issuer_ratio_observation("MSTR", data["MSTR"], generated_at_ms=int(time.time() * 1000))
 
     proof = seal_runtime_source(
         source_key="issuer_btc_per_diluted_share",
@@ -586,13 +736,15 @@ def build_live_issuer_ratio_proof(
 
     proof["collection_contract"] = {
         "provider":
-            "SEC_EDGAR_AND_ISSUER_OFFICIAL_DISCLOSURES",
+            "STRATEGY_LEDGER_AND_ASST_SEC" if mstr_source == "LEDGER"
+            else "SEC_EDGAR_AND_ISSUER_OFFICIAL_DISCLOSURES",
 
         "transport":
             "HTTPS_READ_ONLY",
 
         "selection":
-            "LATEST_TWO_COMPLETE_PAIRED_OFFICIAL_STATES",
+            "MSTR_ADJACENT_REPORTED_ASST_PAIRED_EFFECTIVE_STATES" if mstr_source == "LEDGER"
+            else "LATEST_TWO_COMPLETE_PAIRED_OFFICIAL_STATES",
 
         "machine_invented_fact":
             False,
@@ -611,6 +763,8 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--output", required=True)
+    parser.add_argument("--raw-archive-dir")
+    parser.add_argument("--mstr-source", choices=("LEDGER", "SEC"), default="LEDGER")
 
     parser.add_argument(
         "--user-agent",
@@ -636,6 +790,9 @@ def main() -> int:
     proof = build_live_issuer_ratio_proof(
         user_agent=args.user_agent,
         max_filings=args.max_filings,
+        raw_archive_dir=Path(args.raw_archive_dir) if args.raw_archive_dir
+        else Path(args.output).parent / "raw",
+        mstr_source=args.mstr_source,
     )
 
     output = Path(args.output)

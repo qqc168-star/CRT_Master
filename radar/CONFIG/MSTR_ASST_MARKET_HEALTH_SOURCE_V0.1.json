@@ -39,9 +39,34 @@
     },
     "issuer_btc_per_diluted_share": {
       "source_id": "CRT-CONN-MSTR-ASST-OFFICIAL-ISSUER-RATIO-001",
-      "provider": "SEC EDGAR and issuer official disclosures",
-      "transport": "LOCAL_VERIFIED_FACT_BUNDLE",
-      "implementation_state": "OFFICIAL_FACT_BUNDLE_PASS"
+      "provider": "Strategy official Ledger/Notes and SEC EDGAR/issuer official disclosures",
+      "transport": "HTTPS_READ_ONLY_LOCAL_VERIFIED_FACT_BUNDLE",
+      "implementation_state": "OFFICIAL_REPORTED_OBSERVATION_AND_SEC_PAIR_BINDING",
+      "MSTR": {
+        "ledger": {
+          "source_url": "https://www.strategy.com/ledger",
+          "role": "PRIMARY_OFFICIAL_MSTR_BTC_ADSO_HISTORY",
+          "selection": "ADJACENT_VALID_REPORTED_OBSERVATIONS",
+          "time_semantic": "REPORTED_OBSERVATION_NOT_EFFECTIVE_TIME",
+          "reported_at_rule": "REPORTED_DATE_UTC_MIDNIGHT_SORT_KEY_ONLY",
+          "adso_units": "THOUSANDS_MULTIPLIED_BY_1000"
+        },
+        "notes": {
+          "source_url": "https://www.strategy.com/notes",
+          "role": "METRIC_SEMANTIC_AUTHORITY"
+        },
+        "sec": {
+          "role": "DISCLOSURE_AND_CAPITAL_EVENT_AUTHORITY",
+          "legacy_ratio_collector": "RETAINED_AUDIT_CROSS_CHECK"
+        },
+        "ct_binding_state": "NOT_CT_BOUND",
+        "ct_blocker": "ADSO_EFFECTIVE_TIME_UNRESOLVED"
+      },
+      "ASST": {
+        "provider": "SEC EDGAR and issuer official disclosures",
+        "selection": "LATEST_TWO_COMPLETE_PAIRED_OFFICIAL_STATES",
+        "implementation_state": "UNCHANGED"
+      }
     },
     "commander_lines": {
       "source_id": "CRT-CONN-MSTR-ASST-COMMANDER-LINES-001",
