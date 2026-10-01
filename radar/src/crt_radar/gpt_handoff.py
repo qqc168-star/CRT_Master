@@ -7,6 +7,9 @@ from pathlib import Path
 from typing import Any
 
 from .gpt_bridge_outbox import enqueue_bridge_payload
+from .mstr_asst_market_health import (
+    validate_issuer_ratio_observation, compact_issuer_ratio_observation,
+)
 from .run_ledger import GENESIS_HASH, RunLedger
 from .btc_etf_intake import compact_for_bridge as compact_btc_etf_evidence
 from .treasury_company_ct import compact_treasury_valuation_context
@@ -1137,6 +1140,11 @@ def build_minimized_bridge_payload(
         },
     }
 
+    if "issuer_ratio_observation" in pack:
+        # Independent allowlisted section stays literal during market-detail compaction.
+        payload["issuer_ratio_observation"] = compact_issuer_ratio_observation(
+            pack["issuer_ratio_observation"], generated_at_ms=pack["generated_at_ms"],
+        )
     _assert_bridge_privacy(payload)
     _bound_bridge_detail(payload, pack)
 
@@ -1574,7 +1582,7 @@ def _semantic_descriptor(
             )
         ]
 
-    return {
+    descriptor = {
         "wake_state": wake.get("state"),
         "wake_reason": wake.get("reason"),
         "wake_sources": wake_sources,
@@ -1589,6 +1597,24 @@ def _semantic_descriptor(
             )
         ),
     }
+
+    if "issuer_ratio_observation" in pack:
+        observation = validate_issuer_ratio_observation(
+            pack["issuer_ratio_observation"], generated_at_ms=pack["generated_at_ms"],
+        )
+        # Repeated retrievals of one reported pair do not create new episodes.
+        # A new adjacent pair must not be swallowed by a prior decrease reason.
+        descriptor["issuer_observation_pairs"] = {
+            asset: {key: value for key, value in row.items() if key in {
+                "previous_reported_date", "current_reported_date",
+                "previous_effective_at_ms", "current_effective_at_ms",
+                "previous_btc_holdings", "current_btc_holdings",
+                "previous_diluted_shares", "current_diluted_shares",
+                "time_semantic", "comparison_horizon",
+            }} for asset, row in observation["observations"].items()
+            if f"{asset}_ISSUER_RATIO_OBSERVATION" in wake_sources
+        }
+    return descriptor
 
 
 def semantic_wake_key(
@@ -1886,6 +1912,7 @@ def run_gpt_handoff_gate(
             "LATEST_EVIDENCE_PACK",
             "LATEST_CAPITAL_STATE",
             "LATEST_NOTICE",
+            *(["LATEST_ISSUER_RATIO_OBSERVATION"] if "issuer_ratio_observation" in pack else []),
             *(
                 [
                     "LATEST_MSTR_ASST_MARKET_HEALTH",

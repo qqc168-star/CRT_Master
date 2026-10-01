@@ -118,3 +118,45 @@ GPT handoff，重複狀態被抑制，且沒有交易或外部動作。真正 li
 4. 驗證沒有通知風暴、沒有交易、EAA 仍為 `NONE`。
 
 在上述 live evidence 出現前，CRT Active Baton 不得從 `6 / 8` 誤升為 `8 / 8`。
+
+
+## Independent issuer observation -> GPT closure (post-PR120)
+
+The additive `issuer_ratio_observation` Evidence Pack section is independent of
+`asset_facts` / `issuer_facts`, Treasury Company CT, formal mNAV and Company Health.
+`build_issuer_ratio_observation()` validates the existing sealed issuer proof with
+the existing source validator and reuses `issuer_ratio_observation()`; it does not
+require the other four full Market Health proofs. Full Market Health still requires
+all five sources, including approved Commander lines.
+
+Use the existing collector output with the daily runner's optional
+`--issuer-ratio-proof <local-proof.json>` input. Without this input existing runs
+retain their behavior. The source proof and its clocks/hash/authority must validate;
+invalid proof, same-row ratio mismatch, future observation and invented Ledger
+effective/disclosure clocks fail closed.
+
+A decrease produces `MSTR:BTC_PER_DILUTED_SHARE_DECREASED` from
+`MSTR_ISSUER_RATIO_OBSERVATION` (or the ASST counterpart), for GPT reanalysis only.
+It does not infer Company Health deterioration, scores, lights or any trade action.
+Re-fetching the same pair is deduplicated; changed facts or new adjacent reported
+pairs have distinct semantic identities, independent of retrieval timestamps.
+
+The minimized bridge has a separate literal `issuer_ratio_observation` section:
+paired reported dates, BTC, ADSO, BTC/share, percent change, current source/hash,
+retrieval/first-seen clocks and all Ledger warnings remain explicit. Full previous
+and current clock/source provenance stays in the hash-bound Evidence Pack. Equal
+ASST source URL/hash fields may be shared with explicit `BOTH_SEC_PAIRED_STATES`
+scope; ASST's previous/current SEC effective clocks are preserved. The existing
+16,384-byte limit, privacy rules and action authority remain unchanged.
+
+`REPORTED_OBSERVATION_NOT_EFFECTIVE_TIME`, `ADJACENT_REPORTED_OBSERVATIONS`,
+`NOT_CT_BOUND`, `ADSO_EFFECTIVE_TIME_UNRESOLVED`, `OBSERVATION_ONLY` and
+`machine_execution = FORBIDDEN` remain mandatory. This lane can reach
+`GPT_HANDOFF_READY` even when the formal pack is blocked by separate source gaps.
+A ready local bridge is not completed GPT judgment, notification or execution.
+
+Deterministic tests: `tests.test_issuer_observation_gpt_closure`, alongside existing
+Ledger, Market Health, wake fusion and GPT handoff regression tests. Live acceptance
+uses fresh ordinary-HTTPS Ledger / SEC proof, real market/history inputs and the
+actual daily runner, with private-safe audit artifacts outside the repository;
+fixtures never substitute for live evidence.

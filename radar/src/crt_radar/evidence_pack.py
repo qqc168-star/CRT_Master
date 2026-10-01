@@ -15,7 +15,9 @@ from .btc_control_transfer_validation import (
     evaluate_control_transfer_validation,
 )
 from .change_engine import compute_changes, distill_top_changes
-from .mstr_asst_market_health import validate_mstr_asst_market_health
+from .mstr_asst_market_health import (
+    validate_mstr_asst_market_health, validate_issuer_ratio_observation,
+)
 from .observation_store import Observation, ObservationStore, extract_observations
 from .plan_drift import evaluate_plan_drift
 from .premarket_battle_map import (
@@ -380,6 +382,7 @@ def build_evidence_pack(
     assumption_watch_context: dict[str, Any] | None = None,
     private_context: dict[str, Any] | None = None,
     mstr_asst_market_health: dict[str, Any] | None = None,
+    issuer_ratio_observation: dict[str, Any] | None = None,
     premarket_live_market_handoff: dict[str, Any] | None = None,
     premarket_battle_map: dict[str, Any] | None = None,
     institutional_flow_context: dict[str, Any] | None = None,
@@ -486,6 +489,10 @@ def build_evidence_pack(
         pack["btc_long_horizon_context"] = deepcopy(
             btc_long_horizon_context
         )
+    if issuer_ratio_observation is not None:
+        pack["issuer_ratio_observation"] = validate_issuer_ratio_observation(
+            issuer_ratio_observation, generated_at_ms=generated_at,
+        )
     if mstr_asst_market_health is not None:
         pack["mstr_asst_market_health"] = (
             validate_mstr_asst_market_health(
@@ -508,6 +515,7 @@ def build_evidence_pack(
     fused_reanalysis_wake = fuse_reanalysis_wake(
         pack.get("reanalysis_wake"),
         plan_drift=pack["plan_drift"],
+        issuer_ratio_observation=pack.get("issuer_ratio_observation"),
         mstr_asst_market_health=pack.get(
             "mstr_asst_market_health"
         ),

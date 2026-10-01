@@ -238,7 +238,16 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
 
     percent_change = wake.get("percent_change")
 
-    if market_health_requested:
+    issuer_events = [reason for reason in wake.get("wake_reasons", [])
+                     if str(reason).endswith(":BTC_PER_DILUTED_SHARE_DECREASED")
+                     and str(reason).split(":")[0] + "_ISSUER_RATIO_OBSERVATION" in wake.get("wake_sources", [])]
+    issuer_observation_requested = requested and wake.get("input_family") == "ISSUER_RATIO_OBSERVATION" and bool(issuer_events)
+    if issuer_observation_requested:
+        what_happened = (
+            "Issuer BTC/share observation requires GPT reanalysis: " + ", ".join(issuer_events)
+            + ". Observation only; no Company Health deterioration or trade action is inferred."
+        )
+    elif market_health_requested:
         what_happened = (
             "MSTR／ASST 市場健康度事件已通過唯讀驗證："
             + "、".join(market_health_events)
@@ -355,7 +364,18 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(blockers, list):
         blockers = []
 
-    if market_health_requested:
+    if issuer_observation_requested:
+        title = "Issuer ratio observation requires GPT reanalysis"
+        state = "GPT_REANALYSIS_REQUESTED"
+        instruction = (
+            "Read the latest Evidence Pack issuer_ratio_observation and current capital state. "
+            "Review the adjacent issuer observations, clocks, provenance and contradictory evidence. "
+            "Preserve reported observations as reported, NOT_CT_BOUND and ADSO_EFFECTIVE_TIME_UNRESOLVED. "
+            "Commander proof is not required for this observation review. "
+            "Infer no Company Health deterioration or BUY/SELL/ROTATE/HARVEST action from this wake. "
+            "Advise the user only; no external action or machine execution."
+        )
+    elif market_health_requested:
         title = "MSTR／ASST 市場健康度觸發 GPT 重新分析"
         state = "GPT_REANALYSIS_REQUESTED"
         instruction = (

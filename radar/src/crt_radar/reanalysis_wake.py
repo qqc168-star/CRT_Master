@@ -4,7 +4,9 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from .mstr_asst_market_health import validate_mstr_asst_market_health
+from .mstr_asst_market_health import (
+    validate_mstr_asst_market_health, validate_issuer_ratio_observation,
+)
 from .observation_store import Observation
 
 
@@ -172,8 +174,9 @@ def fuse_reanalysis_wake(
     *,
     plan_drift: dict[str, Any] | None,
     mstr_asst_market_health: dict[str, Any] | None = None,
+    issuer_ratio_observation: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Fuse read-only BTC, plan-drift, and equity-health wake sources."""
+    """Fuse read-only BTC, plan-drift, equity-health and issuer observation wakes."""
 
     if base_wake is not None and not isinstance(base_wake, dict):
         raise ValueError("base_wake must be an object or None")
@@ -209,7 +212,13 @@ def fuse_reanalysis_wake(
         and market_health.get("reanalysis_required") is True
     )
 
-    if base_wake is None and not plan_requested and not market_requested:
+    issuer = (validate_issuer_ratio_observation(issuer_ratio_observation)
+              if issuer_ratio_observation is not None else None)
+    issuer_assets = [asset for asset, row in issuer["observations"].items()
+                     if row["current_btc_per_diluted_share"] < row["previous_btc_per_diluted_share"]] if issuer else []
+    issuer_requested = bool(issuer_assets)
+
+    if base_wake is None and not plan_requested and not market_requested and not issuer_requested:
         return None
 
     if base_wake is None:
@@ -274,6 +283,18 @@ def fuse_reanalysis_wake(
                 }
             )
 
+    if issuer_requested:
+        issuer_reasons = [f"{asset}:BTC_PER_DILUTED_SHARE_DECREASED" for asset in issuer_assets]
+        wake_sources.extend(f"{asset}_ISSUER_RATIO_OBSERVATION" for asset in issuer_assets)
+        wake_reasons.extend(issuer_reasons)
+        if not base_requested and not market_requested:
+            result.update({
+                "state": "REANALYSIS_REQUESTED", "reason": issuer_reasons[0],
+                "metric": "issuer_btc_per_diluted_share", "input_family": "ISSUER_RATIO_OBSERVATION",
+                "current_value": None, "previous_value": None, "percent_change": None,
+                "historical_percentile": None, "baseline_count": 0,
+            })
+
     if plan_requested:
         plan_reason = str(
             plan_drift.get(
@@ -285,7 +306,7 @@ def fuse_reanalysis_wake(
         wake_sources.append("PLAN_DRIFT")
         wake_reasons.append(plan_reason)
 
-        if not base_requested and not market_requested:
+        if not base_requested and not market_requested and not issuer_requested:
             result.update(
                 {
                     "state": "REANALYSIS_REQUESTED",
@@ -306,7 +327,7 @@ def fuse_reanalysis_wake(
 
     result["analyst_reanalysis_requested"] = requested
     result["wake_sources"] = wake_sources
-    result["wake_reasons"] = wake_reasons
+    result["wake_reasons"] = list(dict.fromkeys(wake_reasons))
 
     result["plan_drift_state"] = (
         plan_drift.get("state")
