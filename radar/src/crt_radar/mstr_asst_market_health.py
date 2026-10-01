@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -64,12 +67,75 @@ def _commander_lines(asset: str, raw: Any) -> dict[str, float]:
     }
 
 
+def issuer_ratio_observation(
+    asset: str, issuer: Any, *, generated_at_ms: int,
+) -> tuple[dict[str, Any], list[str]]:
+    """The existing issuer wake comparison, with reported-clock provenance intact."""
+    if not isinstance(issuer, dict):
+        raise ValueError(f"{asset} issuer BTC/share input must be an object")
+    current = _number(issuer.get("current_btc_per_diluted_share"), "current_btc_per_diluted_share")
+    previous = _number(issuer.get("previous_btc_per_diluted_share"), "previous_btc_per_diluted_share")
+    if not all(math.isfinite(value) and value > 0 for value in (previous, current)):
+        raise ValueError("issuer BTC/share must be finite and positive")
+    result = {"current": current, "previous": previous}
+    if any(key in issuer for key in ("time_semantic", "source_role", "current_reported_date", "previous_reported_date")):
+        required = {
+            "source_role": "PRIMARY_OFFICIAL_MSTR_BTC_ADSO_HISTORY",
+            "time_semantic": "REPORTED_OBSERVATION_NOT_EFFECTIVE_TIME",
+            "reported_at_rule": "REPORTED_DATE_UTC_MIDNIGHT_SORT_KEY_ONLY",
+            "comparison_horizon": "ADJACENT_REPORTED_OBSERVATIONS",
+            "ct_binding_state": "NOT_CT_BOUND",
+            "ct_blocker": "ADSO_EFFECTIVE_TIME_UNRESOLVED",
+            "wake_authority": "OBSERVATION_ONLY",
+            "machine_execution": "FORBIDDEN",
+            "semantic_source_url": "https://www.strategy.com/notes",
+            "semantic_authority": "METRIC_SEMANTIC_AUTHORITY",
+            "sec_authority": "DISCLOSURE_AND_CAPITAL_EVENT_AUTHORITY",
+        }
+        if asset != "MSTR" or any(issuer.get(key) != value for key, value in required.items()):
+            raise ValueError("Ledger observation contract mismatch")
+        if any("effective" in key.lower() or "disclosure" in key.lower() for key in issuer):
+            raise ValueError("Ledger observation must not invent effective/disclosure clocks")
+        dates = []
+        for prefix, ratio in (("previous", previous), ("current", current)):
+            reported = issuer.get(f"{prefix}_reported_date")
+            if not isinstance(reported, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", reported):
+                raise ValueError("Ledger reported_date must be ISO date")
+            sort_ms = int(datetime.fromisoformat(reported).replace(tzinfo=timezone.utc).timestamp() * 1000)
+            clocks = [issuer.get(f"{prefix}_{key}") for key in
+                      ("reported_at_ms", "first_seen_at_ms", "retrieved_at_ms")]
+            if (any(type(value) is not int or value <= 0 for value in clocks)
+                    or clocks[0] != sort_ms or not sort_ms <= clocks[1] <= clocks[2] <= generated_at_ms):
+                raise ValueError("Ledger reported/retrieval clock ordering invalid")
+            dates.append(reported)
+            btc = _number(issuer.get(f"{prefix}_btc_holdings"), "Ledger BTC")
+            shares = _number(issuer.get(f"{prefix}_diluted_shares"), "Ledger ADSO")
+            if (not all(math.isfinite(value) and value > 0 for value in (btc, shares))
+                    or not math.isclose(ratio, btc / shares, rel_tol=1e-12)):
+                raise ValueError("Ledger ratio must use same-row BTC/ADSO")
+            if issuer.get(f"{prefix}_source_url") != "https://www.strategy.com/ledger":
+                raise ValueError("Ledger official source URL mismatch")
+            if not re.fullmatch(r"[0-9a-f]{64}", str(issuer.get(f"{prefix}_evidence_hash", ""))):
+                raise ValueError("Ledger raw evidence hash invalid")
+        if dates[0] >= dates[1]:
+            raise ValueError("Ledger adjacent reported dates must be increasing")
+        result.update(deepcopy(issuer))
+        result.update({"current": current, "previous": previous})
+        result["direction_claim"] = (
+            "ADJACENT_REPORTED_BTC_PER_ADSO_DECREASED" if current < previous
+            else "ADJACENT_REPORTED_BTC_PER_ADSO_NON_DECREASED"
+        )
+    reasons = ["BTC_PER_DILUTED_SHARE_DECREASED"] if current < previous else []
+    return result, reasons
+
+
 def _asset_health(
     asset: str,
     market: dict[str, Any],
     options: dict[str, Any],
     lines: dict[str, float],
     issuer: dict[str, Any],
+    generated_at_ms: int,
 ) -> dict[str, Any]:
     if market.get("state") != "VALID":
         raise ValueError(f"{asset} full-day market intake must be VALID")
@@ -98,18 +164,10 @@ def _asset_health(
     if close < lines["invalidation_line"]:
         reasons.append("TACTICAL_INVALIDATION_BREACHED")
 
-    if not isinstance(issuer, dict):
-        raise ValueError(f"{asset} issuer BTC/share input must be an object")
-    current_btc_share = _number(
-        issuer.get("current_btc_per_diluted_share"),
-        "current_btc_per_diluted_share",
+    issuer_observation, issuer_reasons = issuer_ratio_observation(
+        asset, issuer, generated_at_ms=generated_at_ms,
     )
-    previous_btc_share = _number(
-        issuer.get("previous_btc_per_diluted_share"),
-        "previous_btc_per_diluted_share",
-    )
-    if current_btc_share < previous_btc_share:
-        reasons.append("BTC_PER_DILUTED_SHARE_DECREASED")
+    reasons.extend(issuer_reasons)
 
     relative = market.get("relative_btc")
     observations = {
@@ -134,10 +192,7 @@ def _asset_health(
         "wake_reasons": reasons,
         "latest_complete_session": deepcopy(latest),
         "commander_lines": lines,
-        "issuer_btc_per_diluted_share": {
-            "current": current_btc_share,
-            "previous": previous_btc_share,
-        },
+        "issuer_btc_per_diluted_share": issuer_observation,
         "observations": observations,
     }
 
@@ -162,6 +217,14 @@ def validate_mstr_asst_market_health(payload: Any) -> dict[str, Any]:
         expected_reasons.extend(f"{asset}:{reason}" for reason in reasons)
         if row.get("reanalysis_required") is not bool(reasons):
             raise ValueError(f"{asset} reanalysis_required disagrees with reasons")
+        issuer = row.get("issuer_btc_per_diluted_share", {})
+        if any(key in issuer for key in ("time_semantic", "source_role", "current_reported_date", "previous_reported_date")):
+            checked, issuer_reasons = issuer_ratio_observation(
+                asset, issuer, generated_at_ms=payload["generated_at_ms"],
+            )
+            if (checked != issuer or ("BTC_PER_DILUTED_SHARE_DECREASED" in reasons)
+                    != bool(issuer_reasons)):
+                raise ValueError("Ledger observation/wake semantics mismatch")
     if payload.get("wake_reasons") != expected_reasons:
         raise ValueError("market health aggregate wake_reasons mismatch")
     requested = bool(expected_reasons)
@@ -212,6 +275,7 @@ def evaluate_mstr_asst_market_health(
             option_assets[asset],
             _commander_lines(asset, commander_lines[asset]),
             issuer_btc_per_diluted_share[asset],
+            generated_at_ms,
         )
         for asset in SUPPORTED_ASSETS
     }

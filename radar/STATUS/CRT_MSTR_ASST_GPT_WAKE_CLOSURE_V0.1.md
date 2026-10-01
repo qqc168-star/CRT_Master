@@ -64,6 +64,39 @@ Attack／Defense／Invalidation lines 必須來自 `THREE_ARMY_COMMANDER` 且
 
 ## 驗收邊界
 
+### Strategy Ledger reported-observation binding
+
+MSTR issuer ratio 的預設來源為 Strategy official `/ledger`，Notes 是
+`METRIC_SEMANTIC_AUTHORITY`，SEC 保留 `DISCLOSURE_AND_CAPITAL_EVENT_AUTHORITY`。
+既有 SEC MSTR collector 保留，以 `--mstr-source SEC` 明確執行 audit/cross-check；
+ASST 仍使用原 SEC paired-state 路徑。來源契約只更新 issuer ratio entry。
+
+Ledger adapter 依唯一 `Reported / BTC / ADSO ('000)` 表頭取同列 BTC 與
+ADSO × 1,000，排除 totals、缺 ADSO 的歷史列，按 reported date 排序後取
+最新兩個相鄰有效 observations；日期衝突、未來日期、單位／表頭歧義均拒收。
+`--raw-archive-dir` 可指定 repo 外原始證據目錄，CLI 預設保存在 output 旁的
+`raw`；普通 HTTPS GET 使用非私人 User-Agent，不轉送 SEC contact identity。
+
+每列保留 `reported_date`、`reported_at_ms`、`retrieved_at_ms`、
+`first_seen_at_ms`、`source_url` 與 raw SHA-256。`reported_at_ms` 僅是
+`REPORTED_DATE_UTC_MIDNIGHT_SORT_KEY_ONLY`；first-seen 是這次本機抓取首次看見
+該 snapshot 的時間，並非出版／揭露時鐘，也不宣稱歷史 point-in-time 可回放。
+`time_semantic = REPORTED_OBSERVATION_NOT_EFFECTIVE_TIME` 永久保留。
+
+2026-09-21 與 2026-09-28 reported observations 的 BTC/ADSO 約下降 0.129018%，
+只支持 `ADJACENT_REPORTED_BTC_PER_ADSO_DECREASED`。既有
+`MSTR:BTC_PER_DILUTED_SHARE_DECREASED` 仍僅要求 GPT reanalysis；
+不是 formal Company Health deterioration，也不產生分數、燈號或交易。
+reported clocks、來源 URL/hash、comparison horizon、`OBSERVATION_ONLY` 與
+`machine_execution = FORBIDDEN` 在 Market Health、Evidence Pack、GPT bridge
+保留，沿用既有下游接線，不新增引擎。
+
+**永久 CT 邊界：`NOT_CT_BOUND / ADSO_EFFECTIVE_TIME_UNRESOLVED`。**
+此證據不得供 Treasury Company CT 或 formal mNAV 使用；reported／retrieval／
+first-seen 不得偽裝 effective/disclosure clocks。完整 live runtime 仍須五項
+原來源證據，包含真正 `APPROVED` Commander lines；Ledger ratio 的真實觀察
+驗收與離線五來源回歸必須分開描述，不得以 fixture 補足 live 前置缺口。
+
 ### #7 GPT Wake
 
 `MSTR_ASST_EQUITY_HEALTH_SOFTWARE_PATH_CLOSED`
