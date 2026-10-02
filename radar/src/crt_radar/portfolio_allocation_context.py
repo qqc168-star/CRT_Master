@@ -739,7 +739,10 @@ def _portfolio_state(private_context: Any, market_prices: Any) -> dict[str, Any]
         return {"state": "BLOCKED", "reason": "CASH_STATE_INVALID"}
     if unknown:
         return {"state": "BLOCKED", "reason": "UNPRICED_OR_UNCLASSIFIED_HOLDINGS", "assets": sorted(set(unknown))}
-    cash_total = available + reserved
+    # Broker cash is a gross observed balance; USER_CONFIRMED reserves are a
+    # restriction within it, never additional money. Legacy snapshots retain
+    # their original separate available/reserved convention.
+    cash_total = available if isinstance(profile.get("capital_reconciliation"), dict) else available + reserved
     invested = fixed + growth
     total = cash_total + invested
     if total <= 0:

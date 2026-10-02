@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -608,7 +609,7 @@ def validate_private_profile(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def load_private_profile(path: str | Path | None = None) -> dict[str, Any]:
+def _load_historical_private_profile(path: str | Path | None = None) -> dict[str, Any]:
     target = default_private_profile_path() if path is None else Path(path)
     if not target.exists():
         return {
@@ -640,3 +641,88 @@ def load_private_profile(path: str | Path | None = None) -> dict[str, Any]:
         "external_action_performed": False,
         "action_output": "NONE",
     }
+
+
+def load_private_profile(path: str | Path | None = None) -> dict[str, Any]:
+    """Reuse the local profile with optional private broker/intent sidecars.
+
+    Retained observations keep their original clock: loading a file is not a
+    live connection. No sidecars means unchanged historical compatibility.
+    """
+    target = default_private_profile_path() if path is None else Path(path)
+    context = _load_historical_private_profile(target)
+    observed_path = target.with_name("broker-capital-observation.json")
+    intent_path = target.with_name("capital-intent.json")
+    if not observed_path.exists() and not intent_path.exists():
+        return context
+    def read_object(candidate: Path) -> dict[str, Any] | None:
+        if not candidate.exists():
+            return None
+        try:
+            result = json.loads(candidate.read_text(encoding="utf-8"))
+            return result if isinstance(result, dict) else {"invalid_private_sidecar": True}
+        except (OSError, json.JSONDecodeError):
+            return {"invalid_private_sidecar": True}
+    from .broker_capital_observation import reconcile_capital
+    return apply_broker_capital_state(context, reconcile_capital(
+        read_object(observed_path), read_object(intent_path), at_ms=int(time.time() * 1000)))
+
+
+def apply_broker_capital_state(
+    private_context: dict[str, Any] | None,
+    reconciliation: dict[str, Any],
+) -> dict[str, Any]:
+    """Project current broker facts in memory; the validated historical file stays intact.
+
+    The old USER_CONFIRMED contract still checks its own historical STRC equality.
+    A current projection labels broker facts separately, and synchronizes the
+    runtime STRC share count instead of rejecting a changed real position.
+    """
+    from copy import deepcopy
+    context = deepcopy(private_context or {})
+    profile = context.setdefault("profile", {})
+    old_meta = profile.get("capital_state", {})
+    old_shares = profile.get("strc", {}).get("shares")
+    profile["historical_capital_snapshot"] = deepcopy(profile.get("historical_capital_snapshot")) or {
+        "as_of": old_meta.get("as_of"), "strc_shares": old_shares,
+        "source": old_meta.get("source"),
+    }
+    observed = reconciliation.get("broker_observed") or {}
+    confirmed = reconciliation.get("user_confirmed") or {}
+    holdings = deepcopy(observed.get("holdings", []))
+    profile["holdings"] = holdings
+    profile["cash"] = {"available_usd": observed.get("funds", {}).get("cash_usd"),
+                       "reserved_usd": confirmed.get("reserved_usd")}
+    profile["asset_roles"] = deepcopy(confirmed.get("asset_roles", {}))
+    profile["plans"] = []  # No old active plan or replacement is implicitly inherited.
+    profile["capital_state"] = {
+        "contract_version": CAPITAL_STATE_CONTRACT_VERSION,
+        "source": "BROKER_OBSERVED_WITH_USER_CONFIRMED_INTENT",
+        "as_of": datetime.fromtimestamp(observed["observed_at_ms"] / 1000,
+                                         tz=timezone.utc).isoformat() if observed else None,
+        "base_currency": "USD",
+    }
+    profile["capital_state_status"] = {
+        "state": reconciliation["state"], "reason": reconciliation["reason"],
+        "execution_authority": "USER_ONLY",
+    }
+    profile["capital_reconciliation"] = deepcopy(reconciliation)
+    # Retained legacy freshness flags describe the historical snapshot only.
+    for key in ("snapshot_state", "STALE_CAPITAL_FIELDS", "stale_flags"):
+        profile.pop(key, None)
+    if observed.get("scope", {}).get("positions_complete") is True:
+        shares = next((row["quantity"] for row in holdings if row["asset"] == "STRC"), 0.0)
+        profile.setdefault("strc", {})["shares"] = shares
+        # Reuse legacy cash-goal arithmetic with current quantity; rate/goal
+        # inputs remain explicitly historical policy inputs, not new evidence.
+        strc, derived = profile["strc"], profile.get("derived", {})
+        if derived and all(key in strc for key in ("stated_amount_usd", "current_annual_distribution_rate", "withholding_rate")):
+            annual_per_share = strc["stated_amount_usd"] * strc["current_annual_distribution_rate"] * (1 - strc["withholding_rate"])
+            derived["annual_cash_usd"] = round(shares * annual_per_share, 2)
+            derived["six_month_cash_usd"] = round(shares * annual_per_share * 0.5, 2)
+            derived["shares_above_configured_minimum"] = round(shares - derived["configured_fixed_minimum_shares"], 4)
+            derived["goal_covered_at_current_rate"] = shares >= derived["minimum_shares_for_target"]
+            derived["policy_input_state"] = "HISTORICAL_USER_PROFILE_INPUTS"
+    context["state"] = "AVAILABLE"
+    context.update(external_action_authority="NONE", external_action_performed=False, action_output="NONE")
+    return context

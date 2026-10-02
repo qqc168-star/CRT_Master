@@ -139,6 +139,8 @@ def run_daily_evidence(
     now_ms: int | None = None,
     generated_at_ms: int | None = None,
     private_context: dict[str, Any] | None = None,
+    broker_capital_observation: dict[str, Any] | None = None,
+    user_capital_intent: dict[str, Any] | None = None,
     dvol_regime_runner: Callable[..., dict[str, Any]] | None = None,
     transition_diagnostic_runner: Callable[..., dict[str, Any]] | None = None,
     btc_entry_gate_context: dict[str, Any] | None = None,
@@ -300,6 +302,8 @@ def run_daily_evidence(
         btc_entry_gate=btc_entry_gate,
         assumption_watch_context=assumption_watch_context,
         private_context=private_context,
+        broker_capital_observation=broker_capital_observation,
+        user_capital_intent=user_capital_intent,
         mstr_asst_market_health=mstr_asst_market_health,
         issuer_ratio_observation=issuer_ratio_observation,
         institutional_flow_context=institutional_flow_context,
@@ -372,6 +376,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--observation-db", type=Path, default=default_observation_db_path())
     parser.add_argument("--output", type=Path, default=default_evidence_pack_path())
     parser.add_argument("--private-profile", type=Path, default=default_private_profile_path())
+    capital_source = parser.add_mutually_exclusive_group()
+    capital_source.add_argument("--broker-capital-observation", type=Path,
+                                help="Retained, hash-bound broker observation; its original clock is preserved.")
+    capital_source.add_argument("--observe-broker-capital", action="store_true",
+                                help="Read current capital from existing local TWS, without order authority.")
+    parser.add_argument("--user-capital-intent", type=Path,
+                        help="Private USER_CONFIRMED reserve and cancellation facts; never infer from old plans.")
     parser.add_argument("--treasury-valuation-inputs", type=Path, default=None,
         help="Local verified CT histories for MSTR/ASST; absent claims remain BLOCKED.")
     parser.add_argument("--btc-etf-archive", type=Path, default=None,
@@ -516,6 +527,21 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     private_context = load_private_profile(args.private_profile)
+    broker_observation = None
+    if args.observe_broker_capital:
+        from .broker_capital_observation import BLOCKED_BROKER_REASONS, capture_ibkr_capital
+        try:
+            broker_observation = capture_ibkr_capital()
+        except Exception as exc:
+            # Preserve the capital failure without suppressing unrelated market analysis.
+            reason = ("BROKER_SDK_UNAVAILABLE" if isinstance(exc, ImportError) else
+                      "BROKER_CONNECT_UNAVAILABLE" if isinstance(exc, (OSError, TimeoutError)) else
+                      str(exc) if str(exc) in BLOCKED_BROKER_REASONS else "BROKER_OBSERVATION_INVALID")
+            broker_observation = {"capture_failed": True, "reason": reason}
+    elif args.broker_capital_observation is not None:
+        broker_observation = _load_json_object(args.broker_capital_observation, label="Broker capital observation")
+    capital_intent = (_load_json_object(args.user_capital_intent, label="User capital intent")
+                      if args.user_capital_intent is not None else None)
     btc_entry_gate_context = load_btc_entry_gate_context(args.btc_entry_context)
     assumption_watch_context = load_assumption_watch_context(args.assumption_context)
     mstr_asst_market_health = (
@@ -567,6 +593,8 @@ def main(argv: list[str] | None = None) -> int:
         probe_fetcher=probe_liquidation_stream,
         runtime_checks=runtime_checks,
         private_context=private_context,
+        broker_capital_observation=broker_observation,
+        user_capital_intent=capital_intent,
         treasury_valuation_inputs=(
             _load_json_object(args.treasury_valuation_inputs, label="Treasury valuation inputs")
             if args.treasury_valuation_inputs is not None else {}
