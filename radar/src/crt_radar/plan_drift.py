@@ -206,6 +206,14 @@ def evaluate_plan_drift(
             "plans": [],
         }
 
+    if (isinstance(profile.get("capital_reconciliation"), dict)
+            and profile["capital_reconciliation"].get("user_confirmed") is None):
+        return {**base, "state": "BLOCKED", "reason": "CAPITAL_INTENT_UNCONFIRMED",
+                "reanalysis_required": None, "active_plan_count": 0,
+                "pending_tranche_count": 0, "condition_count": 0,
+                "satisfied_condition_count": 0, "violated_condition_count": 0,
+                "blocked_condition_count": 0, "plans": []}
+
     active_plans = [
         plan
         for plan in profile.get("plans", [])

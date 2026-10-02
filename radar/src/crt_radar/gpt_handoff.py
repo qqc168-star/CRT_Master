@@ -602,6 +602,7 @@ def _bridge_capital_condition(
 
 def _bridge_capital_state(
     private_context: Any,
+    *, generated_at_ms: int | None = None,
 ) -> dict[str, Any]:
     if not isinstance(
         private_context,
@@ -627,6 +628,20 @@ def _bridge_capital_state(
         raise ValueError(
             "current private profile unavailable"
         )
+
+    if "capital_reconciliation" in profile:
+        from .broker_capital_observation import BLOCKED_BROKER_REASONS, bridge_capital_surface, reconcile_capital
+        supplied = profile["capital_reconciliation"]
+        if generated_at_ms is None:
+            raise ValueError("current broker capital requires an evaluation clock")
+        checked = reconcile_capital(supplied.get("broker_observed"), supplied.get("user_confirmed"),
+                                    at_ms=generated_at_ms)
+        if (supplied.get("broker_observed") is None and supplied.get("state") == "BLOCKED"
+                and supplied.get("reason") in BLOCKED_BROKER_REASONS):
+            checked["reason"] = supplied["reason"]
+        if _canonical_hash(checked) != _canonical_hash(supplied):
+            raise ValueError("current broker capital reconciliation changed")
+        return bridge_capital_surface(checked, historical_snapshot=profile.get("historical_capital_snapshot", {}))
 
     status = profile.get(
         "capital_state_status"
@@ -1115,7 +1130,7 @@ def build_minimized_bridge_payload(
             _bridge_capital_state(
                 pack.get(
                     "private_context"
-                )
+                ), generated_at_ms=pack.get("generated_at_ms"),
             )
         ),
         "analysis_contract": {

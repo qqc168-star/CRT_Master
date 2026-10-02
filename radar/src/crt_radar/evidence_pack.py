@@ -381,6 +381,8 @@ def build_evidence_pack(
     btc_entry_gate: dict[str, Any] | None = None,
     assumption_watch_context: dict[str, Any] | None = None,
     private_context: dict[str, Any] | None = None,
+    broker_capital_observation: dict[str, Any] | None = None,
+    user_capital_intent: dict[str, Any] | None = None,
     mstr_asst_market_health: dict[str, Any] | None = None,
     issuer_ratio_observation: dict[str, Any] | None = None,
     premarket_live_market_handoff: dict[str, Any] | None = None,
@@ -400,6 +402,18 @@ def build_evidence_pack(
         raise ValueError("source_gate must be an object")
     _assert_authority(source_gate)
     generated_at = int(time.time() * 1000) if generated_at_ms is None else int(generated_at_ms)
+    retained_capital = ((private_context or {}).get("profile", {}).get("capital_reconciliation") or {})
+    if broker_capital_observation is not None or user_capital_intent is not None or retained_capital:
+        from .broker_capital_observation import BLOCKED_BROKER_REASONS, reconcile_capital
+        from .private_profile import apply_broker_capital_state
+        reconciled_capital = reconcile_capital(
+            broker_capital_observation if broker_capital_observation is not None else retained_capital.get("broker_observed"),
+            user_capital_intent if user_capital_intent is not None else retained_capital.get("user_confirmed"),
+            at_ms=generated_at)
+        if (broker_capital_observation is None and retained_capital.get("broker_observed") is None
+                and retained_capital.get("reason") in BLOCKED_BROKER_REASONS):
+            reconciled_capital["reason"] = retained_capital["reason"]
+        private_context = apply_broker_capital_state(private_context, reconciled_capital)
     observations = extract_observations(source_gate, recorded_at_ms=generated_at)
     evidence_by_family = _evidence_by_family(source_gate)
 
