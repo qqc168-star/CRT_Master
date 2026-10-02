@@ -1,0 +1,1818 @@
+{
+  "action_output": "NONE",
+  "analyst_output": {
+    "asset_roles": null,
+    "capital_strategy": null,
+    "dominant_forces": null,
+    "season": null,
+    "weather": null
+  },
+  "asset_facts": {
+    "coverage_state": "PARTIAL",
+    "items": [
+      {
+        "asset_fact_id": "CRT_TREASURY_VALUATION_CONTEXT_V0.1:MSTR",
+        "asset_id": "MSTR",
+        "evidence": {
+          "action_output": "NONE",
+          "as_of": 1790866561134,
+          "asset_id": "MSTR",
+          "benchmark_empirical_cdf_pct": {
+            "baseline": [],
+            "baseline_count": 0,
+            "benchmark_identity": null,
+            "calculation_version": "EMPIRICAL_CDF_LE_V1_MIN20",
+            "current_value": null,
+            "history_end": null,
+            "history_start": null,
+            "reason": "COMPARABLE_BENCHMARK_HISTORY_UNAVAILABLE",
+            "source_semantic": null,
+            "state": "BLOCKED",
+            "value": null
+          },
+          "blockers": [
+            {
+              "claim": "mnav_history",
+              "code": "MNAV_HISTORY_MISSING"
+            },
+            {
+              "claim": "own_history_empirical_cdf_pct",
+              "code": "INSUFFICIENT_BASELINE"
+            },
+            {
+              "claim": "regime_empirical_cdf_pct",
+              "code": "PIT_REGIME_BINDING_UNAVAILABLE"
+            },
+            {
+              "claim": "benchmark_empirical_cdf_pct",
+              "code": "COMPARABLE_BENCHMARK_HISTORY_UNAVAILABLE"
+            },
+            {
+              "claim": "five_week_mnav_change_pct",
+              "code": "FIVE_WEEK_COMPARABLE_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "claim": "formal_action_critical",
+              "code": "OFFICIAL_COMPARABLE_MNAV_INPUTS_REQUIRED"
+            },
+            {
+              "claim": "btc_per_diluted_share.asset_history",
+              "code": "ASSET_HISTORY_MISSING"
+            },
+            {
+              "claim": "preferred_funding_attribution.preferred_funding_attribution",
+              "code": "VERIFIED_PREFERRED_EVENTS_MISSING"
+            }
+          ],
+          "btc_per_diluted_share": {
+            "blockers": [
+              {
+                "claim": "asset_history",
+                "code": "ASSET_HISTORY_MISSING"
+              }
+            ],
+            "btc_per_diluted_share_change_pct": null,
+            "current": null,
+            "direction": null,
+            "growth_direction": null,
+            "growth_observations": [],
+            "observation_span_ms": null,
+            "observations": [],
+            "previous": null,
+            "state": "BLOCKED"
+          },
+          "btc_per_diluted_share_change_pct": null,
+          "calculation_version": "CRT_TREASURY_VALUATION_CONTEXT_V0.1",
+          "capital_decision_authority": "USER_ONLY",
+          "context_hash": "b6b483d95bc5d5d041ef2b4a38325ab279093ab7eb677fe70a8339fb0acced89",
+          "current_btc_per_diluted_share": null,
+          "current_observation": null,
+          "diluted_mnav": null,
+          "evidence_authority": "BLOCKED",
+          "external_action_authority": "NONE",
+          "five_week_mnav_change_pct": {
+            "policy": "NEAREST_35D_PLUS_MINUS_3D_TIE_EARLIER_NO_INTERPOLATION",
+            "reason": "FIVE_WEEK_COMPARABLE_OBSERVATION_UNAVAILABLE",
+            "state": "BLOCKED",
+            "value": null
+          },
+          "formal_action_critical_state": "BLOCKED",
+          "history_coverage": "UNSPECIFIED",
+          "machine_execution": "FORBIDDEN",
+          "mnav_observations": [],
+          "own_history_empirical_cdf_pct": {
+            "baseline": [],
+            "baseline_count": 0,
+            "calculation_version": "EMPIRICAL_CDF_LE_V1_MIN20",
+            "current_value": null,
+            "history_end": null,
+            "history_start": null,
+            "reason": "INSUFFICIENT_BASELINE",
+            "source_semantic": null,
+            "state": "BLOCKED",
+            "value": null
+          },
+          "preferred_funding_attribution": {
+            "blockers": [
+              {
+                "claim": "preferred_funding_attribution",
+                "code": "VERIFIED_PREFERRED_EVENTS_MISSING"
+              }
+            ],
+            "events": [],
+            "research_only": true,
+            "state": "BLOCKED"
+          },
+          "previous_btc_per_diluted_share": null,
+          "production": "NOT_APPROVED",
+          "regime_empirical_cdf_pct": {
+            "baseline": [],
+            "baseline_count": 0,
+            "calculation_version": "EMPIRICAL_CDF_LE_V1_MIN20",
+            "current_value": null,
+            "history_end": null,
+            "history_start": null,
+            "reason": "PIT_REGIME_BINDING_UNAVAILABLE",
+            "regime_identity": null,
+            "source_semantic": null,
+            "state": "BLOCKED",
+            "value": null
+          },
+          "schema_version": "CRT_TREASURY_VALUATION_CONTEXT_V0.1",
+          "source_semantic": null,
+          "state": "BLOCKED"
+        },
+        "fact_type": "TREASURY_VALUATION_CONTEXT",
+        "issuer_id": "CIK-0001050446"
+      },
+      {
+        "asset_fact_id": "CRT_TREASURY_VALUATION_CONTEXT_V0.1:ASST",
+        "asset_id": "ASST",
+        "evidence": {
+          "action_output": "NONE",
+          "as_of": 1790866561134,
+          "asset_id": "ASST",
+          "benchmark_empirical_cdf_pct": {
+            "baseline": [],
+            "baseline_count": 0,
+            "benchmark_identity": null,
+            "calculation_version": "EMPIRICAL_CDF_LE_V1_MIN20",
+            "current_value": null,
+            "history_end": null,
+            "history_start": null,
+            "reason": "COMPARABLE_BENCHMARK_HISTORY_UNAVAILABLE",
+            "source_semantic": null,
+            "state": "BLOCKED",
+            "value": null
+          },
+          "blockers": [
+            {
+              "claim": "mnav_history",
+              "code": "MNAV_HISTORY_MISSING"
+            },
+            {
+              "claim": "own_history_empirical_cdf_pct",
+              "code": "INSUFFICIENT_BASELINE"
+            },
+            {
+              "claim": "regime_empirical_cdf_pct",
+              "code": "PIT_REGIME_BINDING_UNAVAILABLE"
+            },
+            {
+              "claim": "benchmark_empirical_cdf_pct",
+              "code": "COMPARABLE_BENCHMARK_HISTORY_UNAVAILABLE"
+            },
+            {
+              "claim": "five_week_mnav_change_pct",
+              "code": "FIVE_WEEK_COMPARABLE_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "claim": "formal_action_critical",
+              "code": "OFFICIAL_COMPARABLE_MNAV_INPUTS_REQUIRED"
+            },
+            {
+              "claim": "btc_per_diluted_share.asset_history",
+              "code": "ASSET_HISTORY_MISSING"
+            },
+            {
+              "claim": "preferred_funding_attribution.preferred_funding_attribution",
+              "code": "VERIFIED_PREFERRED_EVENTS_MISSING"
+            }
+          ],
+          "btc_per_diluted_share": {
+            "blockers": [
+              {
+                "claim": "asset_history",
+                "code": "ASSET_HISTORY_MISSING"
+              }
+            ],
+            "btc_per_diluted_share_change_pct": null,
+            "current": null,
+            "direction": null,
+            "growth_direction": null,
+            "growth_observations": [],
+            "observation_span_ms": null,
+            "observations": [],
+            "previous": null,
+            "state": "BLOCKED"
+          },
+          "btc_per_diluted_share_change_pct": null,
+          "calculation_version": "CRT_TREASURY_VALUATION_CONTEXT_V0.1",
+          "capital_decision_authority": "USER_ONLY",
+          "context_hash": "c9004ec25421c4488c5e2168a714c3f10f147609dd97a6eab5d376c6573b9dce",
+          "current_btc_per_diluted_share": null,
+          "current_observation": null,
+          "diluted_mnav": null,
+          "evidence_authority": "BLOCKED",
+          "external_action_authority": "NONE",
+          "five_week_mnav_change_pct": {
+            "policy": "NEAREST_35D_PLUS_MINUS_3D_TIE_EARLIER_NO_INTERPOLATION",
+            "reason": "FIVE_WEEK_COMPARABLE_OBSERVATION_UNAVAILABLE",
+            "state": "BLOCKED",
+            "value": null
+          },
+          "formal_action_critical_state": "BLOCKED",
+          "history_coverage": "UNSPECIFIED",
+          "machine_execution": "FORBIDDEN",
+          "mnav_observations": [],
+          "own_history_empirical_cdf_pct": {
+            "baseline": [],
+            "baseline_count": 0,
+            "calculation_version": "EMPIRICAL_CDF_LE_V1_MIN20",
+            "current_value": null,
+            "history_end": null,
+            "history_start": null,
+            "reason": "INSUFFICIENT_BASELINE",
+            "source_semantic": null,
+            "state": "BLOCKED",
+            "value": null
+          },
+          "preferred_funding_attribution": {
+            "blockers": [
+              {
+                "claim": "preferred_funding_attribution",
+                "code": "VERIFIED_PREFERRED_EVENTS_MISSING"
+              }
+            ],
+            "events": [],
+            "research_only": true,
+            "state": "BLOCKED"
+          },
+          "previous_btc_per_diluted_share": null,
+          "production": "NOT_APPROVED",
+          "regime_empirical_cdf_pct": {
+            "baseline": [],
+            "baseline_count": 0,
+            "calculation_version": "EMPIRICAL_CDF_LE_V1_MIN20",
+            "current_value": null,
+            "history_end": null,
+            "history_start": null,
+            "reason": "PIT_REGIME_BINDING_UNAVAILABLE",
+            "regime_identity": null,
+            "source_semantic": null,
+            "state": "BLOCKED",
+            "value": null
+          },
+          "schema_version": "CRT_TREASURY_VALUATION_CONTEXT_V0.1",
+          "source_semantic": null,
+          "state": "BLOCKED"
+        },
+        "fact_type": "TREASURY_VALUATION_CONTEXT",
+        "issuer_id": "CIK-0001920406"
+      },
+      {
+        "action_output": "NONE",
+        "asset": "BTC",
+        "asset_fact_id": "TFTC_US_SPOT_BTC_ETF_FLOW:BTC_ETF_NET_FLOW_USD",
+        "attribution": "TFTC — tftc.io/bitcoin-etf-flows",
+        "availability_semantics": "RETRIEVAL_VINTAGE_AUDIT_NOT_HISTORICAL_PUBLICATION_PROOF",
+        "claim_scope": "DECLARED_CRT_ETF_BASKET_RESEARCH_ONLY_NOT_FORMAL_L3",
+        "coverage_state": "COMPLETE",
+        "evidence": {
+          "1D": {
+            "coverage_state": "COMPLETE",
+            "missing_fund_ids": [],
+            "reason": null,
+            "scope_ids": [
+              "ARKB",
+              "BITB",
+              "BRRR",
+              "BTC",
+              "BTCO",
+              "BTCW",
+              "EZBC",
+              "FBTC",
+              "GBTC",
+              "HODL",
+              "IBIT",
+              "MSBT"
+            ],
+            "session_dates": [
+              "2026-09-30"
+            ],
+            "unit": "USD",
+            "value": -148687762.20000002,
+            "window_semantics": "SUM_REPORTED_FLOWS_OVER_CALENDAR_DAY_WINDOW_CONSTANT_FUND_SCOPE"
+          },
+          "30D": {
+            "coverage_state": "COMPLETE",
+            "missing_fund_ids": [],
+            "reason": null,
+            "scope_ids": [
+              "ARKB",
+              "BITB",
+              "BRRR",
+              "BTC",
+              "BTCO",
+              "BTCW",
+              "EZBC",
+              "FBTC",
+              "GBTC",
+              "HODL",
+              "IBIT",
+              "MSBT"
+            ],
+            "session_dates": [
+              "2026-09-01",
+              "2026-09-02",
+              "2026-09-03",
+              "2026-09-04",
+              "2026-09-08",
+              "2026-09-09",
+              "2026-09-10",
+              "2026-09-11",
+              "2026-09-14",
+              "2026-09-15",
+              "2026-09-16",
+              "2026-09-17",
+              "2026-09-18",
+              "2026-09-21",
+              "2026-09-22",
+              "2026-09-23",
+              "2026-09-24",
+              "2026-09-25",
+              "2026-09-28",
+              "2026-09-29",
+              "2026-09-30"
+            ],
+            "unit": "USD",
+            "value": 2647998715.77,
+            "window_semantics": "SUM_REPORTED_FLOWS_OVER_CALENDAR_DAY_WINDOW_CONSTANT_FUND_SCOPE"
+          },
+          "7D": {
+            "coverage_state": "COMPLETE",
+            "missing_fund_ids": [],
+            "reason": null,
+            "scope_ids": [
+              "ARKB",
+              "BITB",
+              "BRRR",
+              "BTC",
+              "BTCO",
+              "BTCW",
+              "EZBC",
+              "FBTC",
+              "GBTC",
+              "HODL",
+              "IBIT",
+              "MSBT"
+            ],
+            "session_dates": [
+              "2026-09-24",
+              "2026-09-25",
+              "2026-09-28",
+              "2026-09-29",
+              "2026-09-30"
+            ],
+            "unit": "USD",
+            "value": 273688786.06,
+            "window_semantics": "SUM_REPORTED_FLOWS_OVER_CALENDAR_DAY_WINDOW_CONSTANT_FUND_SCOPE"
+          }
+        },
+        "evidence_hash": "be1f2e47322c03ffcb733aadfe80058f77a5a74ea23d995129b26b4e90dce44d",
+        "external_action_authority": "NONE",
+        "fact_type": "BTC_ETF_NET_FLOW_USD",
+        "license": "https://creativecommons.org/licenses/by/4.0/",
+        "limitation": "PARTIAL_IS_SCOPED_NOT_TOTAL;BALANCE_IS_NOT_DERIVED_FROM_FLOW_OR_AUM",
+        "metric_id": "BTC_ETF_NET_FLOW_USD",
+        "production": "NOT_APPROVED",
+        "retrieved_at_ms": 1790866281892,
+        "source_as_of_date": "2026-09-30",
+        "source_as_of_precision": "DATE",
+        "source_id": "TFTC_US_SPOT_BTC_ETF_FLOW",
+        "source_url": "https://www.tftc.io/bitcoin-etf-flows/data.json",
+        "upstream_sources": "SoSoValue (daily aggregates and per-fund flows); issuer disclosures as tabulated by Farside Investors (per-fund history through mid-2026); mempool.space (BTC price, ~21:00 UTC mark)."
+      },
+      {
+        "action_output": "NONE",
+        "asset": "BTC",
+        "asset_fact_id": "TFTC_US_SPOT_BTC_ETF_FLOW:BTC_ETF_FLOW_BREADTH",
+        "attribution": "TFTC — tftc.io/bitcoin-etf-flows",
+        "availability_semantics": "RETRIEVAL_VINTAGE_AUDIT_NOT_HISTORICAL_PUBLICATION_PROOF",
+        "claim_scope": "DECLARED_CRT_ETF_BASKET_RESEARCH_ONLY_NOT_FORMAL_L3",
+        "coverage_state": "COMPLETE",
+        "evidence": {
+          "coverage_state": "COMPLETE",
+          "negative_fund_count": 3,
+          "positive_fund_count": 0,
+          "reported_zero_fund_count": 9,
+          "scope_ids": [
+            "ARKB",
+            "BITB",
+            "BRRR",
+            "BTC",
+            "BTCO",
+            "BTCW",
+            "EZBC",
+            "FBTC",
+            "GBTC",
+            "HODL",
+            "IBIT",
+            "MSBT"
+          ]
+        },
+        "evidence_hash": "be1f2e47322c03ffcb733aadfe80058f77a5a74ea23d995129b26b4e90dce44d",
+        "external_action_authority": "NONE",
+        "fact_type": "BTC_ETF_FLOW_BREADTH",
+        "license": "https://creativecommons.org/licenses/by/4.0/",
+        "limitation": "PARTIAL_IS_SCOPED_NOT_TOTAL;BALANCE_IS_NOT_DERIVED_FROM_FLOW_OR_AUM",
+        "metric_id": "BTC_ETF_FLOW_BREADTH",
+        "production": "NOT_APPROVED",
+        "retrieved_at_ms": 1790866281892,
+        "source_as_of_date": "2026-09-30",
+        "source_as_of_precision": "DATE",
+        "source_id": "TFTC_US_SPOT_BTC_ETF_FLOW",
+        "source_url": "https://www.tftc.io/bitcoin-etf-flows/data.json",
+        "upstream_sources": "SoSoValue (daily aggregates and per-fund flows); issuer disclosures as tabulated by Farside Investors (per-fund history through mid-2026); mempool.space (BTC price, ~21:00 UTC mark)."
+      }
+    ],
+    "overlay_id": "CRT-ISSUER-001",
+    "overlay_type": "NON_WEIGHTED_EVIDENCE_OVERLAY",
+    "reason_code": "BTC_ETF_FLOW_AVAILABLE_BALANCE_BLOCKED",
+    "section_state": "PARTIAL",
+    "upstream_reason_code": "REFLEXIVITY_INPUT_MISSING"
+  },
+  "authority": {
+    "analyst_judgment_required": true,
+    "capital_decision_authority": "USER_ONLY",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "production": "NOT_APPROVED"
+  },
+  "blockers": {
+    "items": [
+      {
+        "affected_ids": [
+          "CRT-ISSUER-001"
+        ],
+        "blocker_id": "CRT-REFLEX-57c16c19bfcea2178601",
+        "code": "REFLEXIVITY_INPUT_MISSING",
+        "overlay_id": "CRT-ISSUER-001",
+        "reason": "No reflexivity evidence input was supplied; absence cannot be treated as no issuer action or no market response.",
+        "reason_code": "REFLEXIVITY_INPUT_MISSING",
+        "required_to_clear": [
+          "provide all four explicit reflexivity input sections"
+        ],
+        "scope": "OVERLAY"
+      },
+      {
+        "affected_ids": [
+          "source_gate"
+        ],
+        "blocker_id": "CRT-REFLEX-6c1cfd4ec0e39527e3b9",
+        "code": "LIQUIDATION_AGGREGATES_INVALID",
+        "overlay_id": "CRT-ISSUER-001",
+        "reason": "Source Gate reported a blocking reason.",
+        "reason_code": "LIQUIDATION_AGGREGATES_INVALID",
+        "required_to_clear": [
+          "clear the Source Gate blocker"
+        ],
+        "scope": "SOURCE_GATE"
+      },
+      {
+        "affected_ids": [
+          "BTC_ETF_BALANCE_BTC"
+        ],
+        "blocker_id": "TFTC_US_SPOT_BTC_ETF_FLOW:BTC_ETF_BALANCE_BTC",
+        "code": "RELIABLE_FREE_BTC_BALANCE_HISTORY_UNAVAILABLE",
+        "coverage_state": "BLOCKED",
+        "evidence_hash": "be1f2e47322c03ffcb733aadfe80058f77a5a74ea23d995129b26b4e90dce44d",
+        "reason": "RELIABLE_FREE_BTC_BALANCE_HISTORY_UNAVAILABLE",
+        "required_to_clear": [
+          "verified comparable source evidence"
+        ],
+        "retrieved_at_ms": 1790866281892,
+        "scope": "METRIC",
+        "source_id": "TFTC_US_SPOT_BTC_ETF_FLOW"
+      }
+    ],
+    "overlay_id": "CRT-ISSUER-001",
+    "overlay_type": "NON_WEIGHTED_EVIDENCE_OVERLAY",
+    "reason_code": "REFLEXIVITY_INPUT_MISSING",
+    "section_state": "BLOCKED"
+  },
+  "btc_bull_validation": {
+    "action_output": "NONE",
+    "adverse_checks": [
+      "BREAKOUT_VOLUME_QUALITY"
+    ],
+    "analyst_judgment_required": true,
+    "authority": {
+      "external_action_authority": "NONE",
+      "external_action_performed": false,
+      "formal_model_authority": "NONE",
+      "formal_threshold_authority": "NONE",
+      "formal_weight_authority": "NONE"
+    },
+    "blocked_checks": [
+      "PRICE_ACCEPTANCE_AND_SMA200",
+      "BREAKOUT_DRIVER_QUALITY"
+    ],
+    "checks": [
+      {
+        "check_id": "PRICE_ACCEPTANCE_AND_SMA200",
+        "reason": "BTC_ENTRY_GATE_BLOCKED",
+        "status": "BLOCKED",
+        "value": null
+      },
+      {
+        "check_id": "BREAKOUT_DRIVER_QUALITY",
+        "reason": "BTC_ENTRY_GATE_BLOCKED",
+        "status": "BLOCKED",
+        "value": null
+      },
+      {
+        "check_id": "SPOT_BTC_ETP_FLOW",
+        "reason": "SPOT_BTC_ETP_FLOW_NOT_AVAILABLE",
+        "status": "PENDING",
+        "value": null
+      },
+      {
+        "check_id": "BREAKOUT_VOLUME_QUALITY",
+        "reason": "EXPANDED_SPOT_VOLUME_WITH_SELL_DOMINANCE_AND_NEGATIVE_20D_CVD",
+        "status": "ADVERSE",
+        "value": {
+          "baseline_meaning": {
+            "cvd_20d_share": "TWENTY_DAY_TAKER_IMBALANCE_SIGN",
+            "quote_volume_rvol20": "LATEST_COMPLETE_DAY_VS_PRIOR_20_COMPLETE_DAY_MEAN",
+            "taker_buy_quote_share_1d": "LATEST_COMPLETE_DAY_BUY_SELL_MAJORITY"
+          },
+          "cvd_20d_share": -0.011525661046787858,
+          "formal_composite_authority": "NONE",
+          "formal_threshold_authority": "NONE",
+          "latest_buy_dominant": false,
+          "natural_research_baselines": {
+            "cvd_20d_share": 0.0,
+            "quote_volume_rvol20": 1.0,
+            "taker_buy_quote_share_1d": 0.5
+          },
+          "persistent_buy_positive": false,
+          "quote_volume_rvol20": 1.1872805439012772,
+          "source_scope": "BINANCE_BTCUSDT_DIRECTIONAL_PROXY",
+          "taker_buy_quote_share_1d": 0.4883544670423511,
+          "volume_expanded": true
+        }
+      },
+      {
+        "check_id": "TIME_PRICE_OVERBALANCE",
+        "reason": "TIME_PRICE_OVERBALANCE_REQUIRES_LATER_TIME_AND_SWING_STRUCTURE",
+        "status": "PENDING",
+        "value": {
+          "current_price_usd": null,
+          "formal_threshold_authority": "NONE",
+          "research_price_zone_usd": [
+            82000.0,
+            83000.0
+          ],
+          "research_time_window": [
+            "2026-09-29",
+            "2026-10-05"
+          ]
+        }
+      },
+      {
+        "check_id": "MACRO_HIGHER_LOW",
+        "reason": "POST_BREAKOUT_PULLBACK_STRUCTURE_NOT_YET_CONFIRMED",
+        "status": "PENDING",
+        "value": null
+      },
+      {
+        "check_id": "CONTROL_TRANSFER_LOOP",
+        "reason": "CONTROL_TRANSFER_EVIDENCE_NOT_AVAILABLE",
+        "status": "PENDING",
+        "value": null
+      },
+      {
+        "check_id": "BTC_RELATIVE_STRENGTH",
+        "reason": "BTC_GOLD_SP500_DOW_RELATIVE_SERIES_NOT_YET_IN_OVERLAY_INPUT",
+        "status": "PENDING",
+        "value": null
+      }
+    ],
+    "control_transfer_loop_closed": false,
+    "generated_at_ms": 1790866561134,
+    "machine_may_confirm_bull_transition": false,
+    "mixed_checks": [],
+    "pending_checks": [
+      "SPOT_BTC_ETP_FLOW",
+      "TIME_PRICE_OVERBALANCE",
+      "MACRO_HIGHER_LOW",
+      "CONTROL_TRANSFER_LOOP",
+      "BTC_RELATIVE_STRENGTH"
+    ],
+    "raw_entry_transition_state": "TRANSITION_UNRESOLVED",
+    "reason": "EVIDENCE_PACK_BLOCKED",
+    "research_coordinates": {
+      "formal_threshold_authority": "NONE",
+      "meaning": "EVENT_SCOPED_TIME_PRICE_VALIDATION_COORDINATE",
+      "price_zone_usd": [
+        82000.0,
+        83000.0
+      ],
+      "time_window": [
+        "2026-09-29",
+        "2026-10-05"
+      ]
+    },
+    "schema_version": "CRT_BTC_BULL_VALIDATION_OVERLAY_V0.2",
+    "scope": "NON_WEIGHTED_EVIDENCE_OVERLAY",
+    "state": "BLOCKED",
+    "supportive_checks": []
+  },
+  "btc_control_transfer_validation": {
+    "action_output": "NONE",
+    "analyst_judgment_required": true,
+    "candidate_event_id": null,
+    "control_transfer_validated_at": null,
+    "current_validation_status": null,
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "formal_model_authority": "NONE",
+    "formal_season": null,
+    "formal_threshold_authority": "NONE",
+    "formal_weight_authority": "NONE",
+    "machine_may_confirm_bull_transition": false,
+    "machine_may_determine_btc_season": false,
+    "reason": "CONTROL_TRANSFER_VALIDATION_EVIDENCE_NOT_AVAILABLE",
+    "research_state": "INCONCLUSIVE",
+    "schema_version": "CRT_BTC_CONTROL_TRANSFER_VALIDATION_RESEARCH_EVAL_V0.1",
+    "season_transition_authority": "NONE",
+    "state": "NOT_AVAILABLE",
+    "strengthening_evidence": {},
+    "validation_event_id": null
+  },
+  "btc_entry_gate": {
+    "action_output": "NONE",
+    "analyst_judgment_required": true,
+    "decision_eligibility": "WAIT",
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "machine_may_confirm_bull_transition": false,
+    "machine_may_output_trade_action": false,
+    "reason": "BTC_ENTRY_GATE_RESEARCH_CONTEXT_INVALID:JSONDecodeError",
+    "schema_version": "CRT_BTC_ENTRY_GATE_V0.2",
+    "state": "BLOCKED",
+    "transition_state": "TRANSITION_UNRESOLVED"
+  },
+  "changes": {},
+  "data_health": {
+    "critical_blockers": [
+      "LIQUIDATION_AGGREGATES_INVALID"
+    ],
+    "runtime_checks": [],
+    "source_gate_state": "BLOCKED",
+    "source_registry_hash": "f1942cda86ba77889ba6460656e8f72bf1d0257e2fb5b86eafd6b32e9f7e9123",
+    "unusable_or_missing_evidence": [
+      {
+        "input_family": "LIQUIDATION_AGGREGATES",
+        "quality_state": "INVALID"
+      },
+      {
+        "input_family": "BTC_SPOT_COMPOSITE_OHLCV",
+        "quality_state": "INVALID"
+      },
+      {
+        "input_family": "BTC_SPOT_AGGRESSOR_DAILY",
+        "quality_state": "INVALID"
+      }
+    ]
+  },
+  "decision_relevant_events": {
+    "coverage_state": "BLOCKED",
+    "items": [],
+    "overlay_id": "CRT-ISSUER-001",
+    "overlay_type": "NON_WEIGHTED_EVIDENCE_OVERLAY",
+    "reason_code": "REFLEXIVITY_INPUT_MISSING",
+    "section_state": "BLOCKED"
+  },
+  "distillation": {
+    "data_quality_conflicts": [
+      "LIQUIDATION_AGGREGATES_INVALID"
+    ],
+    "divergences": [],
+    "formal_extremes": [],
+    "note": "No investment-semantic extreme or divergence rule is invented in this first slice."
+  },
+  "dvol_regime_watch": {
+    "action_output": "NONE",
+    "analyst_judgment_required": true,
+    "as_of_ms": 1790863200000,
+    "baseline_count": 365,
+    "change_1d_pct": 0.7264599050013976,
+    "change_7d_pct": 0.22240756185709643,
+    "current_dvol": 36.05,
+    "direction": "UNKNOWN",
+    "dvol_30d_low": 33.24,
+    "dvol_30d_low_as_of_ms": 1789675200000,
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "formal_model_authority": "NONE",
+    "formal_threshold_authority": "NONE",
+    "formal_weight_authority": "NONE",
+    "hours_since_30d_low": 330.0,
+    "investment_threshold_authority": "NONE",
+    "level_percentile_1y": 9.863013698630137,
+    "low_30d_percentile_1y": 0.0,
+    "machine_may_confirm_bull_transition": false,
+    "provenance": {
+      "claim_precision": "DIRECTIONAL_RESEARCH",
+      "endpoint": "https://www.deribit.com/api/v2/public/get_volatility_index_data",
+      "metric": "BTC DVOL",
+      "provider": "Deribit",
+      "source_scope": "DERIBIT_BTC_OPTIONS_IMPLIED_VOLATILITY"
+    },
+    "reason": "DVOL_LEVEL_IN_EXTREME_LOW_HISTORICAL_PERCENTILE",
+    "rebound_from_30d_low_pct": 8.45367027677495,
+    "recommended_wake_operational_percentile": 90.0,
+    "research_parameters": {
+      "absolute_dvol_40_is_formal_threshold": false,
+      "elevated_percentile": 20.0,
+      "expansion_activation_max_hours": 168.0,
+      "expansion_rebound_pct": 15.0,
+      "extreme_percentile": 10.0,
+      "minimum_baseline_count": 180,
+      "parameter_authority": "RESEARCH_OPERATIONAL_ONLY"
+    },
+    "scale_normalization": "PERCENT_POINTS_X1",
+    "schema_version": "CRT_DVOL_REGIME_WATCH_V0.1",
+    "scope": "NON_WEIGHTED_RESEARCH_OVERLAY",
+    "season_transition_authority": "NONE",
+    "state": "COMPRESSION_EXTREME"
+  },
+  "evidence_pack_hash": "8b737fdbc69f852aaa603f0168cd0a0ca392ef150a0994805e96bcee90250cf9",
+  "fixture_semantics": {
+    "original_run": "2026-10-01T22:56:01.134+08:00",
+    "private_context_included": false,
+    "scope": "OFFLINE_CAPTURED_MARKET_REPLAY_NOT_LIVE_EVIDENCE",
+    "supporting_detail_omitted_with_hash": {
+      "changes": "0bb192bcdcb174bf123c0c21f3bd334139169c5fcfd3d95e6874863fb74678a6",
+      "distillation.top_changes": "17a6254fc7a8269220881c7d1ebb26801f573e78b75fb5ec6635c5122f832038"
+    }
+  },
+  "formal_candidate": {
+    "action_output": "NONE",
+    "authority": {
+      "action_output": "NONE",
+      "candidate_rebuild": "USER_APPROVED_2026-08-17",
+      "capital_decision_authority": "USER_ONLY",
+      "exact_candidate_hash": "NOT_YET_APPROVED",
+      "external_action_authority": "NONE",
+      "external_action_performed": false,
+      "formal_model": "NOT_APPROVED",
+      "production": "NOT_APPROVED"
+    },
+    "candidate_contract_hash": "4fb559c5e0620f4c69a615b1bf2929193cddafc14bacdbe90d89f35081cd370f",
+    "candidate_id": "CRT-V110-FORMAL-CANDIDATE-RUNTIME-V0.1",
+    "candidate_input_hash": "07a2532e0cdc16723a6d006d401ac690f4701a4cbe1f575b5c8cd5aecb204989",
+    "candidate_output_hash": "5c9ee2df540886f7a0649bc280c0e725b361b51dfaaff2bb0aaff8826174e9f4",
+    "candidate_registry_hash": "62497bab3e7d551f45e6b3bc23b367575927d5be6be9f25a0956566e1d64c2ee",
+    "candidate_score": null,
+    "candidate_status": "FORMAL_CANDIDATE_NOT_APPROVED",
+    "capital_decision": null,
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "formal_model": "NOT_APPROVED",
+    "formal_score": null,
+    "history_resolution": {
+      "evaluation_at_ms": 1790866561134,
+      "l4_oi_policy_canonical_sha256": "41894ff01877da4fd7a0baf9aefcb783110129ab194350bd6c6696278f7c357e",
+      "l4_oi_policy_id": "CRT-L4-OI-POINT-IN-TIME-REVISION-POLICY-V0.1",
+      "scope": "CANDIDATE_EVIDENCE_AND_HISTORY_REPLAY_ONLY"
+    },
+    "input_blocked_reasons": [
+      "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM_METRIC_MISSING",
+      "L4_LIQUIDATION_INTENSITY_24H_METRIC_MISSING",
+      "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H_METRIC_MISSING",
+      "L6_CLOSE_MINUS_SMA200_OVER_ATR20_INPUT_FAMILY_NOT_APPROVED",
+      "L6_CLOSE_MINUS_SMA200_OVER_ATR20_SOURCE_NOT_APPROVED",
+      "L6_CVD_20D_SHARE_INPUT_FAMILY_NOT_APPROVED",
+      "L6_CVD_20D_SHARE_SOURCE_NOT_APPROVED",
+      "L6_RETURN_20D_OVER_ATR_VOL_INPUT_FAMILY_NOT_APPROVED",
+      "L6_RETURN_20D_OVER_ATR_VOL_SOURCE_NOT_APPROVED",
+      "L6_SMA50_MINUS_SMA200_OVER_ATR20_INPUT_FAMILY_NOT_APPROVED",
+      "L6_SMA50_MINUS_SMA200_OVER_ATR20_SOURCE_NOT_APPROVED"
+    ],
+    "input_state": "BLOCKED",
+    "layers": {
+      "L1": {
+        "blocked_reasons": [
+          "L1_CORE_INFLATION_ACCELERATION_HISTORY_TIMESTAMP_DUPLICATE",
+          "L1_REAL_POLICY_RATE_HISTORY_TIMESTAMP_DUPLICATE",
+          "L1_UNEMPLOYMENT_DETERIORATION_HISTORY_TIMESTAMP_DUPLICATE"
+        ],
+        "feature_scores": {},
+        "score": null,
+        "state": "BLOCKED"
+      },
+      "L2": {
+        "blocked_reasons": [
+          "L2_BROAD_USD_20D_LOG_CHANGE_HISTORY_TIMESTAMP_DUPLICATE",
+          "L2_NOMINAL_2Y_YIELD_20D_CHANGE_BP_HISTORY_TIMESTAMP_DUPLICATE",
+          "L2_REAL_10Y_YIELD_20D_CHANGE_BP_HISTORY_TIMESTAMP_DUPLICATE"
+        ],
+        "feature_scores": {},
+        "score": null,
+        "state": "BLOCKED"
+      },
+      "L3": {
+        "blocked_reasons": [
+          "L3_HIGH_YIELD_OAS_20D_CHANGE_BP_HISTORY_TIMESTAMP_DUPLICATE",
+          "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM_MISSING",
+          "L3_STABLECOIN_SUPPLY_30D_LOG_CHANGE_HISTORY_TIMESTAMP_DUPLICATE"
+        ],
+        "feature_scores": {},
+        "score": null,
+        "state": "BLOCKED"
+      },
+      "L4": {
+        "blocked_reasons": [
+          "L4_ABS_FUNDING_3D_MEAN_BP_HISTORY_TIMESTAMP_DUPLICATE",
+          "L4_LIQUIDATION_INTENSITY_24H_MISSING",
+          "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H_MISSING"
+        ],
+        "feature_scores": {
+          "L4_OI_TO_MARKET_CAP": 78.102189781
+        },
+        "score": null,
+        "state": "BLOCKED"
+      },
+      "L5": {
+        "blocked_reasons": [
+          "L5_MVRV_LEVEL_HISTORY_TIMESTAMP_DUPLICATE",
+          "L5_REALIZED_CAP_30D_LOG_CHANGE_HISTORY_TIMESTAMP_DUPLICATE"
+        ],
+        "feature_scores": {},
+        "score": null,
+        "state": "BLOCKED"
+      },
+      "L6": {
+        "blocked_reasons": [
+          "L6_CLOSE_MINUS_SMA200_OVER_ATR20_MISSING",
+          "L6_CVD_20D_SHARE_MISSING",
+          "L6_RETURN_20D_OVER_ATR_VOL_MISSING",
+          "L6_SMA50_MINUS_SMA200_OVER_ATR20_MISSING"
+        ],
+        "feature_scores": {},
+        "score": null,
+        "state": "BLOCKED"
+      }
+    },
+    "model_state": "BLOCKED",
+    "production": "NOT_APPROVED",
+    "schema_version": "CRT_V110_FORMAL_CANDIDATE_OUTPUT_V0.1",
+    "scoring_blocked_reasons": [
+      "L1_CORE_INFLATION_ACCELERATION_HISTORY_TIMESTAMP_DUPLICATE",
+      "L1_REAL_POLICY_RATE_HISTORY_TIMESTAMP_DUPLICATE",
+      "L1_UNEMPLOYMENT_DETERIORATION_HISTORY_TIMESTAMP_DUPLICATE",
+      "L2_BROAD_USD_20D_LOG_CHANGE_HISTORY_TIMESTAMP_DUPLICATE",
+      "L2_NOMINAL_2Y_YIELD_20D_CHANGE_BP_HISTORY_TIMESTAMP_DUPLICATE",
+      "L2_REAL_10Y_YIELD_20D_CHANGE_BP_HISTORY_TIMESTAMP_DUPLICATE",
+      "L3_HIGH_YIELD_OAS_20D_CHANGE_BP_HISTORY_TIMESTAMP_DUPLICATE",
+      "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM_METRIC_MISSING",
+      "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM_MISSING",
+      "L3_STABLECOIN_SUPPLY_30D_LOG_CHANGE_HISTORY_TIMESTAMP_DUPLICATE",
+      "L4_ABS_FUNDING_3D_MEAN_BP_HISTORY_TIMESTAMP_DUPLICATE",
+      "L4_LIQUIDATION_INTENSITY_24H_METRIC_MISSING",
+      "L4_LIQUIDATION_INTENSITY_24H_MISSING",
+      "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H_METRIC_MISSING",
+      "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H_MISSING",
+      "L5_MVRV_LEVEL_HISTORY_TIMESTAMP_DUPLICATE",
+      "L5_REALIZED_CAP_30D_LOG_CHANGE_HISTORY_TIMESTAMP_DUPLICATE",
+      "L6_CLOSE_MINUS_SMA200_OVER_ATR20_INPUT_FAMILY_NOT_APPROVED",
+      "L6_CLOSE_MINUS_SMA200_OVER_ATR20_MISSING",
+      "L6_CLOSE_MINUS_SMA200_OVER_ATR20_SOURCE_NOT_APPROVED",
+      "L6_CVD_20D_SHARE_INPUT_FAMILY_NOT_APPROVED",
+      "L6_CVD_20D_SHARE_MISSING",
+      "L6_CVD_20D_SHARE_SOURCE_NOT_APPROVED",
+      "L6_RETURN_20D_OVER_ATR_VOL_INPUT_FAMILY_NOT_APPROVED",
+      "L6_RETURN_20D_OVER_ATR_VOL_MISSING",
+      "L6_RETURN_20D_OVER_ATR_VOL_SOURCE_NOT_APPROVED",
+      "L6_SMA50_MINUS_SMA200_OVER_ATR20_INPUT_FAMILY_NOT_APPROVED",
+      "L6_SMA50_MINUS_SMA200_OVER_ATR20_MISSING",
+      "L6_SMA50_MINUS_SMA200_OVER_ATR20_SOURCE_NOT_APPROVED"
+    ],
+    "season": null,
+    "season_router": {
+      "action_output": "NONE",
+      "analyst_judgment_required": true,
+      "candidate_weather_bucket": null,
+      "external_action_authority": "NONE",
+      "external_action_performed": false,
+      "formal_model": "NOT_APPROVED",
+      "production": "NOT_APPROVED",
+      "reason": "V110_SEASON_STATE_TRANSITION_CONTRACT_NOT_RECOVERED",
+      "router_output_hash": "ac5d0b80f2bc15e318dc17ae15e488f76180feaafd662fbbfa9a75416bdc6384",
+      "schema_version": "CRT_V110_SEASON_ROUTER_CANDIDATE_V0.1",
+      "score_may_determine_btc_season": false,
+      "season": null,
+      "state": "BLOCKED"
+    },
+    "threshold_bucket": null
+  },
+  "generated_at_ms": 1790866561134,
+  "issuer_ratio_observation": {
+    "action_output": "NONE",
+    "analyst_judgment_required": true,
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "generated_at_ms": 1790866283113,
+    "observation_hash": "c0990cf1bdce9e19613dd216547f8b56175e3b5c1cb0821712eecdaf219d737b",
+    "observations": {
+      "ASST": {
+        "current_btc_holdings": 27462.0,
+        "current_btc_per_diluted_share": 0.000272503208699979,
+        "current_diluted_shares": 100776795.0,
+        "current_effective_at_ms": 1790294400000,
+        "current_evidence_hash": "d8d603b11575d10b0764c65d061beea091ba7d870f5e150a385c35e16f2e8749",
+        "current_source_url": "https://www.sec.gov/Archives/edgar/data/1920406/000162828026063653/asst-20260928.htm",
+        "latest_to_previous_change_pct": 3.546786669848223,
+        "machine_execution": "FORBIDDEN",
+        "previous_btc_holdings": 26355.0,
+        "previous_btc_per_diluted_share": 0.0002631691600134697,
+        "previous_diluted_shares": 100144713.0,
+        "previous_effective_at_ms": 1789689600000,
+        "previous_evidence_hash": "d8d603b11575d10b0764c65d061beea091ba7d870f5e150a385c35e16f2e8749",
+        "previous_source_url": "https://www.sec.gov/Archives/edgar/data/1920406/000162828026063653/asst-20260928.htm",
+        "wake_authority": "OBSERVATION_ONLY"
+      },
+      "MSTR": {
+        "comparison_horizon": "ADJACENT_REPORTED_OBSERVATIONS",
+        "ct_binding_state": "NOT_CT_BOUND",
+        "ct_blocker": "ADSO_EFFECTIVE_TIME_UNRESOLVED",
+        "current_btc_holdings": 847666.0,
+        "current_btc_per_diluted_share": 0.0018771239456393926,
+        "current_diluted_shares": 451577000.0,
+        "current_evidence_hash": "63d859a7a1a3ffb5ca53ea8db4a765d70b5246cf2fcee2bd96ca5a39a1e45c51",
+        "current_first_seen_at_ms": 1790866281980,
+        "current_reported_at_ms": 1790553600000,
+        "current_reported_date": "2026-09-28",
+        "current_retrieved_at_ms": 1790866281980,
+        "current_source_url": "https://www.strategy.com/ledger",
+        "evidence_hash": "63d859a7a1a3ffb5ca53ea8db4a765d70b5246cf2fcee2bd96ca5a39a1e45c51",
+        "first_seen_at_ms": 1790866281980,
+        "latest_to_previous_change_pct": -0.12901833051349731,
+        "machine_execution": "FORBIDDEN",
+        "previous_btc_holdings": 846000.0,
+        "previous_btc_per_diluted_share": 0.001879548908262017,
+        "previous_diluted_shares": 450108000.0,
+        "previous_evidence_hash": "63d859a7a1a3ffb5ca53ea8db4a765d70b5246cf2fcee2bd96ca5a39a1e45c51",
+        "previous_first_seen_at_ms": 1790866281980,
+        "previous_reported_at_ms": 1789948800000,
+        "previous_reported_date": "2026-09-21",
+        "previous_retrieved_at_ms": 1790866281980,
+        "previous_source_url": "https://www.strategy.com/ledger",
+        "reported_at_rule": "REPORTED_DATE_UTC_MIDNIGHT_SORT_KEY_ONLY",
+        "retrieved_at_ms": 1790866281980,
+        "sec_authority": "DISCLOSURE_AND_CAPITAL_EVENT_AUTHORITY",
+        "semantic_authority": "METRIC_SEMANTIC_AUTHORITY",
+        "semantic_source_url": "https://www.strategy.com/notes",
+        "source_role": "PRIMARY_OFFICIAL_MSTR_BTC_ADSO_HISTORY",
+        "source_url": "https://www.strategy.com/ledger",
+        "time_semantic": "REPORTED_OBSERVATION_NOT_EFFECTIVE_TIME",
+        "wake_authority": "OBSERVATION_ONLY"
+      }
+    },
+    "schema_version": "CRT_ISSUER_RATIO_OBSERVATION_V0.1",
+    "source_provenance": {
+      "data_hash": "37afc4e7f4808b84accdcdd8ec8385afe2b3bd71135f6be4aad06cb07cdd8622",
+      "observed_at_ms": 1790866283102,
+      "source_id": "CRT-CONN-MSTR-ASST-OFFICIAL-ISSUER-RATIO-001"
+    },
+    "state": "VALID"
+  },
+  "layers": {
+    "L1": {
+      "metrics": {
+        "core_inflation_acceleration": {
+          "as_of_ms": 1790726400000,
+          "evidence_hash": "da78cff198e216eb0695b93936a96bcaf21acb8f4bf5657ada318ac663ba77bb",
+          "input_family": "MACRO_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-MACRO-FRED-CONTEXT-001",
+          "value": -0.7926224816653837
+        },
+        "real_policy_rate": {
+          "as_of_ms": 1790726400000,
+          "evidence_hash": "da78cff198e216eb0695b93936a96bcaf21acb8f4bf5657ada318ac663ba77bb",
+          "input_family": "MACRO_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-MACRO-FRED-CONTEXT-001",
+          "value": 0.8724040238143935
+        },
+        "unemployment_deterioration": {
+          "as_of_ms": 1790726400000,
+          "evidence_hash": "da78cff198e216eb0695b93936a96bcaf21acb8f4bf5657ada318ac663ba77bb",
+          "input_family": "MACRO_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-MACRO-FRED-CONTEXT-001",
+          "value": -0.06666666666666732
+        }
+      },
+      "missing_required_metrics": [],
+      "required_metrics": [
+        "core_inflation_acceleration",
+        "real_policy_rate",
+        "unemployment_deterioration"
+      ],
+      "status": "VALID"
+    },
+    "L2": {
+      "metrics": {
+        "broad_usd_20d_log_change": {
+          "as_of_ms": 1790640000000,
+          "evidence_hash": "403006f33f19bfe075e07873d602751575c084aa4cfe4699fd946221946ef1fa",
+          "input_family": "RATES_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-RATES-FRED-CONTEXT-001",
+          "value": 1.6521503981670258
+        },
+        "broad_usd_proxy": {
+          "as_of_ms": 1790294400000,
+          "evidence_hash": "3b999348baaabe2849af5bed3b3caf18832e4d301bd38b9b20d723b0b3b3de46",
+          "input_family": "DOLLAR_STRENGTH_PROXY",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-FX-FRED-BROAD-USD-PROXY-001",
+          "value": 120.33
+        },
+        "nominal_2y_yield_20d_change_bp": {
+          "as_of_ms": 1790640000000,
+          "evidence_hash": "403006f33f19bfe075e07873d602751575c084aa4cfe4699fd946221946ef1fa",
+          "input_family": "RATES_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-RATES-FRED-CONTEXT-001",
+          "value": 54.999999999999986
+        },
+        "real_10y_yield_20d_change_bp": {
+          "as_of_ms": 1790640000000,
+          "evidence_hash": "403006f33f19bfe075e07873d602751575c084aa4cfe4699fd946221946ef1fa",
+          "input_family": "RATES_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-RATES-FRED-CONTEXT-001",
+          "value": 47.00000000000002
+        }
+      },
+      "missing_required_metrics": [],
+      "required_metrics": [
+        "broad_usd_20d_log_change",
+        "nominal_2y_yield_20d_change_bp",
+        "real_10y_yield_20d_change_bp"
+      ],
+      "status": "VALID"
+    },
+    "L3": {
+      "metrics": {
+        "btc_spot_price_usd": {
+          "as_of_ms": 1790866560011,
+          "evidence_hash": "d00de622b366121d3907a98714c91b0fe390a27701f9365a42fafc0513b81c88",
+          "input_family": "BTC_SPOT_PRICE",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-SPOT-BINANCE-WAKE-001",
+          "value": 83928.01
+        },
+        "high_yield_oas_20d_change_bp": {
+          "as_of_ms": 1790812800000,
+          "evidence_hash": "c658bfec4bf2564a764f4ba53a45befaa3939fb907ffa9a06a78b0289fe0e52f",
+          "input_family": "CREDIT_LIQUIDITY_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-CREDIT-LIQUIDITY-CONTEXT-001",
+          "value": 46.0
+        },
+        "stablecoin_supply_30d_log_change": {
+          "as_of_ms": 1790812800000,
+          "evidence_hash": "c658bfec4bf2564a764f4ba53a45befaa3939fb907ffa9a06a78b0289fe0e52f",
+          "input_family": "CREDIT_LIQUIDITY_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-CREDIT-LIQUIDITY-CONTEXT-001",
+          "value": 0.3779178921524332
+        }
+      },
+      "missing_required_metrics": [
+        "spot_btc_etp_flow_20d_pct_aum"
+      ],
+      "required_metrics": [
+        "high_yield_oas_20d_change_bp",
+        "spot_btc_etp_flow_20d_pct_aum",
+        "stablecoin_supply_30d_log_change"
+      ],
+      "status": "PARTIAL"
+    },
+    "L4": {
+      "metrics": {
+        "abs_funding_3d_mean_bp": {
+          "as_of_ms": 1790841600005,
+          "evidence_hash": "2b791d9166da90e34c676c708d93b9d4421bdc2ce35af960a870a0585d850620",
+          "input_family": "FUNDING_RATE",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-DERIV-BINANCE-FUNDING-001",
+          "value": 0.5015777777777778
+        },
+        "funding_3d_mean_bp": {
+          "as_of_ms": 1790841600005,
+          "evidence_hash": "2b791d9166da90e34c676c708d93b9d4421bdc2ce35af960a870a0585d850620",
+          "input_family": "FUNDING_RATE",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-DERIV-BINANCE-FUNDING-001",
+          "value": 0.5015777777777778
+        },
+        "funding_rate": {
+          "as_of_ms": 1790841600005,
+          "evidence_hash": "2b791d9166da90e34c676c708d93b9d4421bdc2ce35af960a870a0585d850620",
+          "input_family": "FUNDING_RATE",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-DERIV-BINANCE-FUNDING-001",
+          "value": 4.568e-05
+        },
+        "mark_price": {
+          "as_of_ms": 1790841600005,
+          "evidence_hash": "2b791d9166da90e34c676c708d93b9d4421bdc2ce35af960a870a0585d850620",
+          "input_family": "FUNDING_RATE",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-DERIV-BINANCE-FUNDING-001",
+          "value": 83381.6
+        },
+        "oi_to_market_cap_pct": {
+          "as_of_ms": 1790866500000,
+          "evidence_hash": "31c23fad60f7d5cb34514b96cc39609a5839b6ece0d466a9050a543f4dd1af43",
+          "input_family": "OPEN_INTEREST_NOTIONAL",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-DERIV-BINANCE-OI-NOTIONAL-001",
+          "value": 0.4831223323697395
+        },
+        "open_interest_contracts": {
+          "as_of_ms": 1790866553781,
+          "evidence_hash": "fe89da5e168a7af70b627b26a059c9556c264414de8052d43180bce528e7ec50",
+          "input_family": "OPEN_INTEREST",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-DERIV-BINANCE-OI-001",
+          "value": 96731.883
+        },
+        "open_interest_notional_usd": {
+          "as_of_ms": 1790866500000,
+          "evidence_hash": "31c23fad60f7d5cb34514b96cc39609a5839b6ece0d466a9050a543f4dd1af43",
+          "input_family": "OPEN_INTEREST_NOTIONAL",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-DERIV-BINANCE-OI-NOTIONAL-001",
+          "value": 8112855707.7698
+        }
+      },
+      "missing_required_metrics": [
+        "liquidation_intensity_24h_pct",
+        "short_minus_long_liquidation_share_24h"
+      ],
+      "required_metrics": [
+        "abs_funding_3d_mean_bp",
+        "liquidation_intensity_24h_pct",
+        "oi_to_market_cap_pct",
+        "short_minus_long_liquidation_share_24h"
+      ],
+      "status": "PARTIAL"
+    },
+    "L5": {
+      "metrics": {
+        "market_cap_usd": {
+          "as_of_ms": 1790726400000,
+          "evidence_hash": "395e418f0f0aaf785a44fe0ac5a90048e760dc23ceac7ad84187c0a72a81d42c",
+          "input_family": "ONCHAIN_VALUE",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-ONCHAIN-COINMETRICS-COMMUNITY-001",
+          "value": 1679254955567.0159
+        },
+        "mvrv": {
+          "as_of_ms": 1790726400000,
+          "evidence_hash": "395e418f0f0aaf785a44fe0ac5a90048e760dc23ceac7ad84187c0a72a81d42c",
+          "input_family": "ONCHAIN_VALUE",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-ONCHAIN-COINMETRICS-COMMUNITY-001",
+          "value": 1.5589841836602303
+        },
+        "nupl": {
+          "as_of_ms": 1790726400000,
+          "evidence_hash": "395e418f0f0aaf785a44fe0ac5a90048e760dc23ceac7ad84187c0a72a81d42c",
+          "input_family": "ONCHAIN_VALUE",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-ONCHAIN-COINMETRICS-COMMUNITY-001",
+          "value": 0.3585566739669098
+        },
+        "realized_cap_30d_log_change": {
+          "as_of_ms": 1790726400000,
+          "evidence_hash": "395e418f0f0aaf785a44fe0ac5a90048e760dc23ceac7ad84187c0a72a81d42c",
+          "input_family": "ONCHAIN_VALUE",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-ONCHAIN-COINMETRICS-COMMUNITY-001",
+          "value": 1.0721594769221652
+        },
+        "realized_cap_usd": {
+          "as_of_ms": 1790726400000,
+          "evidence_hash": "395e418f0f0aaf785a44fe0ac5a90048e760dc23ceac7ad84187c0a72a81d42c",
+          "input_family": "ONCHAIN_VALUE",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-ONCHAIN-COINMETRICS-COMMUNITY-001",
+          "value": 1077146883956.4557
+        }
+      },
+      "missing_required_metrics": [],
+      "required_metrics": [
+        "mvrv",
+        "nupl",
+        "realized_cap_30d_log_change"
+      ],
+      "status": "VALID"
+    },
+    "L6": {
+      "metrics": {
+        "close_minus_sma200_over_atr20": {
+          "as_of_ms": 1790812799999,
+          "evidence_hash": "d1030bed97f30c79110bef9b15c2b655eac6e08935e179279b1d9c152726be11",
+          "input_family": "PRICE_STRUCTURE_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-SPOT-PRICE-STRUCTURE-PROXY-001",
+          "value": 5.280409393495799
+        },
+        "cvd_20d_share": {
+          "as_of_ms": 1790812799999,
+          "evidence_hash": "d1030bed97f30c79110bef9b15c2b655eac6e08935e179279b1d9c152726be11",
+          "input_family": "PRICE_STRUCTURE_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-SPOT-PRICE-STRUCTURE-PROXY-001",
+          "value": -0.011525661046787858
+        },
+        "quote_volume_rvol20": {
+          "as_of_ms": 1790812799999,
+          "evidence_hash": "d1030bed97f30c79110bef9b15c2b655eac6e08935e179279b1d9c152726be11",
+          "input_family": "PRICE_STRUCTURE_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-SPOT-PRICE-STRUCTURE-PROXY-001",
+          "value": 1.1872805439012772
+        },
+        "return_20d_over_atr_vol": {
+          "as_of_ms": 1790812799999,
+          "evidence_hash": "d1030bed97f30c79110bef9b15c2b655eac6e08935e179279b1d9c152726be11",
+          "input_family": "PRICE_STRUCTURE_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-SPOT-PRICE-STRUCTURE-PROXY-001",
+          "value": 0.7061421686362148
+        },
+        "sma50_minus_sma200_over_atr20": {
+          "as_of_ms": 1790812799999,
+          "evidence_hash": "d1030bed97f30c79110bef9b15c2b655eac6e08935e179279b1d9c152726be11",
+          "input_family": "PRICE_STRUCTURE_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-SPOT-PRICE-STRUCTURE-PROXY-001",
+          "value": 2.56905524528454
+        },
+        "taker_buy_quote_share_1d": {
+          "as_of_ms": 1790812799999,
+          "evidence_hash": "d1030bed97f30c79110bef9b15c2b655eac6e08935e179279b1d9c152726be11",
+          "input_family": "PRICE_STRUCTURE_CONTEXT",
+          "quality_state": "VALID_FRESH",
+          "source_id": "CRT-CONN-BTC-SPOT-PRICE-STRUCTURE-PROXY-001",
+          "value": 0.4883544670423511
+        }
+      },
+      "missing_required_metrics": [],
+      "required_metrics": [
+        "close_minus_sma200_over_atr20",
+        "cvd_20d_share",
+        "return_20d_over_atr_vol",
+        "sma50_minus_sma200_over_atr20"
+      ],
+      "status": "VALID"
+    }
+  },
+  "model_status": {
+    "btc_season_router": {
+      "analyst_judgment_required": true,
+      "candidate_weather_bucket": null,
+      "formal_model": "NOT_APPROVED",
+      "production": "NOT_APPROVED",
+      "reason": "V110_SEASON_STATE_TRANSITION_CONTRACT_NOT_RECOVERED",
+      "score_may_determine_btc_season": false,
+      "season": null,
+      "state": "CANDIDATE_BLOCKED"
+    },
+    "locked_formal_scoring": {
+      "candidate_contract_hash": "4fb559c5e0620f4c69a615b1bf2929193cddafc14bacdbe90d89f35081cd370f",
+      "candidate_output_hash": "5c9ee2df540886f7a0649bc280c0e725b361b51dfaaff2bb0aaff8826174e9f4",
+      "candidate_score": null,
+      "candidate_threshold_bucket": null,
+      "formal_model": "NOT_APPROVED",
+      "layer_weights_percent": {
+        "L1": 20,
+        "L2": 20,
+        "L3": 17,
+        "L4": 25,
+        "L5": 13,
+        "L6": 5
+      },
+      "light_thresholds": [
+        -60,
+        -35,
+        35,
+        60
+      ],
+      "modification_authority": "NONE",
+      "production": "NOT_APPROVED",
+      "reason": "FORMAL_CANDIDATE_INPUT_OR_HISTORY_BLOCKED",
+      "score": null,
+      "state": "CANDIDATE_BLOCKED"
+    },
+    "six_layer_evidence": {
+      "blocked_reasons": [
+        "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM_METRIC_MISSING",
+        "L3_spot_btc_etp_flow_20d_pct_aum_MISSING",
+        "L4_LIQUIDATION_INTENSITY_24H_METRIC_MISSING",
+        "L4_SHORT_MINUS_LONG_LIQUIDATION_SHARE_24H_METRIC_MISSING",
+        "L4_liquidation_intensity_24h_pct_MISSING",
+        "L4_short_minus_long_liquidation_share_24h_MISSING",
+        "L6_CLOSE_MINUS_SMA200_OVER_ATR20_INPUT_FAMILY_NOT_APPROVED",
+        "L6_CLOSE_MINUS_SMA200_OVER_ATR20_SOURCE_NOT_APPROVED",
+        "L6_CVD_20D_SHARE_INPUT_FAMILY_NOT_APPROVED",
+        "L6_CVD_20D_SHARE_SOURCE_NOT_APPROVED",
+        "L6_RETURN_20D_OVER_ATR_VOL_INPUT_FAMILY_NOT_APPROVED",
+        "L6_RETURN_20D_OVER_ATR_VOL_SOURCE_NOT_APPROVED",
+        "L6_SMA50_MINUS_SMA200_OVER_ATR20_INPUT_FAMILY_NOT_APPROVED",
+        "L6_SMA50_MINUS_SMA200_OVER_ATR20_SOURCE_NOT_APPROVED"
+      ],
+      "missing_by_layer": {
+        "L3": [
+          "spot_btc_etp_flow_20d_pct_aum"
+        ],
+        "L4": [
+          "liquidation_intensity_24h_pct",
+          "short_minus_long_liquidation_share_24h"
+        ]
+      },
+      "state": "BLOCKED"
+    }
+  },
+  "pack_state": "BLOCKED",
+  "plan_drift": {
+    "action_output": "NONE",
+    "active_plan_count": 1,
+    "blocked_condition_count": 0,
+    "condition_count": 3,
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "pending_tranche_count": 3,
+    "plans": [
+      {
+        "asset": "USD",
+        "blocked_condition_count": 0,
+        "conditions": [
+          {
+            "current_value": "NOT_YET_VALIDATED",
+            "evaluation": "SATISFIED",
+            "field": "mstr_asst_relative_value_validation_status",
+            "operator": "EQ",
+            "source_kind": "CAPITAL_STATE",
+            "source_path": "private_context.profile.capital_state.mstr_asst_relative_value_validation_status",
+            "source_state": "BOUND",
+            "target_value": "NOT_YET_VALIDATED",
+            "tranche_id": "T1"
+          },
+          {
+            "current_value": "NOT_YET_VALIDATED",
+            "evaluation": "SATISFIED",
+            "field": "mstr_asst_relative_value_validation_status",
+            "operator": "EQ",
+            "source_kind": "CAPITAL_STATE",
+            "source_path": "private_context.profile.capital_state.mstr_asst_relative_value_validation_status",
+            "source_state": "BOUND",
+            "target_value": "NOT_YET_VALIDATED",
+            "tranche_id": "T2"
+          },
+          {
+            "current_value": "NOT_YET_VALIDATED",
+            "evaluation": "SATISFIED",
+            "field": "mstr_asst_relative_value_validation_status",
+            "operator": "EQ",
+            "source_kind": "CAPITAL_STATE",
+            "source_path": "private_context.profile.capital_state.mstr_asst_relative_value_validation_status",
+            "source_state": "BOUND",
+            "target_value": "NOT_YET_VALIDATED",
+            "tranche_id": "T3"
+          }
+        ],
+        "pending_tranche_count": 3,
+        "plan_id": "ATTACK_CAPITAL_WAIT",
+        "reanalysis_required": false,
+        "satisfied_condition_count": 3,
+        "side": "WAIT",
+        "state": "VALID",
+        "violated_condition_count": 0
+      }
+    ],
+    "reanalysis_required": false,
+    "reason": "ACTIVE_PLAN_CONDITIONS_SATISFIED",
+    "satisfied_condition_count": 3,
+    "state": "STABLE",
+    "violated_condition_count": 0
+  },
+  "reanalysis_wake": {
+    "action_output": "NONE",
+    "analyst_reanalysis_requested": true,
+    "baseline_count": 0,
+    "current_value": null,
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "historical_percentile": null,
+    "input_family": "ISSUER_RATIO_OBSERVATION",
+    "metric": "issuer_btc_per_diluted_share",
+    "mstr_asst_market_health_reanalysis_required": null,
+    "mstr_asst_market_health_state": null,
+    "operational_percentile": 90.0,
+    "percent_change": null,
+    "plan_drift_reanalysis_required": false,
+    "plan_drift_state": "STABLE",
+    "previous_value": null,
+    "reason": "MSTR:BTC_PER_DILUTED_SHARE_DECREASED",
+    "state": "REANALYSIS_REQUESTED",
+    "wake_reasons": [
+      "MSTR:BTC_PER_DILUTED_SHARE_DECREASED"
+    ],
+    "wake_sources": [
+      "MSTR_ISSUER_RATIO_OBSERVATION"
+    ]
+  },
+  "schema_version": "CRT_EVIDENCE_PACK_V0.2",
+  "scope": {
+    "available_layers": [
+      "L1",
+      "L2",
+      "L3",
+      "L4",
+      "L5",
+      "L6"
+    ],
+    "not_yet_in_slice": [],
+    "note": "The V1.10 locked-constant candidate is executable and fail-closed. Formal scoring and BTC season remain unapproved.",
+    "slice": "SIX_LAYER_EVIDENCE_TRANSITION_V0.3"
+  },
+  "season_transition_warning_overlay": {
+    "authority": {
+      "action_output": "NONE",
+      "analyst_judgment_required": true,
+      "capital_decision_authority": "USER_ONLY",
+      "external_action_authority": "NONE",
+      "external_action_performed": false,
+      "formal_model": "NOT_APPROVED",
+      "formal_season_authority": "NONE",
+      "machine_may_confirm_bull_transition": false,
+      "machine_may_output_trade_action": false,
+      "production": "NOT_APPROVED",
+      "score_may_determine_btc_season": false
+    },
+    "card": "CRT｜季節轉換預警\n\nFormal Season（正式季節）: NOT CONFIRMED\nResearch Season（研究季節）: WINTER -> SPRING CANDIDATE AT RISK\nTransition Warning（轉季預警）: HIGH / BASELINE_PENDING\n\n① 價格結構     ⚪ N/A →\n② 現貨需求     ⚪ N/A →\n③ 機構資金     ⚪ N/A →\n④ 槓桿品質     ⚪ N/A →\n⑤ 重大反證       🟡\n\n情境 3｜假春風險升高\nEvidence Momentum（證據動量）: BASELINE_PENDING",
+    "conflict_direction": "BASELINE_PENDING",
+    "evidence_momentum": "BASELINE_PENDING",
+    "formal_season": null,
+    "formal_season_status": "NOT_CONFIRMED",
+    "gate_core_veto": {
+      "core": {
+        "institution_20d_supportive": false,
+        "institution_5d_20d_60d_pattern": "UNRESOLVED",
+        "leverage_guard": "ADVERSE_OR_UNAVAILABLE",
+        "reason": "SPOT_AND_INSTITUTIONAL_CORE_SCORES_UNAVAILABLE",
+        "spot_supportive": false,
+        "state": "BLOCKED"
+      },
+      "decision_method": "GATE_PLUS_CORE_PLUS_VETO",
+      "gate": {
+        "reason": "PRICE_STRUCTURE_SCORE_UNAVAILABLE",
+        "state": "BLOCKED"
+      },
+      "selection_reason": "CONFLICT_WITH_PRICE_GATE_NOT_OPEN",
+      "veto": {
+        "insurance_fuse_not_fifth_vote": true,
+        "state": "CONFLICT_PRESENT",
+        "upgrade_blocked": false
+      },
+      "vote_counting_used": false
+    },
+    "generated_at_ms": 1790866561134,
+    "historical_replay": {
+      "detection_latency_ms": null,
+      "false_positive": null,
+      "ground_truth_outcome": null,
+      "ground_truth_transition_at_ms": null,
+      "historical_case_id": null,
+      "objective": "DETECTION_LATENCY_X_FALSE_POSITIVE",
+      "optimization_policy": "DO_NOT_MINIMIZE_FALSE_POSITIVES_AT_THE_COST_OF_EXCESSIVE_LATENCY",
+      "spring_transition_signal_active": false,
+      "state": "GROUND_TRUTH_PENDING",
+      "warning_onset_ms": null
+    },
+    "inherited_locks": {
+      "formal_layer_weights_modified": false,
+      "light_buckets": [
+        "C0_VERY_UNSUPPORTIVE",
+        "C1_UNSUPPORTIVE",
+        "C2_MIXED",
+        "C3_SUPPORTIVE",
+        "C4_VERY_SUPPORTIVE"
+      ],
+      "light_thresholds": [
+        -60,
+        -35,
+        35,
+        60
+      ],
+      "mnav_semantics_modified": false
+    },
+    "lights": {
+      "conflict_veto": {
+        "delta_light": {
+          "changed": null,
+          "from": null,
+          "to": "YELLOW"
+        },
+        "delta_score": null,
+        "direction": "BASELINE_PENDING",
+        "evidence_status": "PARTIAL_SOURCE_EVIDENCE",
+        "light": "YELLOW",
+        "light_symbol": "🟡",
+        "light_thresholds": null,
+        "raw_metrics": {
+          "conflict_evidence": [
+            "BREAKOUT_VOLUME_QUALITY"
+          ],
+          "decisive_veto_evidence": [],
+          "insurance_fuse_not_vote": true,
+          "numeric_conflict_score": null
+        },
+        "score": null,
+        "scoring_method": "CATEGORICAL_FUSE_NO_NUMERIC_SCORE",
+        "threshold_bucket": "CONFLICT_PRESENT"
+      },
+      "institutional_flow": {
+        "delta_light": {
+          "changed": null,
+          "from": null,
+          "to": "NOT_AVAILABLE"
+        },
+        "delta_score": null,
+        "direction": "BASELINE_PENDING",
+        "evidence_status": "BLOCKED_L3_20D_ETP_SCORE_UNAVAILABLE",
+        "light": "NOT_AVAILABLE",
+        "light_symbol": "⚪",
+        "light_thresholds": [
+          -60,
+          -35,
+          35,
+          60
+        ],
+        "raw_metrics": {
+          "context_20d_matches_l3_metric": null,
+          "flow_pattern_5d_20d_60d": "UNRESOLVED",
+          "main_feature_id": "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM",
+          "main_metric_value_pct_starting_aum": null,
+          "normalization": "100_X_FLOW_USD_DIVIDED_BY_STARTING_AUM_USD",
+          "usd_absolute_flow_role": "DISPLAY_ONLY",
+          "window_policy": {
+            "120d": "DISPLAY_ONLY_REGIME_CONTEXT",
+            "1d": "DISPLAY_ONLY_EVENT_PULSE",
+            "20d": "MAIN_LIGHT",
+            "5d": "EARLY_WARNING_CONTEXT",
+            "60d": "PERSISTENCE_CONTEXT"
+          },
+          "windows": {
+            "120d": {
+              "flow_pct_starting_aum": null,
+              "flow_usd_display_only": null,
+              "formal_threshold_authority": "NONE",
+              "role": "REGIME_CONTEXT_DISPLAY_ONLY",
+              "starting_aum_usd": null,
+              "state": "NOT_AVAILABLE",
+              "used_in_main_light_score": false
+            },
+            "1d": {
+              "flow_pct_starting_aum": null,
+              "flow_usd_display_only": null,
+              "formal_threshold_authority": "NONE",
+              "role": "EVENT_PULSE_DISPLAY_ONLY",
+              "starting_aum_usd": null,
+              "state": "NOT_AVAILABLE",
+              "used_in_main_light_score": false
+            },
+            "20d": {
+              "flow_pct_starting_aum": null,
+              "flow_usd_display_only": null,
+              "formal_threshold_authority": "NONE",
+              "role": "TRANSITION_TREND_MAIN_LIGHT",
+              "starting_aum_usd": null,
+              "state": "NOT_AVAILABLE",
+              "used_in_main_light_score": true
+            },
+            "5d": {
+              "flow_pct_starting_aum": null,
+              "flow_usd_display_only": null,
+              "formal_threshold_authority": "NONE",
+              "role": "WEEKLY_IMPULSE_EARLY_WARNING",
+              "starting_aum_usd": null,
+              "state": "NOT_AVAILABLE",
+              "used_in_main_light_score": false
+            },
+            "60d": {
+              "flow_pct_starting_aum": null,
+              "flow_usd_display_only": null,
+              "formal_threshold_authority": "NONE",
+              "role": "INSTITUTIONAL_PERSISTENCE",
+              "starting_aum_usd": null,
+              "state": "NOT_AVAILABLE",
+              "used_in_main_light_score": false
+            }
+          }
+        },
+        "score": null,
+        "scoring_method": "DIRECT_REUSE_L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM_FEATURE_SCORE",
+        "threshold_bucket": null
+      },
+      "leverage_quality": {
+        "delta_light": {
+          "changed": null,
+          "from": null,
+          "to": "NOT_AVAILABLE"
+        },
+        "delta_score": null,
+        "direction": "BASELINE_PENDING",
+        "evidence_status": "BLOCKED_L4_LAYER_SCORE_UNAVAILABLE",
+        "light": "NOT_AVAILABLE",
+        "light_symbol": "⚪",
+        "light_thresholds": [
+          -60,
+          -35,
+          35,
+          60
+        ],
+        "raw_metrics": {
+          "abs_funding_3d_mean_bp": 0.5015777777777778,
+          "funding_3d_mean_bp": 0.5015777777777778,
+          "included_existing_l4_components": [
+            "OPEN_INTEREST",
+            "FUNDING_RATE",
+            "LIQUIDATION_INTENSITY",
+            "LONG_SHORT_LIQUIDATION_DIRECTION"
+          ],
+          "latest_funding_bp": 0.4568,
+          "latest_funding_rate": 4.568e-05,
+          "long_liquidation_24h_usd": null,
+          "oi_24h_change": {
+            "absolute_change": 369769055.7619066,
+            "history_state": "AVAILABLE",
+            "metric": "open_interest_notional_usd",
+            "percent_change": 4.775473559578726,
+            "previous_as_of_ms": 1790779500000
+          },
+          "oi_3d_change": {
+            "absolute_change": 248172914.2698002,
+            "history_state": "AVAILABLE",
+            "metric": "open_interest_notional_usd",
+            "percent_change": 3.1555362216885596,
+            "previous_as_of_ms": 1790606700000
+          },
+          "short_liquidation_24h_usd": null
+        },
+        "score": null,
+        "scoring_method": "DIRECT_REUSE_EXISTING_L4_LAYER_SCORE",
+        "threshold_bucket": null
+      },
+      "price_structure": {
+        "delta_light": {
+          "changed": null,
+          "from": null,
+          "to": "NOT_AVAILABLE"
+        },
+        "delta_score": null,
+        "direction": "BASELINE_PENDING",
+        "evidence_status": "BLOCKED_INCOMPLETE_L6_PRICE_FEATURES",
+        "light": "NOT_AVAILABLE",
+        "light_symbol": "⚪",
+        "light_thresholds": [
+          -60,
+          -35,
+          35,
+          60
+        ],
+        "raw_metrics": {
+          "event_research_coordinates": {
+            "attack_zone_usd": [
+              82000.0,
+              83000.0
+            ],
+            "formal_threshold_authority": "NONE",
+            "retest_defense_zone_usd": [
+              80000.0,
+              82000.0
+            ],
+            "scope": "EVENT_SCOPED_DISPLAY_ONLY",
+            "used_in_score": false
+          },
+          "excluded_from_price_light": [
+            "L6_CVD_20D_SHARE"
+          ],
+          "exclusion_reason": "AVOID_DUPLICATE_VOTE_WITH_SPOT_DEMAND_LIGHT",
+          "feature_values": {
+            "L6_CLOSE_MINUS_SMA200_OVER_ATR20": 5.280409393495799,
+            "L6_RETURN_20D_OVER_ATR_VOL": 0.7061421686362148,
+            "L6_SMA50_MINUS_SMA200_OVER_ATR20": 2.56905524528454
+          },
+          "normalized_feature_scores": {
+            "L6_CLOSE_MINUS_SMA200_OVER_ATR20": null,
+            "L6_RETURN_20D_OVER_ATR_VOL": null,
+            "L6_SMA50_MINUS_SMA200_OVER_ATR20": null
+          },
+          "selected_existing_l6_weight_percent": 80.0
+        },
+        "score": null,
+        "scoring_method": "REUSE_L6_EXISTING_FEATURE_WEIGHTS_RENORMALIZED_AFTER_INTENTIONAL_CVD_ROLE_SEPARATION",
+        "threshold_bucket": null
+      },
+      "spot_demand": {
+        "delta_light": {
+          "changed": null,
+          "from": null,
+          "to": "NOT_AVAILABLE"
+        },
+        "delta_score": null,
+        "direction": "BASELINE_PENDING",
+        "evidence_status": "BLOCKED_L6_CVD_SCORE_UNAVAILABLE",
+        "light": "NOT_AVAILABLE",
+        "light_symbol": "⚪",
+        "light_thresholds": [
+          -60,
+          -35,
+          35,
+          60
+        ],
+        "raw_metrics": {
+          "diagnostic_state": "NOT_REQUESTED",
+          "l6_cvd_20d_share": -0.011525661046787858,
+          "leverage_quality_cross_check": null,
+          "persistence_30m_to_30m": null,
+          "prior_30m": {
+            "spot_buy_share_pct": null,
+            "spot_cvd_proxy_usd": null
+          },
+          "recent_30m": {
+            "spot_buy_share_pct": null,
+            "spot_cvd_proxy_usd": null
+          },
+          "spot_buy_share_pct": null,
+          "spot_cvd_proxy_usd": null,
+          "spot_demand_absorption": null
+        },
+        "score": null,
+        "scoring_method": "DIRECT_REUSE_L6_CVD_20D_SHARE_FEATURE_SCORE",
+        "threshold_bucket": null
+      }
+    },
+    "overlay_hash": "ae7d838d61680122c7ea40095ce11a2896bccd6a84fb0c2b9f8c7e599f79c6c3",
+    "overlay_id": "SEASON_TRANSITION_WARNING_OVERLAY",
+    "research_season": "WINTER -> SPRING CANDIDATE AT RISK",
+    "scenario": {
+      "id": "SCENARIO_3",
+      "label": "情境 3｜假春風險升高",
+      "selection_reason": "CONFLICT_WITH_PRICE_GATE_NOT_OPEN"
+    },
+    "schema_version": "CRT_SEASON_TRANSITION_WARNING_OVERLAY_V0.1",
+    "scope": "RESEARCH_DECISION_SUPPORT_ONLY",
+    "transition_warning": {
+      "direction": "BASELINE_PENDING",
+      "focus": "FALSE_SPRING_RISK",
+      "level": "HIGH"
+    }
+  },
+  "source_gate_idempotency_key": "ed6959476ba0809d4719d13af4451e128b94a28255c36d442e76a04a9b7afbac",
+  "source_gate_run_id": "d658eb80-d952-4c5a-9e68-b856c67f94d2",
+  "transition_diagnostic": {
+    "action_output": "NONE",
+    "analyst_judgment_required": false,
+    "external_action_authority": "NONE",
+    "external_action_performed": false,
+    "machine_may_confirm_bull_transition": false,
+    "machine_regime_judgment": null,
+    "reason": "REANALYSIS_WAKE_NOT_REQUESTED",
+    "schema_version": "CRT_BTC_TRANSITION_DIAGNOSTIC_V0.1",
+    "state": "NOT_REQUESTED"
+  }
+}

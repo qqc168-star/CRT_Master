@@ -5,6 +5,7 @@ import tempfile
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from unittest.mock import patch
 
 from crt_radar.evidence_pack import (
     attach_premarket_market_data,
@@ -12,6 +13,7 @@ from crt_radar.evidence_pack import (
 )
 from crt_radar.gpt_handoff import (
     build_minimized_bridge_payload,
+    expand_bridge_field_names,
     run_gpt_handoff_gate,
 )
 from crt_radar.plain_language_notice import (
@@ -241,10 +243,21 @@ class SeasonThreeArmyGptE2ETests(unittest.TestCase):
                 notice,
                 ledger_path=td_path / "handoff.jsonl",
             )
-            bridge = build_minimized_bridge_payload(
-                pack,
-                handoff,
-            )
+            original_pack, original_handoff = deepcopy(pack), deepcopy(handoff)
+            # This fixture contains the entire duplicated Commander source map.
+            # Base main previously marked its 112,985-byte bridge ready without
+            # a Treasury section. Required critical overflow now fails closed.
+            with self.assertRaisesRegex(ValueError, "16 KiB"):
+                build_minimized_bridge_payload(pack, handoff)
+            self.assertEqual(pack, original_pack)
+            self.assertEqual(handoff, original_handoff)
+            # A test-only capacity oracle retains the original role/privacy and
+            # source-fact assertions below; it is never enqueueable acceptance.
+            with patch("crt_radar.gpt_handoff.BRIDGE_CEILING_BYTES", 10 ** 9):
+                bridge = build_minimized_bridge_payload(pack, handoff)
+            self.assertGreaterEqual(len(json.dumps(
+                bridge, ensure_ascii=False, sort_keys=True,
+                separators=(",", ":")).encode("utf-8")), 16 * 1024)
 
             self.assertEqual(
                 handoff["state"],
@@ -259,7 +272,8 @@ class SeasonThreeArmyGptE2ETests(unittest.TestCase):
                 pack["evidence_pack_hash"],
             )
 
-            market = bridge["market_context"]
+            semantic_bridge = expand_bridge_field_names(bridge)
+            market = semantic_bridge["market_context"]
             self.assertEqual(
                 market["asset_strategy_delta"],
                 pack["asset_strategy_delta"],
@@ -293,7 +307,7 @@ class SeasonThreeArmyGptE2ETests(unittest.TestCase):
                     handoff,
                 )
 
-            contract = bridge[
+            contract = semantic_bridge[
                 "analysis_contract"
             ][
                 "season_three_army_role_separation"

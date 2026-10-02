@@ -16,7 +16,7 @@ from typing import Any, Callable
 from urllib import request as urlrequest
 
 from .gpt_bridge_outbox import _validate_bridge_payload
-from .gpt_handoff import _assert_bridge_privacy
+from .gpt_handoff import _assert_bridge_privacy, expand_bridge_field_names
 from .gpt_transport_boundary import (
     _read_json, _seal_state, _validate_state, _write_no_clobber,
     claim_delivery, delivery_lock, ensure_pending_boundary_state,
@@ -36,6 +36,7 @@ _PAYLOAD_FIELDS = {
     "market_context", "capital_state", "analysis_contract", "privacy",
     "authority", "bridge_payload_hash",
 }
+_OPTIONAL_PAYLOAD_FIELDS = {"issuer_ratio_observation"}
 _SENSITIVE_TEXT = re.compile(
     r"(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\\\\[^\\\s]+\\|file://|/(?:home|Users|tmp|var)/|"
     r"\bsk-[A-Za-z0-9_-]{12,}|\bBearer\s+\S+|"
@@ -45,9 +46,11 @@ _SENSITIVE_TEXT = re.compile(
 
 def validate_transport_payload(payload: dict[str, Any]) -> tuple[str, str]:
     identity = _validate_bridge_payload(payload)
-    if set(payload) != _PAYLOAD_FIELDS:
+    if set(payload) - _OPTIONAL_PAYLOAD_FIELDS != _PAYLOAD_FIELDS:
         raise ValueError("Transport requires the minimized bridge field set")
+    expanded = expand_bridge_field_names(payload)
     _assert_bridge_privacy(payload)
+    _assert_bridge_privacy(expanded)
     if payload["authority"].get("capital_decision_authority") != "USER_ONLY":
         raise ValueError("Capital decision authority must remain USER_ONLY")
     if payload["authority"].get("machine_may_execute_trade") is not False:
@@ -67,6 +70,7 @@ def validate_transport_payload(payload: dict[str, Any]) -> tuple[str, str]:
         elif isinstance(value, str) and _SENSITIVE_TEXT.search(value):
             raise ValueError("Forbidden transport text")
     check(payload)
+    check(expanded)
     return identity
 
 
