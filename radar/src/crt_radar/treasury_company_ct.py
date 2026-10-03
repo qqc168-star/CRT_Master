@@ -94,6 +94,7 @@ def _metadata(raw: Any, section: dict, claim: str, issuer: str, as_of: int,
         return None
     return {"issuer_id": raw["issuer_id"], "source_ref": raw["source_ref"],
             "verification_state": raw["verification_state"], **clocks,
+            **({"source_evidence": deepcopy(raw["source_evidence"])} if isinstance(raw.get("source_evidence"), dict) else {}),
             "source_semantic": {key: semantic[key] for key in ("identity", "version", "effective_from", "effective_to")}}
 
 
@@ -244,6 +245,15 @@ def _funding(raw: Any, issuer: str, as_of: int, coverage: Any) -> dict:
             row["remaining_nominal_capacity_usd"] = capacity - used
         else:
             _block(out, claim + ".remaining_nominal_capacity_usd", "NOMINAL_CAPACITY_NOT_COMPARABLE")
+        if "reported_remaining_nominal_capacity_usd" in record:
+            # Directly disclosed remainder is not inferred usable capacity.
+            reported = _numeric(record, "reported_remaining_nominal_capacity_usd", out, claim)
+            row["reported_remaining_nominal_capacity_usd"] = reported
+            if row["remaining_nominal_capacity_usd"] is None:
+                row["remaining_nominal_capacity_usd"] = reported
+            elif reported is not None and row["remaining_nominal_capacity_usd"] != reported:
+                row["remaining_nominal_capacity_usd"] = None
+                _block(out, claim + ".remaining_nominal_capacity_usd", "NOMINAL_REMAINDER_CONFLICT")
         if row["usable_capacity_usd"] is not None and not _text(record.get("usability_basis_ref")):
             row["usable_capacity_usd"] = None
             _block(out, claim + ".usable_capacity_usd", "USABILITY_BASIS_MISSING")
@@ -525,7 +535,7 @@ def build_treasury_company_ct(*, issuer_id: str, as_of_ms: int,
         burden_current: Any = None, burden_previous: Any = None,
         maturities: Any = None, capital_conversion_events: Any = None,
         management_events: Any = None, price_financing_state: Any = None,
-        coverage: Any = None) -> dict:
+        coverage: Any = None, source_binding: Any = None) -> dict:
     """Synthesize five independent organs. `_pct` changes are fractions (0.1 = 10%)."""
     if not _text(issuer_id) or not _time(as_of_ms):
         raise ValueError("issuer_id and positive integer as_of_ms are required")
@@ -541,11 +551,14 @@ def build_treasury_company_ct(*, issuer_id: str, as_of_ms: int,
     price = _price(price_financing_state, issuer_id, as_of_ms)
     sections = {**organs, "price_financing_state": price}
     blockers = [{"section": name, **blocker} for name, section in sections.items() for blocker in section["blockers"]]
+    if isinstance(source_binding, dict):
+        blockers.extend({"section": "source_binding", **b} for b in source_binding.get("blockers", []))
     states = [section["state"] for section in sections.values()]
     return {"schema_version": SCHEMA_VERSION, "issuer_id": issuer_id, "as_of_ms": as_of_ms,
             "state": "COMPLETE" if all(s == "AVAILABLE" for s in states) else (
                 "BLOCKED" if all(s == "BLOCKED" for s in states) else "PARTIAL"),
             "organs": organs, "price_financing_state": price, "blockers": blockers,
+            "source_binding": deepcopy(source_binding),
             "reflexivity_diagnosis": {"state": "GPT_JUDGMENT_REQUIRED"},
             "action_output": "NONE", "external_action_authority": "NONE", "external_action_performed": False}
 
@@ -568,6 +581,10 @@ def add_treasury_company_ct(pack: dict, ct_input: dict) -> None:
         pack["asset_facts"]["items"].append({**common,
             "asset_fact_id": f"{SCHEMA_VERSION}:{ct['issuer_id']}:{name}",
             "fact_type": "TREASURY_COMPANY_CT", "ct_section": name, "evidence": deepcopy(section)})
+    if ct.get("source_binding") is not None:
+        pack["asset_facts"]["items"].append({**common,
+            "asset_fact_id": f"{SCHEMA_VERSION}:{ct['issuer_id']}:source_binding",
+            "fact_type": "ISSUER_CT_SOURCE_BINDING", "evidence": ct["source_binding"]})
     for blocker in ct["blockers"]:
         pack["blockers"]["items"].append({**common, **blocker, "scope": "CALCULATION",
             "affected_ids": [f"{ct['issuer_id']}:{blocker['section']}:{blocker['claim']}"],
