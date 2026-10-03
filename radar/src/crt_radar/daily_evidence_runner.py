@@ -129,6 +129,7 @@ def run_daily_evidence(
     reflexivity_input: dict[str, Any] | None = None,
     treasury_valuation_inputs: dict[str, Any] | None = None,
     treasury_company_ct_inputs: dict[str, Any] | None = None,
+    issuer_ct_archive: str | Path | None = None,
     btc_long_horizon_inputs: dict[str, Any] | None = None,
     portfolio_allocation_inputs: dict[str, Any] | None = None,
     btc_etf_archive: dict[str, Any] | None = None,
@@ -154,6 +155,12 @@ def run_daily_evidence(
     btc_control_transfer_validation_evidence: dict[str, Any] | None = None,
     acceptance_wake_operational_percentile: float | None = None,
 ) -> dict[str, Any]:
+    if issuer_ct_archive is not None:
+        if treasury_company_ct_inputs is not None:
+            raise ValueError("Supply retained issuer archive or normalized CT inputs, not both")
+        from .issuer_ratio_market_health_source import build_archived_issuer_ct_inputs
+        treasury_company_ct_inputs = build_archived_issuer_ct_inputs(
+            issuer_ct_archive, as_of_ms=generated_at_ms if generated_at_ms is not None else (now_ms if now_ms is not None else int(time.time() * 1000)))
     source_gate = run_source_gate(
         registry,
         fetch_overrides=fetch_overrides,
@@ -485,6 +492,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--issuer-ratio-proof", type=Path, default=None,
         help="Existing sealed issuer proof; independent reported observation lane, no Commander requirement.")
+    parser.add_argument("--issuer-ct-archive", type=Path, default=None,
+        help="Read-only retained official SEC archive; four-clock CT binding, no collection.")
     args = parser.parse_args(argv)
 
     if (
@@ -599,6 +608,7 @@ def main(argv: list[str] | None = None) -> int:
             _load_json_object(args.treasury_valuation_inputs, label="Treasury valuation inputs")
             if args.treasury_valuation_inputs is not None else {}
         ),
+        issuer_ct_archive=args.issuer_ct_archive,
         treasury_company_ct_inputs=(
             _load_json_object(args.treasury_company_ct_inputs, label="Treasury Company CT inputs")
             if args.treasury_company_ct_inputs is not None else None

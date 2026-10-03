@@ -112,3 +112,49 @@
 External Action Authority（外部行動權限）`NONE` 均維持原狀。
 本次沒有接入投資人斷層掃描、券商、實際值班部署或自動蒐集管線。
 既有接力棒的 `6 / 8` 與第七項傳輸阻塞不因本功能而改變。
+
+
+### Retained official issuer source binding
+
+`daily_evidence_runner --issuer-ct-archive <acceptance-root>` reads the existing
+`sec-disclosures/manifest.json` and hashed raw HTML without fetching or changing
+the archive. It checks issuer/accession identity, raw SHA-256, SEC acceptance and
+proven local retrieval. Retrieval after the replay time is excluded. Date-only
+SEC observations reuse the existing UTC date conversion and retain DATE precision;
+these values are not claims of intraday effective timestamps. First seen means
+first proven local archive retrieval, not presumed public availability.
+
+ASST AFDS excludes Traditional Warrants; comparison uses a single filing's paired
+observations, without assuming equivalence across splits or denominator changes.
+Conflicting same-date values remain blocked. MSTR Ledger reported observations
+remain NOT_CT_BOUND / ADSO_EFFECTIVE_TIME_UNRESOLVED, with their original hashes.
+They remain available through the existing `--issuer-ratio-proof` observation
+lane; SEC period funding uses and cash/reserve snapshots independently feed CT.
+SATA forward dividend terms never populate September historical carry. Missing
+principal, liquidation terms, costs or usable funding capacity remain missing.
+Nominal remaining capacity is distinct from usable capacity. Capital routes are
+not summed into a causal return; cash-funded and issuance-funded legs remain
+separate and unknown consequences stay null.
+
+CT BTC/share facts now supply the existing common-equity health projection when
+valuation inputs are absent, after local-visibility and basis checks. Conflicting
+CT/valuation values block that claim. Formal mNAV, action authority and Bridge
+limits are unchanged. Source binding diagnostics remain in Evidence Pack facts
+and claim-scoped blockers; no second fact database is created.
+
+
+PR #126 final correction: cash conflicts are compared across documents by issuer,
+effective date, currency, cash definition and accounting scope, independently of
+`basis_ref`. Conflicting components and dependent liquidity totals are blocked;
+other verified components and BTC/share remain available. Conflicting originals
+and references remain in source-binding diagnostics; no revision is inferred.
+
+The retained MSTR/ASST capital-flow announcements describe period aggregates.
+Their amounts, quantities and explicit start/end dates remain in
+`ISSUER_CT_SOURCE_BINDING` facts with `execution_time=null` and
+`PERIOD_AGGREGATE_EXECUTION_TIME_UNRESOLVED`. They do not enter CT conversion or
+management action calculations. Period end is never execution effective time.
+Funding-use observations retain period scope; cash/capacity snapshots retain
+as-of semantics. Missing/ambiguous periods block the funding-use claim.
+MSTR ADSO effective time remains unproven; ASST stock-count changes and future
+SATA dividend terms alone do not establish funding proceeds or usable capacity.

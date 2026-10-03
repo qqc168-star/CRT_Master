@@ -759,6 +759,274 @@ def build_live_issuer_ratio_proof(
     return proof
 
 
+
+
+def _reconcile_archived_cash(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Compare economic claims across documents, not document-specific bases.
+
+    No revision authority is inferred. Only the conflicting component is masked;
+    source values/references remain available in the conflict diagnostic.
+    """
+    from copy import deepcopy
+    result = deepcopy(rows)
+    groups = {}
+    for row in result:
+        for field in ("usd_cash_usd", "usd_reserve_usd"):
+            value = row.get(field)
+            if value is None:
+                continue
+            scope = row.get("source_evidence", {}).get("cash_claim_scopes", {}).get(field)
+            if not isinstance(scope, dict) or not all(scope.get(k) for k in ("definition", "accounting_scope", "currency")):
+                raise ValueError("Archived cash requires explicit economic scope")
+            key = (row["issuer_id"], row["effective_time"], field,
+                   scope["definition"], scope["accounting_scope"], scope["currency"])
+            groups.setdefault(key, []).append(row)
+    conflicts = []
+    for key, records in groups.items():
+        field = key[2]
+        if len({r[field] for r in records}) <= 1:
+            continue
+        conflicts.append(dict(claim=field, code="CONFLICTING_CASH_AT_SAME_EFFECTIVE_TIME",
+            issuer_id=key[0], effective_time=key[1], definition=key[3],
+            accounting_scope=key[4], currency=key[5],
+            observations=[dict(value=r[field], source_ref=r["source_ref"], basis_ref=r["basis_ref"])
+                          for r in records]))
+        for row in records:
+            row[field] = None
+            row["source_evidence"].setdefault("cash_conflict_fields", []).append(field)
+    return result, conflicts
+
+def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> dict:
+    """Read retained official bytes only; normalize into the existing CT contract.
+
+    No fetch, inferred effective clock, revision policy, or formal valuation.
+    SEC date observations reuse _date_ms and retain DATE precision explicitly.
+    Local visibility requires retrieval <= replay time (not just publication).
+    """
+    from .issuer_fact_history import select_fact_history
+    from .treasury_company_ct import ISSUERS
+
+    if type(as_of_ms) is not int or as_of_ms <= 0:
+        raise ValueError("Positive replay time required")
+    root = Path(archive)
+    outputs = {asset: dict(issuer_id=issuer, as_of_ms=as_of_ms,
+        asset_history=[], funding_instruments=[], capital_conversion_events=[],
+        management_events=[], source_binding={"observations": [], "blockers": []})
+        for asset, issuer in ISSUERS.items()}
+    burdens = {asset: [] for asset in ISSUERS}
+    def block(asset, claim, code):
+        outputs[asset]["source_binding"]["blockers"].append(dict(claim=claim, code=code))
+    manifest = json.loads((root / "sec-disclosures" / "manifest.json").read_text(encoding="utf-8-sig"))
+    if not isinstance(manifest, list):
+        raise ValueError("SEC archive manifest must be a list")
+    seen = set()
+    for item in manifest:
+        asset = item.get("asset")
+        if asset not in ISSUERS:
+            raise ValueError("Unknown archive issuer")
+        accession = item.get("accession", "")
+        claim = accession or "SEC_DOCUMENT"
+        try:
+            if not re.fullmatch(r"\d{10}-\d{2}-\d{6}", accession):
+                raise ValueError("SEC_ACCESSION_INVALID")
+            primary = item.get("primary", "")
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+", primary):
+                raise ValueError("SEC_DOCUMENT_IDENTITY_INVALID")
+            expected = _document_url(ASSETS[asset]["cik"], accession, primary)
+            if item.get("source_url") != expected:
+                raise ValueError("SEC_ISSUER_SOURCE_MISMATCH")
+            raw = (root / "sec-disclosures" / f"{asset}-{accession}.html").read_bytes()
+            digest = hashlib.sha256(raw).hexdigest()
+            if digest != item.get("raw_sha256"):
+                raise ValueError("RAW_HASH_MISMATCH")
+            disclosed = _accepted_ms(item.get("accepted", ""))
+            retrieved = item.get("retrieved_at_ms")
+            if type(retrieved) is not int or not 0 < disclosed <= retrieved:
+                raise ValueError("SOURCE_CLOCK_INVALID")
+            if retrieved > as_of_ms:
+                raise ValueError("NOT_LOCALLY_VISIBLE_AT_REPLAY")
+            identity = (asset, accession)
+            if identity in seen:
+                raise ValueError("DUPLICATE_ACCESSION_REQUIRES_REVIEW")
+            seen.add(identity)
+            text = _plain(raw)
+            if ASSETS[asset]["cik"] not in raw.decode("utf-8"):
+                raise ValueError("SEC_DOCUMENT_CIK_MISMATCH")
+        except (ValueError, OSError, UnicodeError) as exc:
+            block(asset, claim, "ARCHIVE_RAW_UNAVAILABLE" if isinstance(exc, OSError) else str(exc))
+            continue
+        out = outputs[asset]
+        ref = expected + "#sha256=" + digest
+        def meta(at, basis):
+            return dict(issuer_id=ISSUERS[asset], source_ref=ref,
+                verification_state="VALIDATED", effective_time=at,
+                disclosure_time=disclosed, first_seen_time=retrieved,
+                retrieval_time=retrieved, basis_ref=basis,
+                source_semantic=dict(identity=basis, version="V1", effective_from=1, effective_to=None),
+                source_evidence=dict(raw_sha256=digest, accession=accession,
+                    effective_precision="DATE", effective_date=datetime.fromtimestamp(at / 1000, timezone.utc).date().isoformat(),
+                    effective_time_rule="EXISTING_SEC_DATE_UTC_CONVERSION_NOT_INTRADAY_TIME",
+                    first_seen_rule="FIRST_PROVEN_LOCAL_ARCHIVE_RETRIEVAL"))
+        date_pattern = re.sub(r"\(\?P<\w+>", "(?:", DATE_RE)
+        periods = set()
+        for match in re.finditer(
+                r"during (?:the period (?:from |between )|period )(?P<start>" + date_pattern
+                + r") (?:to|through|and) (?P<end>" + date_pattern + r")", text, re.I):
+            start = _date_ms(re.fullmatch(DATE_RE, match["start"], re.I))
+            end = _date_ms(re.fullmatch(DATE_RE, match["end"], re.I))
+            if start <= end <= disclosed:
+                periods.add((datetime.fromtimestamp(start / 1000, timezone.utc).date().isoformat(),
+                             datetime.fromtimestamp(end / 1000, timezone.utc).date().isoformat()))
+        period = (dict(period_start_date=next(iter(periods))[0], period_end_date=next(iter(periods))[1])
+                  if len(periods) == 1 else dict(period_candidates=sorted(periods)))
+        def period_fact(key, source, destination, amount=None, **effects):
+            # CT's existing action contract requires an execution effective_time.
+            # A period endpoint is not that clock. Preserve the disclosed facts
+            # outside action calculations, including the management-action lane.
+            row = dict(issuer_id=ISSUERS[asset], source_ref=ref,
+                claim="PERIOD_CAPITAL_FLOW", observation_id=accession + ":" + key,
+                source=source, destination=destination, amount_usd=amount,
+                disclosure_time=disclosed, first_seen_time=retrieved, retrieval_time=retrieved,
+                raw_sha256=digest, period_precision="DATE", **period,
+                execution_time=None, ct_binding_state="BLOCKED", active_for_calculation=False,
+                reason="PERIOD_AGGREGATE_EXECUTION_TIME_UNRESOLVED", **effects)
+            out["source_binding"]["observations"].append(row)
+            for section in ("capital_conversion", "management_evidence"):
+                block(asset, section + ":" + row["observation_id"], row["reason"])
+        def cash_row(at, basis, **values):
+            row = dict(**meta(at, basis), **values)
+            row["source_evidence"]["cash_claim_scopes"] = {
+                field: dict(definition=("CASH_AND_CASH_EQUIVALENTS" if asset == "ASST" else
+                                       "USD_CASH" if field == "usd_cash_usd" else "USD_RESERVE"),
+                            accounting_scope="ISSUER_REPORTED_COMPANY_SCOPE", currency="USD")
+                for field in ("usd_cash_usd", "usd_reserve_usd") if field in values}
+            return row
+        if asset == "ASST":
+            try:
+                states = _strive_states(raw, accepted_at_ms=disclosed, source_url=expected)
+                if any(r["btc_holdings"] <= 0 or r["diluted_shares"] <= 0 for r in states):
+                    raise ValueError("Nonpositive issuer asset")
+            except (ValueError, ZeroDivisionError, OverflowError):
+                block(asset, "asset_history", "SEC_ASSET_SCHEMA_INVALID")
+                states = []
+            basis_text = re.search(r"Assumed Fully Diluted Shares Outstanding represents (.*?)\(5\)", text)
+            if states and basis_text and "Traditional Warrants are excluded" in basis_text.group(1):
+                # Comparison limited to the very same filing's restated pair;
+                # no implicit cross-filing split or warrant-basis equivalence.
+                basis = "ASST_AFDS_EXCLUDES_TRADITIONAL_WARRANTS:" + digest
+                for state in states:
+                    out["asset_history"].append(dict(**meta(state["effective_at_ms"], basis),
+                        btc_holdings=state["btc_holdings"], diluted_shares=state["diluted_shares"]))
+                cash = re.search(r"Cash and cash equivalents \(in thousands\) \$ ([\d,]+) \$ ([\d,]+)", text)
+                if cash:
+                    for state, value in zip(states, cash.groups()):
+                        burdens[asset].append(cash_row(state["effective_at_ms"], basis,
+                            usd_cash_usd=_scale(value) * 1000))
+                preferred = re.search(r"SATA Stock ([\d,]+) ([\d,]+) ([\d,]+)", text)
+                if preferred:
+                    out["source_binding"]["observations"].append(dict(
+                        source_ref=ref, claim="PREFERRED_SHARES_NOT_LIQUIDATION_VALUE",
+                        previous_shares=_scale(preferred.group(1)), current_shares=_scale(preferred.group(2)),
+                        previous_effective_date=states[0]["effective_at_ms"], current_effective_date=states[1]["effective_at_ms"],
+                        disclosure_time=disclosed, retrieval_time=retrieved,
+                        limitation="LIQUIDATION_TERMS_AND_ANNUAL_CARRY_COMPONENTS_NOT_BOUND"))
+                purchase = re.search(r"Strive purchased ([\d,]+) bitcoin", text)
+                if purchase and _scale(purchase.group(1)) == states[1]["btc_holdings"] - states[0]["btc_holdings"]:
+                    period_fact("btc-purchase", "FUNDING_SOURCE_UNRESOLVED", "BTC_PURCHASE",
+                        btc_change=_scale(purchase.group(1)))
+            elif states:
+                block(asset, "asset_history", "AFDS_BASIS_UNVERIFIED")
+            rate = re.search(r"rate per annum on the Company[’']s SATA Stock at ([\d.]+)%, effective for periods commencing on or after (" + DATE_RE + r")", text, re.I)
+            if rate:
+                out["source_binding"]["observations"].append(dict(
+                    source_ref=ref, claim="SATA_ANNUAL_RATE_TERMS", annual_rate_pct=float(rate.group(1)),
+                    effective_date=rate.group(2), interpretation="FORWARD_SENSITIVITY_NOT_HISTORICAL_CARRY",
+                    disclosure_time=disclosed, retrieval_time=retrieved))
+        else:
+            cash = re.search(r"As of " + DATE_RE + r", the balances of the USD Reserve and USD Cash were \$([\d.]+) billion and \$([\d.]+) billion, respectively", text, re.I)
+            if cash:
+                at = _date_ms(cash)
+                burdens[asset].append(cash_row(at, "MSTR_SEPARATELY_DISCLOSED_USD_CASH_RESERVE",
+                    usd_reserve_usd=float(cash.group(4)) * 1e9, usd_cash_usd=float(cash.group(5)) * 1e9,
+                    reserve_separate_from_cash=True,
+                    reserve_usable_for_carry=(True if re.search(
+                        r"USD Reserve.*?intended to support the payment of dividends.*?interest on its outstanding indebtedness", text) else None)))
+                allocations = re.search(r"\$([\d.]+) million in net proceeds from MSTR Stock sales were used to fund bitcoin purchases and \$([\d.]+) million in net proceeds from MSTR Stock sales were used to fund repurchases of STRC Stock", text)
+                if allocations:
+                    for key, amount, dest in (("btc-purchase", allocations.group(1), "BTC_PURCHASE"),
+                                              ("strc-repurchase-common-funded", allocations.group(2), "STRC_REPURCHASE")):
+                        period_fact(key, "MSTR_COMMON_ISSUANCE", dest, float(amount) * 1e6)
+                    out["funding_instruments"].append(dict(**meta(at, "MSTR_REPORTED_COMMON_ISSUANCE_USE"),
+                        instrument_id=accession + ":MSTR_COMMON", instrument_type="COMMON_ATM",
+                        observed_funding_use_usd=sum(float(x) for x in allocations.groups()) * 1e6))
+                    out["funding_instruments"][-1]["source_evidence"].update(
+                        observation_kind="PERIOD_FUNDING_USE_WITH_AS_OF_CAPACITY_NOT_EXECUTION_TIME", **period)
+                    if len(periods) != 1:
+                        out["funding_instruments"][-1]["observed_funding_use_usd"] = None
+                        block(asset, "funding:observed_funding_use_usd", "FUNDING_USE_PERIOD_UNRESOLVED")
+                nominal = re.search(r"MSTR Stock [\d,]+ \$ - \$ [\d.]+ (?:\(3\) )?\$ ([\d,.]+) Class A Common Stock Total", text)
+                if nominal and allocations:
+                    out["funding_instruments"][-1]["reported_remaining_nominal_capacity_usd"] = _scale(nominal.group(1)) * 1e6
+                cash_use = re.search(r"used \$([\d.]+) million of USD Cash to fund repurchases of STRC Stock", text)
+                if cash_use:
+                    period_fact("strc-repurchase-cash-funded", "USD_CASH", "STRC_REPURCHASE",
+                        float(cash_use.group(1)) * 1e6, liquidity_change_usd=-float(cash_use.group(1)) * 1e6)
+        out["source_binding"]["observations"].append(dict(source_ref=ref,
+            disclosure_time=disclosed, first_seen_time=retrieved, retrieval_time=retrieved,
+            role="DISCLOSURE_AND_CAPITAL_EVENT_AUTHORITY"))
+    for asset, out in outputs.items():
+        # Whole pairs, not arbitrary latest rows: retain the latest locally
+        # visible filing's explicit comparison while rejecting conflicting
+        # values across all retained filings at the same effective date.
+        rows = out["asset_history"]
+        overlay = {"asset_facts": {"coverage_state": "PARTIAL", "items": [dict(
+            asset_fact_id=str(i), fact_type="BTC_SHARE_PAIR", issuer_id=out["issuer_id"],
+            quality_state="VALID_REPORTED", effective_at_ms=r["effective_time"],
+            value=[r["btc_holdings"], r["diluted_shares"]], unit="BTC_AND_SHARES",
+            source_refs=[{"evidence_hash": r["source_evidence"]["raw_sha256"]}]) for i, r in enumerate(rows)]}}
+        history = select_fact_history(overlay, fact_type="BTC_SHARE_PAIR", issuer_id=out["issuer_id"])
+        if history.get("reason") == "CONFLICTING_FACTS_AT_SAME_EFFECTIVE_TIME":
+            out["asset_history"] = []
+            block(asset, "asset_history", history["reason"])
+        elif rows:
+            latest = max(rows, key=lambda r: (r["effective_time"], r["disclosure_time"]))
+            out["asset_history"] = sorted([r for r in rows if r["source_ref"] == latest["source_ref"]], key=lambda r: r["effective_time"])
+        reconciled, conflicts = _reconcile_archived_cash(burdens[asset])
+        out["source_binding"]["cash_conflicts"] = conflicts
+        for conflict in conflicts:
+            block(asset, "burden:" + conflict["claim"], conflict["code"])
+        br = sorted(reconciled, key=lambda r: (r["effective_time"], r["disclosure_time"]))
+        if br:
+            latest = br[-1]
+            pair = [r for r in br if r["basis_ref"] == latest["basis_ref"]]
+            out["burden_current"] = latest
+            older = [r for r in pair if r["effective_time"] < latest["effective_time"]]
+            if older:
+                out["burden_previous"] = older[-1]
+    for receipt_path in sorted((root / "ledger-raw").glob("retrieval-*.json")):
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8-sig"))
+        try:
+            digest = receipt.get("evidence_hash", "")
+            if not re.fullmatch(r"[a-f0-9]{64}", digest):
+                raise ValueError("LEDGER_HASH_INVALID")
+            retrieved = receipt.get("retrieved_at_ms")
+            if (receipt.get("source_url") != "https://www.strategy.com/ledger"
+                    or receipt.get("http_status") != 200
+                    or type(retrieved) is not int or retrieved > as_of_ms):
+                raise ValueError("LEDGER_SOURCE_OR_LOCAL_VISIBILITY_INVALID")
+            raw = (root / "ledger-raw" / f"ledger-{digest}.html").read_bytes()
+            if hashlib.sha256(raw).hexdigest() != digest:
+                raise ValueError("LEDGER_RAW_HASH_MISMATCH")
+            rows = parse_strategy_ledger(raw, source_url=receipt["source_url"], retrieved_at_ms=retrieved)
+            outputs["MSTR"]["source_binding"]["observations"].append({
+                "claim": "REPORTED_OBSERVATION_NOT_EFFECTIVE_TIME",
+                "ct_binding_state": "NOT_CT_BOUND", "reported_comparison": build_ledger_ratio_data(rows)})
+        except (ValueError, OSError, UnicodeError) as exc:
+            block("MSTR", "ledger", "ARCHIVE_RAW_UNAVAILABLE" if isinstance(exc, OSError) else str(exc))
+    block("MSTR", "asset_history", "ADSO_EFFECTIVE_TIME_UNRESOLVED")
+    return outputs
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
 

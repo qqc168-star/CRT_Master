@@ -153,6 +153,30 @@ def _health_row(pack: dict[str, Any], asset: str, residual_inputs: dict[str, Any
 
     current_bps = valuation.get("current_btc_per_diluted_share") if isinstance(valuation, dict) else None
     bps_change = valuation.get("btc_per_diluted_share_change_pct") if isinstance(valuation, dict) else None
+    # CT asset facts are independently usable when formal valuation is absent.
+    # Revalidate local visibility and comparison basis before projecting them.
+    from .treasury_company_ct import validate_pit_replay
+    issuer = {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}[asset]
+    def ct_visible(row):
+        return isinstance(row, dict) and validate_pit_replay(
+            row, issuer_id=issuer, replay_at=pack.get("generated_at_ms"),
+            mode="AUDIT_REPLAY")["state"] == "AVAILABLE"
+    ct_bps = (current_asset.get("btc_per_diluted_share")
+              if ct_visible(current_asset) and current_asset.get("basis_ref") else None)
+    ct_change = (per_share.get("btc_per_diluted_share_change_pct")
+        if ct_visible(current_asset) and ct_visible(previous_asset)
+        and current_asset.get("basis_ref") and current_asset["basis_ref"] == previous_asset.get("basis_ref")
+        and current_asset["source_semantic"] == previous_asset["source_semantic"]
+        and previous_asset["effective_time"] < current_asset["effective_time"] else None)
+    bps_conflict = any(_number(a) is not None and _number(b) is not None and a != b
+                      for a, b in ((current_bps, ct_bps), (bps_change, ct_change)))
+    if bps_conflict:
+        current_bps, bps_change = None, None
+    else:
+        if _number(current_bps) is None:
+            current_bps = ct_bps
+        if _number(bps_change) is None:
+            bps_change = ct_change
     current_shares = _number((current_asset or {}).get("diluted_shares"))
     previous_shares = _number((previous_asset or {}).get("diluted_shares"))
     diluted_share_change = None
@@ -175,7 +199,7 @@ def _health_row(pack: dict[str, Any], asset: str, residual_inputs: dict[str, Any
             "usable_liquidity_usd": current_burden.get("usable_liquidity_usd"),
         }
 
-    blockers: list[str] = []
+    blockers: list[str] = ["CT_VALUATION_BTC_SHARE_CONFLICT"] if bps_conflict else []
     if _number(current_bps) is None:
         blockers.append("BTC_PER_DILUTED_SHARE_UNAVAILABLE")
     if _number(bps_change) is None:
