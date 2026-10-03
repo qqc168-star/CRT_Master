@@ -1258,7 +1258,7 @@ def _compact_premarket_refs(payload: dict[str, Any]) -> None:
     changed = False
 
     # Full handoff repeated inside Commander map.
-    if b.get("live_market_handoff") == h:
+    if _canonical_hash(b.get("live_market_handoff")) == _canonical_hash(h):
         b["live_market_handoff"] = {
             "bridge_same_as": "premarket.live_market_handoff"
         }
@@ -1269,8 +1269,8 @@ def _compact_premarket_refs(payload: dict[str, Any]) -> None:
         if not isinstance(row, dict):
             continue
         sid = row.get("id")
-        if sid in h["analysis_inputs"] and (
-            row.get("machine_evidence") == h["analysis_inputs"][sid]
+        if isinstance(sid, str) and sid in h["analysis_inputs"] and (
+            _canonical_hash(row.get("machine_evidence")) == _canonical_hash(h["analysis_inputs"][sid])
         ):
             row["machine_evidence"] = {
                 "bridge_same_as": "premarket.analysis_inputs." + sid
@@ -1280,7 +1280,7 @@ def _compact_premarket_refs(payload: dict[str, Any]) -> None:
     # Each analysis input repeats all four asset snapshots.
     for row in h["analysis_inputs"].values():
         if isinstance(row, dict) and (
-            row.get("asset_market_observations") == h["asset_market"]
+            _canonical_hash(row.get("asset_market_observations")) == _canonical_hash(h["asset_market"])
         ):
             row["asset_market_observations"] = {
                 "bridge_same_as": "premarket.asset_market"
@@ -1302,7 +1302,7 @@ def _compact_premarket_refs(payload: dict[str, Any]) -> None:
             if not all(
                 isinstance(key, str)
                 and key in parsed
-                and parsed[key] == value
+                and _canonical_hash(parsed[key]) == _canonical_hash(value)
                 for key, value in families.items()
             ):
                 continue
