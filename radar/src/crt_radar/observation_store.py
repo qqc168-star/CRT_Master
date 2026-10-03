@@ -394,6 +394,71 @@ class ObservationStore:
             selected.append(candidates[0])
         return selected
 
+    def scoring_series(
+        self,
+        input_family: str,
+        metric: str,
+        *,
+        visible_at_ms: int,
+        expected_layer_id: str,
+        allowed_source_ids: Iterable[str],
+        before_as_of_ms: int | None = None,
+    ) -> list[Observation]:
+        """Project retained captures into qualified, unique observation periods.
+
+        Audit hashes/run IDs/registry snapshots identify captures, not new facts.
+        Without a metric-specific revision policy, differing visible values are
+        unresolved; equal values retain their earliest visible capture. Raw rows
+        are never rewritten. The sealed L4 OI policy owns all OI resolution.
+        """
+        if is_scoped_metric(input_family, metric):
+            selected = self.point_in_time_series(
+                input_family, metric, visible_at_ms=visible_at_ms,
+            )
+            return [
+                row for row in selected
+                if before_as_of_ms is None or row.as_of_ms < before_as_of_ms
+            ]
+        if isinstance(visible_at_ms, bool) or not isinstance(visible_at_ms, int) or visible_at_ms < 0:
+            raise ObservationRevisionConflict("EVALUATION_AT_INVALID_BLOCKED")
+        if before_as_of_ms is not None and (
+            isinstance(before_as_of_ms, bool) or not isinstance(before_as_of_ms, int)
+        ):
+            raise ObservationRevisionConflict("HISTORY_CUTOFF_INVALID_BLOCKED")
+        allowed_sources = set(allowed_source_ids)
+        rows = self.conn.execute(
+            """
+            SELECT * FROM observations
+            WHERE input_family = ? AND metric = ? AND recorded_at_ms <= ?
+            ORDER BY as_of_ms ASC, recorded_at_ms ASC, id ASC
+            """,
+            (input_family, metric, visible_at_ms),
+        ).fetchall()
+        selected: dict[int, Observation] = {}
+        for row in rows:
+            observation = self._from_row(row)
+            if before_as_of_ms is not None and observation.as_of_ms >= before_as_of_ms:
+                continue
+            context = f"{input_family}:{metric}:{observation.as_of_ms}"
+            if observation.as_of_ms <= 0 or observation.recorded_at_ms < observation.as_of_ms:
+                raise ObservationRevisionConflict(f"REVISION_CLOCK_INVALID_BLOCKED:{context}")
+            if (
+                observation.layer_id != expected_layer_id
+                or observation.source_id not in allowed_sources
+                or not observation.quality_state.startswith("VALID")
+            ):
+                raise ObservationRevisionConflict(f"HISTORY_PROVENANCE_NOT_APPROVED_BLOCKED:{context}")
+            if not math.isfinite(observation.value_num):
+                raise ObservationRevisionConflict(f"OBSERVATION_VALUE_INVALID_BLOCKED:{context}")
+            previous = selected.get(observation.as_of_ms)
+            if previous is None:
+                selected[observation.as_of_ms] = observation
+            elif previous.source_id != observation.source_id:
+                raise ObservationRevisionConflict(f"SOURCE_IDENTITY_MISMATCH_BLOCKED:{context}")
+            elif previous.value_num != observation.value_num:
+                raise ObservationRevisionConflict(f"OBSERVATION_REVISION_CONFLICT_BLOCKED:{context}")
+        return list(selected.values())
+
     def latest_at_or_before(
         self,
         input_family: str,

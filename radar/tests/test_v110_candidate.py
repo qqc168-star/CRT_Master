@@ -227,6 +227,195 @@ class V110FormalCandidateTests(unittest.TestCase):
         )
         self.assertIsNone(result["candidate_score"])
 
+    def test_general_history_retrieval_repeats_preserve_candidate_result(self):
+        with tempfile.TemporaryDirectory() as td:
+            with ObservationStore(Path(td) / "observations.sqlite3") as store:
+                layers = _complete_surface(
+                    store,
+                    self.contract,
+                    self.registry,
+                    populate_history=True,
+                )
+                before = evaluate_v110_candidate(
+                    layers,
+                    store,
+                    evaluation_at_ms=CURRENT_MS,
+                )
+                original_count = store.count()
+                repeats = []
+                for binding in self.contract["feature_bindings"]:
+                    if binding["input_family"] == "OPEN_INTEREST_NOTIONAL":
+                        continue
+                    for row in store.series(binding["input_family"], binding["metric"]):
+                        for retrieval in range(2):
+                            repeats.append(
+                                Observation(
+                                    **{
+                                        **row.__dict__,
+                                        "evidence_hash": hashlib.sha256(
+                                            f"repeat:{row.evidence_hash}:{retrieval}".encode()
+                                        ).hexdigest(),
+                                        "recorded_run_id": f"repeat-{retrieval}",
+                                        "recorded_at_ms": CURRENT_MS,
+                                    }
+                                )
+                            )
+                self.assertGreater(len(repeats), 0)
+                self.assertEqual(store.record(repeats), len(repeats))
+                self.assertEqual(store.count(), original_count + len(repeats))
+                replay = evaluate_v110_candidate(
+                    deepcopy(layers),
+                    store,
+                    evaluation_at_ms=CURRENT_MS,
+                )
+
+        self.assertEqual(replay, before)
+        self.assertEqual(replay["model_state"], "VALID_CANDIDATE_OUTPUT")
+        self.assertEqual(replay["candidate_score"], 0.0)
+        self.assertIsNone(replay["formal_score"])
+        self.assertIsNone(replay["season"])
+        self.assertIsNone(replay["capital_decision"])
+        self.assertEqual(replay["formal_model"], "NOT_APPROVED")
+        self.assertEqual(replay["production"], "NOT_APPROVED")
+        self.assertEqual(replay["action_output"], "NONE")
+        self.assertEqual(replay["external_action_authority"], "NONE")
+        self.assertFalse(replay["external_action_performed"])
+
+    def test_general_history_recorded_after_evaluation_is_insufficient(self):
+        with tempfile.TemporaryDirectory() as td:
+            with ObservationStore(Path(td) / "source.sqlite3") as source_store:
+                layers = _complete_surface(
+                    source_store,
+                    self.contract,
+                    self.registry,
+                    populate_history=True,
+                )
+                future_rows = []
+                future_feature_ids = []
+                for binding in self.contract["feature_bindings"]:
+                    rows = source_store.series(binding["input_family"], binding["metric"])
+                    if binding["input_family"] == "OPEN_INTEREST_NOTIONAL":
+                        future_rows.extend(rows)
+                        continue
+                    if rows:
+                        future_feature_ids.append(binding["feature_id"])
+                    future_rows.extend(
+                        Observation(
+                            **{
+                                **row.__dict__,
+                                "recorded_at_ms": CURRENT_MS + 1,
+                            }
+                        )
+                        for row in rows
+                    )
+            with ObservationStore(Path(td) / "future.sqlite3") as store:
+                self.assertEqual(store.record(future_rows), len(future_rows))
+                result = evaluate_v110_candidate(
+                    layers,
+                    store,
+                    evaluation_at_ms=CURRENT_MS,
+                )
+
+        self.assertGreater(len(future_feature_ids), 0)
+        self.assertEqual(result["input_state"], "COMPLETE")
+        self.assertEqual(result["input_blocked_reasons"], [])
+        self.assertEqual(result["model_state"], "BLOCKED")
+        for feature_id in future_feature_ids:
+            self.assertIn(
+                f"{feature_id}_HISTORY_INSUFFICIENT",
+                result["scoring_blocked_reasons"],
+            )
+        self.assertFalse(
+            any(reason.endswith("_HISTORY_TIMESTAMP_DUPLICATE")
+                for reason in result["scoring_blocked_reasons"])
+        )
+        self.assertIsNone(result["candidate_score"])
+        self.assertIsNone(result["formal_score"])
+        self.assertIsNone(result["season"])
+        self.assertIsNone(result["capital_decision"])
+        self.assertEqual(result["formal_model"], "NOT_APPROVED")
+        self.assertEqual(result["production"], "NOT_APPROVED")
+        self.assertEqual(result["action_output"], "NONE")
+        self.assertEqual(result["external_action_authority"], "NONE")
+        self.assertFalse(result["external_action_performed"])
+
+    def test_current_observation_after_evaluation_blocks_candidate(self):
+        with tempfile.TemporaryDirectory() as td:
+            with ObservationStore(Path(td) / "observations.sqlite3") as store:
+                layers = _complete_surface(
+                    store,
+                    self.contract,
+                    self.registry,
+                    populate_history=True,
+                )
+                layers["L2"]["metrics"]["broad_usd_20d_log_change"]["as_of_ms"] = CURRENT_MS + 1
+                result = evaluate_v110_candidate(
+                    layers,
+                    store,
+                    evaluation_at_ms=CURRENT_MS,
+                )
+
+        blocker = "L2_BROAD_USD_20D_LOG_CHANGE_AS_OF_AFTER_EVALUATION_BLOCKED"
+        self.assertEqual(result["input_state"], "BLOCKED")
+        self.assertEqual(result["model_state"], "BLOCKED")
+        self.assertIn(blocker, result["input_blocked_reasons"])
+        self.assertIn(blocker, result["scoring_blocked_reasons"])
+        self.assertIsNone(result["candidate_score"])
+        self.assertIsNone(result["threshold_bucket"])
+        self.assertIsNone(result["formal_score"])
+        self.assertIsNone(result["season"])
+        self.assertIsNone(result["capital_decision"])
+        self.assertEqual(result["formal_model"], "NOT_APPROVED")
+        self.assertEqual(result["production"], "NOT_APPROVED")
+        self.assertEqual(result["action_output"], "NONE")
+        self.assertEqual(result["external_action_authority"], "NONE")
+        self.assertFalse(result["external_action_performed"])
+
+    def test_general_history_changed_value_blocks_without_revision_authority(self):
+        with tempfile.TemporaryDirectory() as td:
+            with ObservationStore(Path(td) / "observations.sqlite3") as store:
+                layers = _complete_surface(
+                    store,
+                    self.contract,
+                    self.registry,
+                    populate_history=True,
+                )
+                base = store.series("RATES_CONTEXT", "broad_usd_20d_log_change")[0]
+                original_count = store.count()
+                conflict = Observation(
+                    **{
+                        **base.__dict__,
+                        "value_num": base.value_num + 0.25,
+                        "evidence_hash": hashlib.sha256(b"general visible revision").hexdigest(),
+                        "recorded_run_id": "general-visible-revision",
+                        "recorded_at_ms": CURRENT_MS,
+                    }
+                )
+                self.assertEqual(store.record([conflict]), 1)
+                self.assertEqual(store.count(), original_count + 1)
+                result = evaluate_v110_candidate(
+                    layers,
+                    store,
+                    evaluation_at_ms=CURRENT_MS,
+                )
+
+        blocker = "L2_BROAD_USD_20D_LOG_CHANGE_OBSERVATION_REVISION_CONFLICT_BLOCKED"
+        self.assertEqual(result["input_state"], "BLOCKED")
+        self.assertEqual(result["model_state"], "BLOCKED")
+        self.assertIn(blocker, result["input_blocked_reasons"])
+        self.assertIn(blocker, result["scoring_blocked_reasons"])
+        self.assertIsNone(result["candidate_score"])
+        self.assertIsNone(result["threshold_bucket"])
+        self.assertIsNone(result["formal_score"])
+        self.assertIsNone(result["season"])
+        self.assertIsNone(result["capital_decision"])
+        self.assertEqual(result["season_router"]["state"], "BLOCKED")
+        self.assertEqual(result["formal_model"], "NOT_APPROVED")
+        self.assertEqual(result["production"], "NOT_APPROVED")
+        self.assertEqual(result["action_output"], "NONE")
+        self.assertEqual(result["external_action_authority"], "NONE")
+        self.assertFalse(result["external_action_performed"])
+
     def test_l4_oi_history_uses_latest_revision_visible_at_evaluation(self):
         with tempfile.TemporaryDirectory() as td:
             with ObservationStore(Path(td) / "observations.sqlite3") as store:

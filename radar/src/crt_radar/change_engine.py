@@ -9,7 +9,7 @@ from .observation_store import (
     ObservationRevisionConflict,
     ObservationStore,
 )
-from .oi_revision_policy import OiRevisionPolicyError, is_scoped_metric
+from .oi_revision_policy import OiRevisionPolicyError
 
 
 HORIZONS_MS = {
@@ -116,16 +116,14 @@ def compute_changes(store: ObservationStore, current: list[Observation]) -> dict
             "current_value": observation.value_num,
             "horizons": {},
         }
-        scoped = is_scoped_metric(observation.input_family, observation.metric)
         try:
-            series = (
-                store.point_in_time_series(
-                    observation.input_family,
-                    observation.metric,
-                    visible_at_ms=observation.recorded_at_ms,
-                )
-                if scoped
-                else store.series(observation.input_family, observation.metric)
+            series = store.scoring_series(
+                observation.input_family,
+                observation.metric,
+                visible_at_ms=observation.recorded_at_ms,
+                expected_layer_id=observation.layer_id,
+                allowed_source_ids=[observation.source_id],
+                before_as_of_ms=observation.as_of_ms + 1,
             )
         except ObservationRevisionConflict as exc:
             blocked_state = str(exc).split(":", 1)[0]

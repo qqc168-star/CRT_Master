@@ -19,7 +19,6 @@ from .oi_revision_policy import (
     EXPECTED_POLICY_CANONICAL_SHA256,
     OiRevisionPolicyError,
     POLICY_ID,
-    is_scoped_metric,
 )
 
 
@@ -203,6 +202,8 @@ def _metric_observation(
     except (TypeError, ValueError):
         blockers.append(f"{feature_id}_AS_OF_INVALID")
         as_of_ms = 0
+    if as_of_ms > evaluation_at_ms:
+        blockers.append(f"{feature_id}_AS_OF_AFTER_EVALUATION_BLOCKED")
     try:
         value = _finite(item.get("value"), f"{feature_id}_VALUE_INVALID")
     except V110CandidateError as exc:
@@ -216,14 +217,13 @@ def _metric_observation(
         history: list[dict[str, Any]] = []
         history_blocked = False
         try:
-            rows = (
-                store.point_in_time_series(
-                    binding["input_family"],
-                    binding["metric"],
-                    visible_at_ms=evaluation_at_ms,
-                )
-                if is_scoped_metric(binding["input_family"], binding["metric"])
-                else store.series(binding["input_family"], binding["metric"])
+            rows = store.scoring_series(
+                binding["input_family"],
+                binding["metric"],
+                visible_at_ms=evaluation_at_ms,
+                expected_layer_id=f"AS-{binding['layer_id']}",
+                allowed_source_ids=binding["allowed_source_ids"],
+                before_as_of_ms=as_of_ms,
             )
         except ObservationRevisionConflict as exc:
             blockers.append(f"{feature_id}_{str(exc).split(':', 1)[0]}")
