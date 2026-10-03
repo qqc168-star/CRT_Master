@@ -760,6 +760,42 @@ def build_live_issuer_ratio_proof(
 
 
 
+
+def _reconcile_archived_cash(rows: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Compare economic claims across documents, not document-specific bases.
+
+    No revision authority is inferred. Only the conflicting component is masked;
+    source values/references remain available in the conflict diagnostic.
+    """
+    from copy import deepcopy
+    result = deepcopy(rows)
+    groups = {}
+    for row in result:
+        for field in ("usd_cash_usd", "usd_reserve_usd"):
+            value = row.get(field)
+            if value is None:
+                continue
+            scope = row.get("source_evidence", {}).get("cash_claim_scopes", {}).get(field)
+            if not isinstance(scope, dict) or not all(scope.get(k) for k in ("definition", "accounting_scope", "currency")):
+                raise ValueError("Archived cash requires explicit economic scope")
+            key = (row["issuer_id"], row["effective_time"], field,
+                   scope["definition"], scope["accounting_scope"], scope["currency"])
+            groups.setdefault(key, []).append(row)
+    conflicts = []
+    for key, records in groups.items():
+        field = key[2]
+        if len({r[field] for r in records}) <= 1:
+            continue
+        conflicts.append(dict(claim=field, code="CONFLICTING_CASH_AT_SAME_EFFECTIVE_TIME",
+            issuer_id=key[0], effective_time=key[1], definition=key[3],
+            accounting_scope=key[4], currency=key[5],
+            observations=[dict(value=r[field], source_ref=r["source_ref"], basis_ref=r["basis_ref"])
+                          for r in records]))
+        for row in records:
+            row[field] = None
+            row["source_evidence"].setdefault("cash_conflict_fields", []).append(field)
+    return result, conflicts
+
 def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> dict:
     """Read retained official bytes only; normalize into the existing CT contract.
 
@@ -831,14 +867,40 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                     effective_precision="DATE", effective_date=datetime.fromtimestamp(at / 1000, timezone.utc).date().isoformat(),
                     effective_time_rule="EXISTING_SEC_DATE_UTC_CONVERSION_NOT_INTRADAY_TIME",
                     first_seen_rule="FIRST_PROVEN_LOCAL_ARCHIVE_RETRIEVAL"))
-        def event(at, key, source, destination, amount=None, **effects):
-            row = dict(**meta(at, "SEC_DISCLOSED_CAPITAL_FLOW"), event_id=accession + ":" + key,
+        date_pattern = re.sub(r"\(\?P<\w+>", "(?:", DATE_RE)
+        periods = set()
+        for match in re.finditer(
+                r"during (?:the period (?:from |between )|period )(?P<start>" + date_pattern
+                + r") (?:to|through|and) (?P<end>" + date_pattern + r")", text, re.I):
+            start = _date_ms(re.fullmatch(DATE_RE, match["start"], re.I))
+            end = _date_ms(re.fullmatch(DATE_RE, match["end"], re.I))
+            if start <= end <= disclosed:
+                periods.add((datetime.fromtimestamp(start / 1000, timezone.utc).date().isoformat(),
+                             datetime.fromtimestamp(end / 1000, timezone.utc).date().isoformat()))
+        period = (dict(period_start_date=next(iter(periods))[0], period_end_date=next(iter(periods))[1])
+                  if len(periods) == 1 else dict(period_candidates=sorted(periods)))
+        def period_fact(key, source, destination, amount=None, **effects):
+            # CT's existing action contract requires an execution effective_time.
+            # A period endpoint is not that clock. Preserve the disclosed facts
+            # outside action calculations, including the management-action lane.
+            row = dict(issuer_id=ISSUERS[asset], source_ref=ref,
+                claim="PERIOD_CAPITAL_FLOW", observation_id=accession + ":" + key,
                 source=source, destination=destination, amount_usd=amount,
-                active_for_calculation=True, consequence_basis_ref=ref, **effects)
-            out["capital_conversion_events"].append(row)
-            out["management_events"].append(dict(**meta(at, "SEC_DISCLOSED_MANAGEMENT_ACTION"),
-                event_id=row["event_id"], action_type=destination, action_ref=ref,
-                active_for_calculation=True))
+                disclosure_time=disclosed, first_seen_time=retrieved, retrieval_time=retrieved,
+                raw_sha256=digest, period_precision="DATE", **period,
+                execution_time=None, ct_binding_state="BLOCKED", active_for_calculation=False,
+                reason="PERIOD_AGGREGATE_EXECUTION_TIME_UNRESOLVED", **effects)
+            out["source_binding"]["observations"].append(row)
+            for section in ("capital_conversion", "management_evidence"):
+                block(asset, section + ":" + row["observation_id"], row["reason"])
+        def cash_row(at, basis, **values):
+            row = dict(**meta(at, basis), **values)
+            row["source_evidence"]["cash_claim_scopes"] = {
+                field: dict(definition=("CASH_AND_CASH_EQUIVALENTS" if asset == "ASST" else
+                                       "USD_CASH" if field == "usd_cash_usd" else "USD_RESERVE"),
+                            accounting_scope="ISSUER_REPORTED_COMPANY_SCOPE", currency="USD")
+                for field in ("usd_cash_usd", "usd_reserve_usd") if field in values}
+            return row
         if asset == "ASST":
             try:
                 states = _strive_states(raw, accepted_at_ms=disclosed, source_url=expected)
@@ -858,7 +920,7 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                 cash = re.search(r"Cash and cash equivalents \(in thousands\) \$ ([\d,]+) \$ ([\d,]+)", text)
                 if cash:
                     for state, value in zip(states, cash.groups()):
-                        burdens[asset].append(dict(**meta(state["effective_at_ms"], basis),
+                        burdens[asset].append(cash_row(state["effective_at_ms"], basis,
                             usd_cash_usd=_scale(value) * 1000))
                 preferred = re.search(r"SATA Stock ([\d,]+) ([\d,]+) ([\d,]+)", text)
                 if preferred:
@@ -870,7 +932,7 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                         limitation="LIQUIDATION_TERMS_AND_ANNUAL_CARRY_COMPONENTS_NOT_BOUND"))
                 purchase = re.search(r"Strive purchased ([\d,]+) bitcoin", text)
                 if purchase and _scale(purchase.group(1)) == states[1]["btc_holdings"] - states[0]["btc_holdings"]:
-                    event(states[1]["effective_at_ms"], "btc-purchase", "FUNDING_SOURCE_UNRESOLVED", "BTC_PURCHASE",
+                    period_fact("btc-purchase", "FUNDING_SOURCE_UNRESOLVED", "BTC_PURCHASE",
                         btc_change=_scale(purchase.group(1)))
             elif states:
                 block(asset, "asset_history", "AFDS_BASIS_UNVERIFIED")
@@ -884,7 +946,7 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
             cash = re.search(r"As of " + DATE_RE + r", the balances of the USD Reserve and USD Cash were \$([\d.]+) billion and \$([\d.]+) billion, respectively", text, re.I)
             if cash:
                 at = _date_ms(cash)
-                burdens[asset].append(dict(**meta(at, "MSTR_SEPARATELY_DISCLOSED_USD_CASH_RESERVE"),
+                burdens[asset].append(cash_row(at, "MSTR_SEPARATELY_DISCLOSED_USD_CASH_RESERVE",
                     usd_reserve_usd=float(cash.group(4)) * 1e9, usd_cash_usd=float(cash.group(5)) * 1e9,
                     reserve_separate_from_cash=True,
                     reserve_usable_for_carry=(True if re.search(
@@ -893,16 +955,21 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                 if allocations:
                     for key, amount, dest in (("btc-purchase", allocations.group(1), "BTC_PURCHASE"),
                                               ("strc-repurchase-common-funded", allocations.group(2), "STRC_REPURCHASE")):
-                        event(at, key, "MSTR_COMMON_ISSUANCE", dest, float(amount) * 1e6)
+                        period_fact(key, "MSTR_COMMON_ISSUANCE", dest, float(amount) * 1e6)
                     out["funding_instruments"].append(dict(**meta(at, "MSTR_REPORTED_COMMON_ISSUANCE_USE"),
                         instrument_id=accession + ":MSTR_COMMON", instrument_type="COMMON_ATM",
                         observed_funding_use_usd=sum(float(x) for x in allocations.groups()) * 1e6))
+                    out["funding_instruments"][-1]["source_evidence"].update(
+                        observation_kind="PERIOD_FUNDING_USE_WITH_AS_OF_CAPACITY_NOT_EXECUTION_TIME", **period)
+                    if len(periods) != 1:
+                        out["funding_instruments"][-1]["observed_funding_use_usd"] = None
+                        block(asset, "funding:observed_funding_use_usd", "FUNDING_USE_PERIOD_UNRESOLVED")
                 nominal = re.search(r"MSTR Stock [\d,]+ \$ - \$ [\d.]+ (?:\(3\) )?\$ ([\d,.]+) Class A Common Stock Total", text)
                 if nominal and allocations:
                     out["funding_instruments"][-1]["reported_remaining_nominal_capacity_usd"] = _scale(nominal.group(1)) * 1e6
                 cash_use = re.search(r"used \$([\d.]+) million of USD Cash to fund repurchases of STRC Stock", text)
                 if cash_use:
-                    event(at, "strc-repurchase-cash-funded", "USD_CASH", "STRC_REPURCHASE",
+                    period_fact("strc-repurchase-cash-funded", "USD_CASH", "STRC_REPURCHASE",
                         float(cash_use.group(1)) * 1e6, liquidity_change_usd=-float(cash_use.group(1)) * 1e6)
         out["source_binding"]["observations"].append(dict(source_ref=ref,
             disclosure_time=disclosed, first_seen_time=retrieved, retrieval_time=retrieved,
@@ -924,18 +991,18 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
         elif rows:
             latest = max(rows, key=lambda r: (r["effective_time"], r["disclosure_time"]))
             out["asset_history"] = sorted([r for r in rows if r["source_ref"] == latest["source_ref"]], key=lambda r: r["effective_time"])
-        br = sorted(burdens[asset], key=lambda r: (r["effective_time"], r["disclosure_time"]))
+        reconciled, conflicts = _reconcile_archived_cash(burdens[asset])
+        out["source_binding"]["cash_conflicts"] = conflicts
+        for conflict in conflicts:
+            block(asset, "burden:" + conflict["claim"], conflict["code"])
+        br = sorted(reconciled, key=lambda r: (r["effective_time"], r["disclosure_time"]))
         if br:
             latest = br[-1]
             pair = [r for r in br if r["basis_ref"] == latest["basis_ref"]]
-            # MSTR same-date contradictory cash values are never latest-wins.
-            if any(len({(r.get("usd_cash_usd"), r.get("usd_reserve_usd")) for r in pair if r["effective_time"] == t}) > 1 for t in {r["effective_time"] for r in pair}):
-                block(asset, "burden", "CONFLICTING_BURDEN_AT_SAME_EFFECTIVE_TIME")
-            else:
-                out["burden_current"] = latest
-                older = [r for r in pair if r["effective_time"] < latest["effective_time"]]
-                if older:
-                    out["burden_previous"] = older[-1]
+            out["burden_current"] = latest
+            older = [r for r in pair if r["effective_time"] < latest["effective_time"]]
+            if older:
+                out["burden_previous"] = older[-1]
     for receipt_path in sorted((root / "ledger-raw").glob("retrieval-*.json")):
         receipt = json.loads(receipt_path.read_text(encoding="utf-8-sig"))
         try:

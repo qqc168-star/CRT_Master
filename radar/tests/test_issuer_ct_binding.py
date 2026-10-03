@@ -20,9 +20,10 @@ Bitcoin held 1,000 1,100 Assumed Fully Diluted Shares (4) 10,000 10,500
 Assumed Fully Diluted Shares Outstanding represents Effective Common Shares Outstanding
 plus shares underlying all potentially dilutive securities, including options and unvested RSUs.
 Shares underlying Traditional Warrants are excluded from this figure. (5)
-Strive purchased 100 bitcoin
+During the period from September 21, 2026 through September 25, 2026, Strive purchased 100 bitcoin
 """
 MSTR = """0001050446 TEST ONLY USD Reserve is intended to support the payment of dividends and interest on its outstanding indebtedness. As of September 27, 2026, the balances of the USD Reserve and USD Cash were $1.00 billion and $0.20 billion, respectively.
+During Period September 21, 2026 to September 27, 2026
 $10.0 million in net proceeds from MSTR Stock sales were used to fund bitcoin purchases and $5.0 million in net proceeds from MSTR Stock sales were used to fund repurchases of STRC Stock
 used $2.0 million of USD Cash to fund repurchases of STRC Stock
 """
@@ -95,7 +96,7 @@ class IssuerCtBindingTests(unittest.TestCase):
         self.items[0]['raw_sha256'] = '0' * 64
         data = self.inputs()
         self.assertEqual(build_treasury_company_ct(**data['ASST'])['organs']['per_share_asset_engine']['state'], 'BLOCKED')
-        self.assertEqual(len(data['MSTR']['capital_conversion_events']), 3)
+        self.assertEqual(len(self.periods(data['MSTR'])), 3)
 
     def test_cross_company_url_cannot_supply_facts(self):
         self.items[0]['source_url'] = self.items[1]['source_url']
@@ -127,7 +128,7 @@ class IssuerCtBindingTests(unittest.TestCase):
         ct = self.ct('MSTR')
         self.assertEqual(ct['organs']['per_share_asset_engine']['state'], 'BLOCKED')
         self.assertIn('ADSO_EFFECTIVE_TIME_UNRESOLVED', str(ct['blockers']))
-        self.assertEqual(ct['organs']['capital_conversion']['state'], 'PARTIAL')
+        self.assertEqual(ct['organs']['capital_conversion']['state'], 'BLOCKED')
 
     def test_no_missing_burden_components_filled_with_zero(self):
         r = self.ct()['organs']['capital_burden_resilience']['current']
@@ -148,18 +149,18 @@ class IssuerCtBindingTests(unittest.TestCase):
         self.assertIsNone(r['annual_cost_rate_pct'])
 
     def test_capital_routes_do_not_invent_consequences(self):
-        events = self.ct('MSTR')['organs']['capital_conversion']['events']
+        events = self.periods(self.inputs()['MSTR'])
         self.assertEqual(len(events), 3)
         self.assertEqual(sum(e['amount_usd'] for e in events), 17000000)
-        self.assertTrue(all(e['senior_claim_change_usd'] is None for e in events))
-        self.assertTrue(all(e['annual_carry_change_usd'] is None for e in events))
-        self.assertEqual(sum(e['liquidity_change_usd'] or 0 for e in events), -2000000)
+        self.assertTrue(all(e.get('senior_claim_change_usd') is None for e in events))
+        self.assertTrue(all(e.get('annual_carry_change_usd') is None for e in events))
+        self.assertEqual(sum(e.get('liquidity_change_usd') or 0 for e in events), -2000000)
 
     def test_purchase_does_not_attribute_share_change_or_rounded_cost(self):
-        e = self.ct()['organs']['capital_conversion']['events'][0]
+        e = self.periods(self.inputs()['ASST'])[0]
         self.assertEqual(e['btc_change'], 100)
         self.assertIsNone(e['amount_usd'])
-        self.assertIsNone(e['diluted_share_change'])
+        self.assertIsNone(e.get('diluted_share_change'))
         self.assertEqual(e['source'], 'FUNDING_SOURCE_UNRESOLVED')
 
     def test_future_sata_rate_not_backfilled_as_september_carry(self):
@@ -170,7 +171,7 @@ class IssuerCtBindingTests(unittest.TestCase):
 
     def test_management_action_has_no_quality_score(self):
         ct = self.ct('MSTR')
-        self.assertEqual(len(ct['organs']['management_evidence']['events']), 3)
+        self.assertEqual(len(ct['organs']['management_evidence']['events']), 0)
         self.assertEqual(ct['action_output'], 'NONE')
         self.assertEqual(ct['external_action_authority'], 'NONE')
         self.assertNotIn('score', ct['organs']['management_evidence'])
@@ -183,7 +184,8 @@ class IssuerCtBindingTests(unittest.TestCase):
         health = pack['common_equity_health']['assets']['ASST']
         self.assertGreater(health['btc_per_diluted_share_change_pct'], 0)
         self.assertTrue(any(f['fact_type'] == 'TREASURY_COMPANY_CT' for f in pack['asset_facts']['items']))
-        self.assertGreater(len(pack['decision_relevant_events']['items']), 0)
+        self.assertFalse(any(e.get('ct_section') in ('capital_conversion', 'management_evidence') for e in pack['decision_relevant_events']['items']))
+        self.assertTrue(any(f['fact_type'] == 'ISSUER_CT_SOURCE_BINDING' for f in pack['asset_facts']['items']))
         projected = _bridge_market_context(pack)
         self.assertEqual(projected['common_equity_health']['assets']['ASST']['btc_per_diluted_share_change_pct'], health['btc_per_diluted_share_change_pct'])
         dim = health['company_health']['dimensions']['per_share_asset_engine']
@@ -253,3 +255,109 @@ class IssuerCtBindingTests(unittest.TestCase):
         ct = self.ct('MSTR')
         self.assertEqual(ct['organs']['capital_burden_resilience']['current']['usable_liquidity_usd'], 200000000)
         self.assertIn('RESERVE_USABILITY_OR_NONOVERLAP_UNVERIFIED', str(ct['blockers']))
+
+    @staticmethod
+    def periods(data):
+        return [o for o in data['source_binding']['observations'] if o.get('claim') == 'PERIOD_CAPITAL_FLOW']
+
+    def test_asst_cross_document_cash_conflict_different_basis(self):
+        # Reproduces the reviewed failure: same date/scope, different document
+        # hashes (and therefore different basis_ref), conflicting cash values.
+        later = self.add('ASST', ASST.replace('$ 210,000', '$ 211,000'), 11)
+        later['accepted'] = '2026-09-29T12:00:00Z'
+        d = self.inputs()['ASST']
+        self.assertIsNone(d['burden_current']['usd_cash_usd'])
+        conflict = d['source_binding']['cash_conflicts'][0]
+        self.assertEqual({o['value'] for o in conflict['observations']}, {210000000, 211000000})
+        self.assertEqual(len({o['basis_ref'] for o in conflict['observations']}), 2)
+        self.assertGreater(build_treasury_company_ct(**d)['organs']['per_share_asset_engine']['btc_per_diluted_share_change_pct'], 0)
+
+    def test_mstr_cross_document_cash_conflict(self):
+        self.add('MSTR', MSTR.replace('$0.20 billion', '$0.21 billion'), 12)
+        d = self.inputs()['MSTR']
+        self.assertIsNone(d['burden_current']['usd_cash_usd'])
+        self.assertEqual(d['burden_current']['usd_reserve_usd'], 1e9)
+        self.assertIn('CONFLICTING_CASH_AT_SAME_EFFECTIVE_TIME', str(d['source_binding']['blockers']))
+
+    def test_cash_conflict_blocks_downstream_liquidity_only(self):
+        self.add('ASST', ASST.replace('$ 210,000', '$ 211,000'), 13)
+        with patch('crt_radar.daily_evidence_runner.run_source_gate', return_value=gate(0)):
+            pack = run_daily_evidence(None, observation_db=self.root/'conflict.sqlite3',
+                issuer_ct_archive=self.root, now_ms=NOW, generated_at_ms=NOW)
+        health = _bridge_market_context(pack)['common_equity_health']['assets']['ASST']
+        self.assertIsNone(health['liquidity_change_usd'])
+        self.assertGreater(health['btc_per_diluted_share_change_pct'], 0)
+
+    def test_economic_scope_not_document_basis_controls_cash_conflict(self):
+        from copy import deepcopy
+        from crt_radar.issuer_ratio_market_health_source import _reconcile_archived_cash
+        row = self.inputs()['ASST']['burden_current']
+        for field, replacement in [('definition', 'RESTRICTED_CASH'), ('accounting_scope', 'SUBSIDIARY_ONLY'), ('currency', 'EUR')]:
+            with self.subTest(field=field):
+                other = deepcopy(row)
+                other['usd_cash_usd'] += 1
+                other['source_evidence']['cash_claim_scopes']['usd_cash_usd'][field] = replacement
+                _, conflicts = _reconcile_archived_cash([row, other])
+                self.assertEqual(conflicts, [])
+        other = deepcopy(row)
+        other['basis_ref'] = 'ANOTHER_DOCUMENT'
+        _, conflicts = _reconcile_archived_cash([row, other])
+        self.assertEqual(conflicts, [])
+        other['usd_cash_usd'] += 1
+        _, conflicts = _reconcile_archived_cash([row, other])
+        self.assertEqual(len(conflicts), 1)
+
+    def test_asst_prior_date_conflict_cannot_hide_behind_latest_pair(self):
+        self.add('ASST', ASST.replace('$ 200,000', '$ 201,000'), 14)
+        d = self.inputs()['ASST']
+        self.assertIsNone(d['burden_previous']['usd_cash_usd'])
+        self.assertEqual(d['burden_current']['usd_cash_usd'], 210000000)
+
+    def test_period_end_is_never_action_effective_time(self):
+        inputs = self.inputs()
+        for asset, end in [('MSTR', '2026-09-27'), ('ASST', '2026-09-25')]:
+            ct = build_treasury_company_ct(**inputs[asset])
+            self.assertEqual(ct['organs']['capital_conversion']['events'], [])
+            self.assertEqual(ct['organs']['management_evidence']['events'], [])
+            for row in self.periods(inputs[asset]):
+                self.assertEqual(row['period_start_date'], '2026-09-21')
+                self.assertEqual(row['period_end_date'], end)
+                self.assertNotIn('effective_time', row)
+                self.assertIsNone(row['execution_time'])
+                self.assertFalse(row['active_for_calculation'])
+
+    def test_missing_period_keeps_amount_without_inventing_endpoint(self):
+        self.items = []
+        self.add('MSTR', MSTR.replace('During Period September 21, 2026 to September 27, 2026', ''), 15)
+        rows = self.periods(self.inputs()['MSTR'])
+        self.assertEqual(sum(r['amount_usd'] for r in rows), 17000000)
+        self.assertTrue(all('period_end_date' not in r and r['period_candidates'] == [] for r in rows))
+        self.assertEqual(self.ct('MSTR')['organs']['capital_conversion']['events'], [])
+
+    def test_asst_stock_and_future_dividend_are_not_funding_proceeds(self):
+        self.add('ASST', '0001920406 rate per annum on the Company’s SATA Stock at 13.00%, effective for periods commencing on or after October 1, 2026', 16)
+        d = self.inputs()['ASST']
+        self.assertEqual(d['funding_instruments'], [])
+        self.assertEqual(build_treasury_company_ct(**d)['organs']['funding_engine']['state'], 'BLOCKED')
+
+    def test_reserve_conflict_preserves_cash_but_blocks_liquidity_total(self):
+        self.add('MSTR', MSTR.replace('$1.00 billion', '$1.01 billion'), 17)
+        ct = self.ct('MSTR')
+        row = ct['organs']['capital_burden_resilience']['current']
+        self.assertEqual(row['usd_cash_usd'], 200000000)
+        self.assertIsNone(row['usd_reserve_usd'])
+        self.assertIsNone(row['usable_liquidity_usd'])
+        self.assertIn('CASH_COMPONENT_CONFLICT', str(ct['blockers']))
+
+    def test_unknown_funding_period_cannot_take_cash_snapshot_date(self):
+        self.items = []
+        self.add('MSTR', MSTR.replace('During Period September 21, 2026 to September 27, 2026', ''), 18)
+        ct = self.ct('MSTR')
+        self.assertIsNone(ct['organs']['funding_engine']['instruments'][0]['observed_funding_use_usd'])
+        self.assertIn('FUNDING_USE_PERIOD_UNRESOLVED', str(ct['blockers']))
+
+    def test_optional_provenance_does_not_break_existing_burden_input(self):
+        from test_treasury_company_ct import kwargs
+        data = kwargs()
+        data['burden_current']['source_evidence'] = None
+        self.assertIsNotNone(build_treasury_company_ct(**data)['organs']['capital_burden_resilience']['current'])

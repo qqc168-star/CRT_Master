@@ -341,6 +341,11 @@ def _burden_snapshot(raw: Any, out: dict, claim: str, issuer: str, as_of: int) -
             row["coverage_basis"] = "USD_CASH_PLUS_SEPARATE_USABLE_RESERVE"
         elif usable is not False:
             _block(out, claim + ".reserve", "RESERVE_USABILITY_OR_NONOVERLAP_UNVERIFIED")
+    if row.get("source_evidence", {}).get("cash_conflict_fields"):
+        # A conflicting component cannot silently disappear from liquidity and
+        # turn a cash-only fallback into a comparable total.
+        row["usable_liquidity_usd"] = None
+        _block(out, claim + ".liquidity", "CASH_COMPONENT_CONFLICT")
     row["carry_coverage_years"] = _calc(out, claim + ".carry_coverage_years",
         [row["usable_liquidity_usd"], row["annual_carry_usd"]], lambda a, b: a / b)
     return row

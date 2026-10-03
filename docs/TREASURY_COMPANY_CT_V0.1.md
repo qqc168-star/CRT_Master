@@ -129,7 +129,7 @@ observations, without assuming equivalence across splits or denominator changes.
 Conflicting same-date values remain blocked. MSTR Ledger reported observations
 remain NOT_CT_BOUND / ADSO_EFFECTIVE_TIME_UNRESOLVED, with their original hashes.
 They remain available through the existing `--issuer-ratio-proof` observation
-lane; SEC funding uses, cash/reserve and capital actions independently feed CT.
+lane; SEC period funding uses and cash/reserve snapshots independently feed CT.
 SATA forward dividend terms never populate September historical carry. Missing
 principal, liquidation terms, costs or usable funding capacity remain missing.
 Nominal remaining capacity is distinct from usable capacity. Capital routes are
@@ -141,3 +141,20 @@ valuation inputs are absent, after local-visibility and basis checks. Conflictin
 CT/valuation values block that claim. Formal mNAV, action authority and Bridge
 limits are unchanged. Source binding diagnostics remain in Evidence Pack facts
 and claim-scoped blockers; no second fact database is created.
+
+
+PR #126 final correction: cash conflicts are compared across documents by issuer,
+effective date, currency, cash definition and accounting scope, independently of
+`basis_ref`. Conflicting components and dependent liquidity totals are blocked;
+other verified components and BTC/share remain available. Conflicting originals
+and references remain in source-binding diagnostics; no revision is inferred.
+
+The retained MSTR/ASST capital-flow announcements describe period aggregates.
+Their amounts, quantities and explicit start/end dates remain in
+`ISSUER_CT_SOURCE_BINDING` facts with `execution_time=null` and
+`PERIOD_AGGREGATE_EXECUTION_TIME_UNRESOLVED`. They do not enter CT conversion or
+management action calculations. Period end is never execution effective time.
+Funding-use observations retain period scope; cash/capacity snapshots retain
+as-of semantics. Missing/ambiguous periods block the funding-use claim.
+MSTR ADSO effective time remains unproven; ASST stock-count changes and future
+SATA dividend terms alone do not establish funding proceeds or usable capacity.
