@@ -17,6 +17,7 @@ North Star: **Automation prepares evidence. GPT creates judgment. Human commits 
 1. Treat current `main` as the only engineering truth.
 2. Read `CRT_CORE_CONTRACT.md`.
 3. Read `CRT_EVIDENCE_PACK_CONTRACT.md`.
+   - Before modifying bridge capacity, source copying, evidence projections or GPT transport, read `docs/CRT_BRIDGE_CAPACITY_AND_DEDUP_DOCTRINE_V0.1.md`.
 4. Read `CRT_GPT_ANALYSIS_DOCTRINE_V0.1.md` for the GPT（分析主廚） reasoning sequence（推理順序）, evidence-independence rules（證據獨立性規則）, regime synthesis（市場狀態整合）, asset-role translation（資產角色轉譯）, portfolio interaction（投資組合互動）, and capital-judgment requirements（資本判斷要求）.
 5. Read `CRT_SEASON_THREE_ARMY_COMMANDER_DEPLOYMENT_DOCTRINE_V0.1.md` for the non-formal separation（非正式分工） between Season（季節） strategic risk posture（戰略風險姿態）, Bull Foundation（牛市地基） transition credibility（轉換可信度）, and Three-Army Commander Map（三軍統帥地圖） tactical deployment（戰術部署）.
 6. Read `radar/RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md` for preserved formal locks.

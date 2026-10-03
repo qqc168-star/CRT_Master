@@ -1230,6 +1230,193 @@ def _bridge_size(value: Any) -> int:
                           separators=(",", ":")).encode("utf-8"))
 
 
+
+def _compact_premarket_refs(payload: dict[str, Any]) -> None:
+    """Share exact duplicates, preserving all independent analysis."""
+    market = payload.get("market_context", {})
+    pre = market.get("premarket_market_data")
+    if not isinstance(pre, dict):
+        return
+
+    handoff = pre.get("live_market_handoff")
+    battle = pre.get("battle_map")
+    if not isinstance(handoff, dict) or not isinstance(battle, dict):
+        return
+
+    assets = handoff.get("asset_market")
+    inputs = handoff.get("analysis_inputs")
+    sections = battle.get("analysis_sections")
+    if not isinstance(assets, dict) or not isinstance(inputs, dict):
+        return
+    if not isinstance(sections, list):
+        return
+
+    original = deepcopy(pre)
+    candidate = deepcopy(pre)
+    h = candidate["live_market_handoff"]
+    b = candidate["battle_map"]
+    changed = False
+
+    # Full handoff repeated inside Commander map.
+    if b.get("live_market_handoff") == h:
+        b["live_market_handoff"] = {
+            "bridge_same_as": "premarket.live_market_handoff"
+        }
+        changed = True
+
+    # Commander sections repeat the analysis inputs.
+    for row in b["analysis_sections"]:
+        if not isinstance(row, dict):
+            continue
+        sid = row.get("id")
+        if sid in h["analysis_inputs"] and (
+            row.get("machine_evidence") == h["analysis_inputs"][sid]
+        ):
+            row["machine_evidence"] = {
+                "bridge_same_as": "premarket.analysis_inputs." + sid
+            }
+            changed = True
+
+    # Each analysis input repeats all four asset snapshots.
+    for row in h["analysis_inputs"].values():
+        if isinstance(row, dict) and (
+            row.get("asset_market_observations") == h["asset_market"]
+        ):
+            row["asset_market_observations"] = {
+                "bridge_same_as": "premarket.asset_market"
+            }
+            changed = True
+
+
+    # Only share whole source-family observations that match the
+    # canonical parsed source, including clocks and provenance.
+    gate = h.get("source_gate_context")
+    parsed = gate.get("parsed") if isinstance(gate, dict) else None
+    if isinstance(parsed, dict):
+        for row in h["analysis_inputs"].values():
+            if not isinstance(row, dict):
+                continue
+            families = row.get("available_source_families")
+            if not isinstance(families, dict) or not families:
+                continue
+            if not all(
+                isinstance(key, str)
+                and key in parsed
+                and parsed[key] == value
+                for key, value in families.items()
+            ):
+                continue
+            ref = {"bridge_source_families": sorted(families)}
+            if _bridge_size(ref) < _bridge_size(families):
+                row["available_source_families"] = ref
+                changed = True
+
+    if not changed:
+        return
+
+    probe = {
+        "market_context": {
+            "premarket_market_data": deepcopy(candidate)
+        }
+    }
+    _restore_premarket_refs(probe)
+
+    if _canonical_hash(
+        probe["market_context"]["premarket_market_data"]
+    ) != _canonical_hash(original):
+        raise ValueError("Premarket roundtrip mismatch")
+
+    if _bridge_size(candidate) >= _bridge_size(original):
+        return
+
+    market["premarket_market_data"] = candidate
+    market["premarket_ref_encoding"] = (
+        "bridge_source_families inherits named items from " "live_market_handoff.source_gate_context.parsed; " "bridge_same_as refers to fields under "
+        "market_context.premarket_market_data; "
+        "expand references before interpretation."
+    )
+
+
+def _restore_premarket_refs(payload: dict[str, Any]) -> None:
+    """Expand only exact, declared reference paths."""
+    pre = payload.get("market_context", {}).get(
+        "premarket_market_data"
+    )
+    if not isinstance(pre, dict):
+        return
+
+    handoff = pre.get("live_market_handoff")
+    battle = pre.get("battle_map")
+    if not isinstance(handoff, dict) or not isinstance(battle, dict):
+        return
+
+    assets = handoff.get("asset_market")
+    inputs = handoff.get("analysis_inputs")
+    if not isinstance(assets, dict) or not isinstance(inputs, dict):
+        return
+
+
+    # Restore source families before restoring whole sections and
+    # Commander handoff copies.
+    gate = handoff.get("source_gate_context")
+    parsed = gate.get("parsed") if isinstance(gate, dict) else None
+    for row in inputs.values():
+        if not isinstance(row, dict):
+            continue
+        ref = row.get("available_source_families")
+        if not isinstance(ref, dict):
+            continue
+        if "bridge_source_families" not in ref:
+            continue
+        if set(ref) != {"bridge_source_families"}:
+            raise ValueError("Invalid source reference")
+        names = ref["bridge_source_families"]
+        if (
+            not isinstance(names, list)
+            or not names
+            or any(not isinstance(k, str) for k in names)
+            or names != sorted(set(names))
+            or not isinstance(parsed, dict)
+            or any(k not in parsed for k in names)
+        ):
+            raise ValueError("Unresolvable source reference")
+        row["available_source_families"] = {
+            k: deepcopy(parsed[k]) for k in names
+        }
+
+    def restore(row, field, expected, source):
+        if not isinstance(row, dict):
+            return
+        value = row.get(field)
+        if not isinstance(value, dict) or "bridge_same_as" not in value:
+            return
+        if value != {"bridge_same_as": expected}:
+            raise ValueError("Invalid premarket reference")
+        row[field] = deepcopy(source)
+
+    for row in inputs.values():
+        restore(
+            row, "asset_market_observations",
+            "premarket.asset_market", assets
+        )
+
+    for row in battle.get("analysis_sections", []):
+        if not isinstance(row, dict):
+            continue
+        sid = row.get("id")
+        if isinstance(sid, str) and sid in inputs:
+            restore(
+                row, "machine_evidence",
+                "premarket.analysis_inputs." + sid,
+                inputs[sid]
+            )
+
+    restore(
+        battle, "live_market_handoff",
+        "premarket.live_market_handoff", handoff
+    )
+
+
 def _compact_tranche_fields(payload: dict[str, Any]) -> None:
     """Share exact-equal tranche fields; budgets/statuses stay literal in common."""
     for plan in payload.get("capital_state", {}).get("active_plans", []):
@@ -1353,6 +1540,7 @@ def expand_bridge_field_names(payload: dict[str, Any]) -> dict[str, Any]:
         for plan in result.get("capital_state", {}).get("active_plans", []):
             _expand_tranche_fields(plan)
         _expand_authority_references(result)
+        _restore_premarket_refs(result)
         return result
     symbols, glossary, _ = codec
     tokens = list(symbols) + ["@" + char for char in string.digits + string.ascii_uppercase + string.ascii_lowercase]
@@ -1376,6 +1564,7 @@ def expand_bridge_field_names(payload: dict[str, Any]) -> dict[str, Any]:
     for plan in result.get("capital_state", {}).get("active_plans", []):
         _expand_tranche_fields(plan)
     _expand_authority_references(result)
+    _restore_premarket_refs(result)
     return result
 
 
@@ -1471,10 +1660,12 @@ def _bound_bridge_detail(payload: dict[str, Any], pack: dict[str, Any]) -> None:
     15 KiB is operational headroom, not a new CRT formal lock. The final hash
     costs exactly 89 additional bytes. Critical inputs are never truncated.
     """
+    source_market_hash = _canonical_hash(payload["market_context"])
+    _compact_premarket_refs(payload)
     if _bridge_size(payload) + 89 <= BRIDGE_OPERATIONAL_BUDGET_BYTES:
         return
     market = payload["market_context"]
-    original_hash = _canonical_hash(market)
+    original_hash = source_market_hash
     # These are non-trigger history/ranking displays; current layer facts and
     # the trigger's current/previous/change remain separately literal.
     changes = market.get("changes", {})
