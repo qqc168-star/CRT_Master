@@ -573,6 +573,34 @@ def validate_equity_live_snapshot(
             asset,
             assets.get(asset),
         )
+        trade = assets[asset].get("trade_evidence")
+        if trade is not None:
+            if not isinstance(trade, dict) or trade.get("price") != assets[asset]["premarket_price"]:
+                raise ValueError(f"{asset} trade evidence price mismatch")
+            source_time = _timestamp(trade.get("observed_at_ms"), f"{asset}.trade.observed_at_ms")
+            reception = _timestamp(trade.get("received_at_ms"), f"{asset}.trade.received_at_ms")
+            if not window["start_ms"] <= source_time <= reception <= retrieved:
+                raise ValueError(f"{asset} trade evidence clock outside evaluation window")
+            if window["end_ms"] - source_time > binding["max_age_seconds"] * 1000:
+                raise ValueError(f"{asset} trade evidence stale")
+            if trade.get("source") == "RT_VOLUME":
+                if (trade.get("time_semantics") != "EXACT_TRADE_TIMESTAMP"
+                        or trade.get("trade_at_ms") != source_time):
+                    raise ValueError(f"{asset} exact trade clock mismatch")
+            elif trade.get("source") == "BAR_5S":
+                if (trade.get("time_semantics") != "TRADE_TIME_WITHIN_5S_BAR_ONLY"
+                        or trade.get("trade_at_ms") is not None
+                        or trade.get("bar_start_at_ms") != source_time
+                        or trade.get("bar_end_at_ms") != source_time + 5000
+                        or trade["bar_end_at_ms"] > reception):
+                    raise ValueError(f"{asset} bar interval cannot supply an exact trade clock")
+            else:
+                raise ValueError(f"{asset} trade evidence source invalid")
+        if (binding["provider_contract_id"] == "IBKR-TWS-API-L1-RTBARS-5S-V1"
+                or any(assets[a].get("trade_evidence") is not None for a in ASSET_ORDER)):
+            if trade is None:
+                raise ValueError(f"{asset} trade evidence missing")
+
 
     supplied_hash = _hash64(
         snapshot.get("snapshot_hash"),
@@ -702,6 +730,17 @@ def equity_snapshot_to_asset_market(
 
     for asset in ASSET_ORDER:
         row = locked["assets"][asset]
+        # Preserve per-asset source clocks; a bar interval is never an exact trade.
+        trade = row.get("trade_evidence")
+        asset_observed = observed if trade is None else trade["observed_at_ms"]
+        asset_refs = deepcopy(refs)
+        if trade is not None:
+            asset_refs[0]["price_time_semantics"] = trade["time_semantics"]
+            asset_refs[0]["trade_at_ms"] = trade["trade_at_ms"]
+            asset_refs[0]["received_at_ms"] = trade["received_at_ms"]
+            if trade["source"] == "BAR_5S":
+                asset_refs[0]["bar_start_at_ms"] = trade["bar_start_at_ms"]
+                asset_refs[0]["bar_end_at_ms"] = trade["bar_end_at_ms"]
 
         price = _finite(
             row["premarket_price"],
@@ -713,13 +752,13 @@ def equity_snapshot_to_asset_market(
             "state": "AVAILABLE",
             "asset": asset,
             "session": "PREMARKET",
-            "observed_at_ms": observed,
-            "source_refs": deepcopy(refs),
+            "observed_at_ms": asset_observed,
+            "source_refs": deepcopy(asset_refs),
             "premarket_price": _available(
                 price,
                 unit="USD",
-                observed_at_ms=observed,
-                source_refs=refs,
+                observed_at_ms=asset_observed,
+                source_refs=asset_refs,
             ),
             "previous_close": _optional_metric(
                 row,

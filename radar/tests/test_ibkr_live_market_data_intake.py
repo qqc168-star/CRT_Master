@@ -79,7 +79,7 @@ def _capture(*, market_data_type: int = 1, trade_at_ms: int | None = None) -> di
             },
             "bars_5s": [
                 {
-                    "time_s": observed // 1000,
+                    "time_s": observed // 1000 - 5,
                     "open": price - 0.1,
                     "high": price + 0.1,
                     "low": price - 0.2,
@@ -212,6 +212,10 @@ class IbkrLiveMarketDataIntakeTests(unittest.TestCase):
         for index, _asset in enumerate(ASSET_ORDER):
             app.marketDataType(1000 + index, 1)
         app.tickPrice(1000, 4, 125.1, None)
+        self.assertEqual(sink.observations, [])
+        received_ms = _premarket_ms() + 1000
+        with patch("crt_radar.ibkr_live_market_data_intake.time.time", return_value=received_ms / 1000):
+            app.tickString(1000, 48, f"125.1;1;{received_ms - 100};10;125;true")
 
         self.assertEqual(len(sink.observations), 1)
         self.assertEqual(sink.observations[0][0:3], ("LAST", "MSTR", 125.1))

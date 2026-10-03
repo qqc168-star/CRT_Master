@@ -99,6 +99,19 @@ A plan mismatch, journal/checkpoint mismatch, non-live proof, or hash-chain
 failure blocks before the feed connects. Replay only requests GPT reanalysis;
 it never creates an order or grants capital authority.
 
+Trade-clock qualification: `tickPrice(LAST)` remains quote audit only; qualified
+RTVolume supplies the `LAST` event's exact `trade_at_ms`. A 5-second TRADES bar
+requires positive volume and integer trade count before `BAR_5S_CLOSE` is emitted;
+its event timestamp is the bar-close boundary, never an exact trade timestamp.
+Snapshots retain `time_s` and `received_at_ms`; bar-only prices carry a 5-second
+interval with `trade_at_ms = null`. New zero bars cannot refresh or replace an
+older trade, and source freshness still applies. Overlapping RTVolume/bar clocks
+with differing prices remain blocked. Invalid inputs remain diagnostic evidence.
+IBKR snapshots without this clock proof must be requalified from their raw capture.
+RTVolume zero size is distinct from a zero-trade bar: IBKR documents that it can
+represent an odd-lot trade; the provider's explicit trade timestamp is retained.
+See [IBKR RTVolume semantics](https://www.interactivebrokers.com/docs/tws-api/doc/market-data-live/available-tick-types/rt-volume).
+
 Official references:
 
 - [IBKR TWS API documentation](https://ibkrcampus.com/campus/ibkr-api-page/twsapi-doc/)

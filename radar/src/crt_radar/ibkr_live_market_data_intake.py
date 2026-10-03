@@ -296,7 +296,10 @@ def _parse_rt_volume(value: str) -> dict[str, Any] | None:
         trade_at_ms = int(parts[2])
         total_volume = float(parts[3])
         vwap = float(parts[4])
-        single_trade = parts[5].strip().lower() == "true"
+        flag = parts[5].strip().lower()
+        if flag not in {"true", "false"}:
+            return None
+        single_trade = flag == "true"
     except (TypeError, ValueError):
         return None
     if not all(math.isfinite(item) for item in (price, size, total_volume, vwap)):
@@ -343,6 +346,13 @@ def _native_feed_app(
                 for asset in ASSET_ORDER
             }
             self.failures: list[dict[str, Any]] = []
+            registry = load_ibkr_source_registry(
+                _default_radar_path("CONFIG", "SOURCE_REGISTRY_V1.2.json"),
+                _default_radar_path("CONFIG", "IBKR_EQUITY_SOURCE_V0.1.json"),
+            )
+            self.max_trade_age_ms = registry.get(SOURCE_ID).max_age_seconds * 1000
+            self.last_bar_notified_ms = {asset: 0 for asset in ASSET_ORDER}
+            self.last_trade_notified_ms = {asset: 0 for asset in ASSET_ORDER}
 
         def nextValidId(self, orderId: int) -> None:  # noqa: N802
             del orderId
@@ -381,9 +391,12 @@ def _native_feed_app(
             asset: str,
             price: float,
             observed_at_ms: int,
-        ) -> None:
+        ) -> bool:
             if observation_sink is None:
-                return
+                return False
+            # Delivery order cannot move an observation clock backwards.
+            if observed_at_ms < max(self.last_trade_notified_ms[asset], self.last_bar_notified_ms[asset]):
+                return False
             with self.lock:
                 market_data_types = {
                     item: self.assets[item]["market_data_type"]
@@ -393,7 +406,7 @@ def _native_feed_app(
                 market_data_types[item] != LIVE_MARKET_DATA_TYPE
                 for item in ASSET_ORDER
             ):
-                return
+                return False
             try:
                 if channel == "LAST":
                     observation_sink.on_ibkr_last(
@@ -411,6 +424,7 @@ def _native_feed_app(
                     )
                 else:
                     raise ValueError(f"unsupported observation channel: {channel}")
+                return True
             except Exception as exc:
                 with self.lock:
                     self.failures.append(
@@ -420,6 +434,7 @@ def _native_feed_app(
                             "message": f"OBSERVATION_SINK_FAILURE:{type(exc).__name__}:{exc}",
                         }
                     )
+                return False
 
         def tickPrice(  # noqa: N802
             self,
@@ -441,14 +456,7 @@ def _native_feed_app(
             with self.lock:
                 self.assets[asset]["l1"][field] = number
                 self.assets[asset]["last_received_at_ms"] = received
-            observation_channel = _observation_channel_for_tick_type(tickType)
-            if observation_channel is not None:
-                self._notify_observation(
-                    observation_channel,
-                    asset,
-                    number,
-                    received,
-                )
+            # tickPrice is retained as quote audit only: it has no trade clock.
 
         def tickSize(self, reqId: int, tickType: int, size: Any) -> None:  # noqa: N802
             asset = self._asset(reqId, "L1")
@@ -468,14 +476,47 @@ def _native_feed_app(
             asset = self._asset(reqId, "L1")
             if asset is None or int(tickType) != RT_VOLUME_TICK_TYPE:
                 return
+            received = int(time.time() * 1000)
             parsed = _parse_rt_volume(value)
             if parsed is None:
+                with self.lock:
+                    self.assets[asset].setdefault("trade_diagnostics", []).append(
+                        {"source": "RT_VOLUME", "reason": "RT_VOLUME_INVALID",
+                         "raw": value, "received_at_ms": received}
+                    )
                 return
-            received = int(time.time() * 1000)
             parsed["received_at_ms"] = received
+            try:
+                _normalize_rt_volume(asset, parsed, retrieved_at_ms=received)
+                if received - parsed["trade_at_ms"] > self.max_trade_age_ms:
+                    raise IbkrIntakeError("RT_VOLUME_STALE")
+            except IbkrIntakeError as exc:
+                with self.lock:
+                    self.assets[asset].setdefault("trade_diagnostics", []).append(
+                        {"source": "RT_VOLUME", "reason": str(exc), "raw": parsed}
+                    )
+                return
             with self.lock:
+                previous = self.assets[asset]["rt_volume"]
+                if previous is not None and parsed["trade_at_ms"] < previous["trade_at_ms"]:
+                    self.assets[asset].setdefault("trade_diagnostics", []).append(
+                        {"source": "RT_VOLUME", "reason": "OLDER_TRADE_RECEIVED", "raw": parsed}
+                    )
+                    return
+                if (previous is not None and parsed["trade_at_ms"] == previous["trade_at_ms"]
+                        and parsed["price"] != previous["price"]):
+                    self.assets[asset]["rt_volume_conflict_at_ms"] = parsed["trade_at_ms"]
+                    self.assets[asset].setdefault("trade_diagnostics", []).append(
+                        {"source": "RT_VOLUME", "reason": "SAME_TRADE_CLOCK_PRICE_CONFLICT", "raw": parsed}
+                    )
+                    return
+                if previous is None or parsed["trade_at_ms"] > previous["trade_at_ms"]:
+                    self.assets[asset]["rt_volume_conflict_at_ms"] = None
                 self.assets[asset]["rt_volume"] = parsed
                 self.assets[asset]["last_received_at_ms"] = received
+            if parsed["trade_at_ms"] > self.last_trade_notified_ms[asset]:
+                if self._notify_observation("LAST", asset, parsed["price"], parsed["trade_at_ms"]):
+                    self.last_trade_notified_ms[asset] = parsed["trade_at_ms"]
 
         def marketDataType(self, reqId: int, marketDataType: int) -> None:  # noqa: N802
             asset = self._asset(reqId, "L1")
@@ -500,25 +541,36 @@ def _native_feed_app(
             if asset is None:
                 return
             bar = {
-                "time_s": int(date),
-                "open": float(open_),
-                "high": float(high),
-                "low": float(low),
-                "close": float(close),
-                "volume": float(volume),
-                "wap": float(wap),
-                "count": int(count),
+                "time_s": date,
+                "open": _audit_number(open_),
+                "high": _audit_number(high),
+                "low": _audit_number(low),
+                "close": _audit_number(close),
+                "volume": _audit_number(volume),
+                "wap": _audit_number(wap),
+                "count": count,
                 "received_at_ms": int(time.time() * 1000),
             }
             with self.lock:
                 self.assets[asset]["bars_5s"].append(bar)
                 self.assets[asset]["last_received_at_ms"] = bar["received_at_ms"]
-            self._notify_observation(
-                "BAR_5S_CLOSE",
-                asset,
-                bar["close"],
-                bar["received_at_ms"],
-            )
+            try:
+                qualified = _normalize_bar(asset, bar)
+                if bar["received_at_ms"] - qualified["time_s"] * 1000 > self.max_trade_age_ms:
+                    raise IbkrIntakeError("TRADE_BAR_STALE")
+            except IbkrIntakeError as exc:
+                with self.lock:
+                    self.assets[asset].setdefault("trade_diagnostics", []).append(
+                        {"source": "BAR_5S", "reason": str(exc), "time_s": date}
+                    )
+                return
+            if qualified["volume"] == 0 or qualified["count"] == 0:
+                return
+            # BAR_5S_CLOSE is a completed-bar observation, not an exact trade clock.
+            bar_end_ms = qualified["time_s"] * 1000 + 5000
+            if bar_end_ms > self.last_bar_notified_ms[asset]:
+                if self._notify_observation("BAR_5S_CLOSE", asset, qualified["close"], bar_end_ms):
+                    self.last_bar_notified_ms[asset] = bar_end_ms
 
     return MarketDataApp, Contract
 
@@ -614,6 +666,35 @@ class NativeIbkrFeed:
         }
 
 
+def _audit_number(value: Any) -> Any:
+    if value is None or isinstance(value, bool):
+        return value
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    return number if math.isfinite(number) else str(value)
+
+
+def _normalize_rt_volume(asset: str, raw: dict[str, Any], *, retrieved_at_ms: int) -> dict[str, Any]:
+    price = _positive_number(raw.get("price"), f"{asset}.rt_volume.price")
+    for field in ("size", "total_volume"):
+        if _optional_nonnegative(raw.get(field)) is None:
+            raise IbkrIntakeError(f"{asset}.rt_volume.{field} invalid")
+    _positive_number(raw.get("vwap"), f"{asset}.rt_volume.vwap")
+    if not isinstance(raw.get("single_trade"), bool):
+        raise IbkrIntakeError(f"{asset}.rt_volume.single_trade invalid")
+    trade_at = raw.get("trade_at_ms")
+    received = raw.get("received_at_ms")
+    if (not isinstance(trade_at, int) or isinstance(trade_at, bool) or trade_at <= 0
+            or not isinstance(received, int) or isinstance(received, bool)
+            or not trade_at <= received <= retrieved_at_ms):
+        raise IbkrIntakeError(f"{asset} RTVolume trade/reception clock invalid")
+    return {"source": "RT_VOLUME", "price": price, "trade_at_ms": trade_at,
+            "observed_at_ms": trade_at, "received_at_ms": received,
+            "time_semantics": "EXACT_TRADE_TIMESTAMP"}
+
+
 def _normalize_bar(asset: str, raw: Any) -> dict[str, Any]:
     if not isinstance(raw, dict):
         raise IbkrIntakeError(f"{asset} 5-second bar invalid")
@@ -627,13 +708,18 @@ def _normalize_bar(asset: str, raw: Any) -> dict[str, Any]:
     if high < low or not low <= open_ <= high or not low <= close <= high:
         raise IbkrIntakeError(f"{asset} 5-second bar geometry invalid")
     volume = _optional_nonnegative(raw.get("volume"))
+    if volume is None:
+        raise IbkrIntakeError(f"{asset} 5-second bar volume invalid")
     wap = _optional_positive(raw.get("wap"))
     count = raw.get("count")
     if not isinstance(count, int) or isinstance(count, bool) or count < 0:
         raise IbkrIntakeError(f"{asset} 5-second bar count invalid")
-    received_at_ms = raw.get("received_at_ms", time_s * 1000)
-    if not isinstance(received_at_ms, int) or isinstance(received_at_ms, bool):
-        raise IbkrIntakeError(f"{asset} 5-second bar reception time invalid")
+    if (volume == 0) != (count == 0):
+        raise IbkrIntakeError(f"{asset} 5-second bar volume/count contradiction")
+    received_at_ms = raw.get("received_at_ms")
+    if (not isinstance(received_at_ms, int) or isinstance(received_at_ms, bool)
+            or received_at_ms < time_s * 1000 + 5000):
+        raise IbkrIntakeError(f"{asset} 5-second bar reception/completion time invalid")
     return {
         "time_s": time_s,
         "open": open_,
@@ -645,6 +731,64 @@ def _normalize_bar(asset: str, raw: Any) -> dict[str, Any]:
         "count": count,
         "received_at_ms": received_at_ms,
     }
+
+
+def _qualified_asset_trade(
+    asset: str, raw: dict[str, Any], *, retrieved_at_ms: int, max_age_seconds: int,
+) -> tuple[list[dict], list[dict], dict | None, dict, list[dict]]:
+    """Qualify one captured asset without requiring other assets to have traded."""
+    if raw.get("market_data_type") != LIVE_MARKET_DATA_TYPE:
+        raise IbkrIntakeError(f"{asset} did not confirm live market data type")
+    retrieved = retrieved_at_ms
+    raw_bars = raw.get("bars_5s")
+    if not isinstance(raw_bars, list):
+        raise IbkrIntakeError(f"{asset} 5-second bar collection invalid")
+    bars = []
+    diagnostics = deepcopy(raw.get("trade_diagnostics", []))
+    for row in raw_bars:
+        try:
+            bar = _normalize_bar(asset, row)
+            if bar["received_at_ms"] > retrieved:
+                raise IbkrIntakeError(f"{asset} bar reception is in the future")
+            bars.append(bar)
+        except IbkrIntakeError as exc:
+            diagnostics.append({"source": "BAR_5S", "reason": str(exc)})
+    trade_bars = [bar for bar in bars if bar["volume"] > 0 and bar["count"] > 0]
+    rt_volume = raw.get("rt_volume") if isinstance(raw.get("rt_volume"), dict) else None
+    trade = None
+    if rt_volume is not None:
+        if (raw.get("rt_volume_conflict_at_ms") is not None
+                and raw["rt_volume_conflict_at_ms"] == rt_volume.get("trade_at_ms")):
+            raise IbkrIntakeError(f"{asset} same trade clock has conflicting prices")
+        try:
+            trade = _normalize_rt_volume(asset, rt_volume, retrieved_at_ms=retrieved)
+        except IbkrIntakeError as exc:
+            diagnostics.append({"source": "RT_VOLUME", "reason": str(exc)})
+    if trade_bars:
+        latest_bar = max(trade_bars, key=lambda row: row["time_s"])
+        start_ms = latest_bar["time_s"] * 1000
+        end_ms = start_ms + 5000
+        same_period = [bar for bar in trade_bars if bar["time_s"] == latest_bar["time_s"]]
+        if len({bar["close"] for bar in same_period}) != 1:
+            raise IbkrIntakeError(f"{asset} conflicting trade bar closes")
+        if trade is None or trade["trade_at_ms"] < start_ms:
+            trade = {"source": "BAR_5S", "price": latest_bar["close"],
+                     "trade_at_ms": None, "observed_at_ms": start_ms,
+                     "bar_start_at_ms": start_ms, "bar_end_at_ms": end_ms,
+                     "received_at_ms": latest_bar["received_at_ms"],
+                     "time_semantics": "TRADE_TIME_WITHIN_5S_BAR_ONLY"}
+        elif trade["trade_at_ms"] < end_ms and trade["price"] != latest_bar["close"]:
+            raise IbkrIntakeError(f"{asset} RTVolume/bar last-trade order unresolved")
+    if trade is None:
+        raise IbkrIntakeError(f"{asset} has no qualified timestamped premarket trade")
+    trade_price = trade["price"]
+    trade_at_ms = trade["trade_at_ms"]
+    observed_at_ms = trade["observed_at_ms"]
+    if not _is_premarket(observed_at_ms):
+        raise IbkrIntakeError(f"{asset} latest trade is outside US premarket")
+    if retrieved - observed_at_ms > max_age_seconds * 1000:
+        raise IbkrIntakeError(f"{asset} qualified trade is stale")
+    return bars, trade_bars, rt_volume, trade, diagnostics
 
 
 def _is_premarket(timestamp_ms: int) -> bool:
@@ -680,34 +824,12 @@ def build_ibkr_equity_live_snapshot(
             raise IbkrIntakeError(f"{asset} did not confirm live market data type")
 
         l1 = raw.get("l1") if isinstance(raw.get("l1"), dict) else {}
-        raw_bars = raw.get("bars_5s")
-        if not isinstance(raw_bars, list):
-            raise IbkrIntakeError(f"{asset} 5-second bar collection invalid")
-        bars = [_normalize_bar(asset, row) for row in raw_bars]
-        rt_volume = raw.get("rt_volume") if isinstance(raw.get("rt_volume"), dict) else None
-
-        trade_price = None
-        trade_at_ms = None
-        if rt_volume is not None:
-            trade_price = _optional_positive(rt_volume.get("price"))
-            candidate_time = rt_volume.get("trade_at_ms")
-            if isinstance(candidate_time, int) and not isinstance(candidate_time, bool):
-                trade_at_ms = candidate_time
-
-        if bars:
-            latest_bar = max(bars, key=lambda row: row["time_s"])
-            bar_time_ms = latest_bar["time_s"] * 1000
-            if trade_at_ms is None or bar_time_ms >= trade_at_ms:
-                trade_price = latest_bar["close"]
-                trade_at_ms = bar_time_ms
-
-        if trade_price is None or trade_at_ms is None:
-            raise IbkrIntakeError(f"{asset} has no timestamped premarket trade")
-        if trade_at_ms > retrieved:
-            raise IbkrIntakeError(f"{asset} trade timestamp is in the future")
-        if not _is_premarket(trade_at_ms):
-            raise IbkrIntakeError(f"{asset} latest trade is outside US premarket")
-
+        bars, trade_bars, rt_volume, trade, diagnostics = _qualified_asset_trade(
+            asset, raw, retrieved_at_ms=retrieved, max_age_seconds=binding["max_age_seconds"],
+        )
+        trade_price = trade["price"]
+        trade_at_ms = trade["trade_at_ms"]
+        observed_at_ms = trade["observed_at_ms"]
         total_volume = None
         if rt_volume is not None:
             total_volume = _optional_nonnegative(rt_volume.get("total_volume"))
@@ -715,6 +837,8 @@ def build_ibkr_equity_live_snapshot(
         normalized_assets[asset] = {
             "symbol": asset,
             "premarket_price": trade_price,
+            "trade_evidence": trade,
+            "trade_diagnostics": diagnostics,
             "previous_close": _optional_positive(l1.get("close")),
             "premarket_high": None,
             "premarket_low": None,
@@ -731,15 +855,15 @@ def build_ibkr_equity_live_snapshot(
                 "observed_trade_at_ms": trade_at_ms,
             },
             "real_time_bars_5s": {
-                "state": "AVAILABLE" if bars else "BLOCKED",
-                "reason": None if bars else "NO_5_SECOND_TRADE_BAR_DURING_CAPTURE",
+                "state": "AVAILABLE" if trade_bars else "BLOCKED",
+                "reason": None if trade_bars else "NO_QUALIFIED_5_SECOND_TRADE_BAR_DURING_CAPTURE",
                 "bar_size_seconds": 5,
                 "what_to_show": "TRADES",
                 "use_rth": False,
                 "items": bars,
             },
         }
-        observation_times.append(trade_at_ms)
+        observation_times.append(observed_at_ms)
 
     request_identity = {
         "provider_contract_id": binding["provider_contract_id"],
