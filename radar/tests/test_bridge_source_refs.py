@@ -86,6 +86,88 @@ class BridgeSourceRefsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             _restore_premarket_refs(x)
 
+
+    def test_json_type_identity_across_all_reference_paths(self):
+        import json
+
+        def literal(x):
+            return json.dumps(
+                x, ensure_ascii=False,
+                sort_keys=True, separators=(",", ":")
+            )
+
+        # Python equality is insufficient for JSON identity.
+        for canonical, observed in (
+            (1, 1.0), (False, 0), (1, True)
+        ):
+            for location in (
+                "source", "asset", "battle_handoff",
+                "battle_evidence"
+            ):
+                with self.subTest(
+                    location=location,
+                    canonical=canonical,
+                    observed=observed
+                ):
+                    x = make()
+                    pre = x["market_context"][
+                        "premarket_market_data"]
+                    h = pre["live_market_handoff"]
+                    b = pre["battle_map"]
+
+                    if location == "source":
+                        h["source_gate_context"]["parsed"][
+                            "BTC_SPOT_PRICE"]["type_probe"] = canonical
+                        h["analysis_inputs"]["PRICE_STRUCTURE"][
+                            "available_source_families"][
+                                "BTC_SPOT_PRICE"][
+                                    "type_probe"] = observed
+                    elif location == "asset":
+                        h["asset_market"]["MSTR"][
+                            "premarket_price"]["value"] = canonical
+                        h["analysis_inputs"]["PRICE_STRUCTURE"][
+                            "asset_market_observations"]["MSTR"][
+                                "premarket_price"]["value"] = observed
+                    elif location == "battle_handoff":
+                        h["asset_market"]["MSTR"][
+                            "premarket_price"]["value"] = canonical
+                        b["live_market_handoff"][
+                            "asset_market"]["MSTR"][
+                                "premarket_price"]["value"] = observed
+                    else:
+                        h["analysis_inputs"]["PRICE_STRUCTURE"][
+                            "asset_market_observations"]["MSTR"][
+                                "premarket_price"]["value"] = canonical
+                        row = next(
+                            z for z in b["analysis_sections"]
+                            if z["id"] == "PRICE_STRUCTURE"
+                        )
+                        row["machine_evidence"][
+                            "asset_market_observations"]["MSTR"][
+                                "premarket_price"]["value"] = observed
+
+                    before = deepcopy(x)
+                    _compact_premarket_refs(x)
+                    _restore_premarket_refs(x)
+                    x["market_context"].pop(
+                        "premarket_ref_encoding", None
+                    )
+                    self.assertEqual(
+                        literal(x), literal(before)
+                    )
+
+    def test_unhashable_section_id_is_not_deduped(self):
+        x = make()
+        pre = x["market_context"]["premarket_market_data"]
+        pre["battle_map"]["analysis_sections"][0]["id"] = []
+        before = deepcopy(x)
+        _compact_premarket_refs(x)
+        _restore_premarket_refs(x)
+        x["market_context"].pop(
+            "premarket_ref_encoding", None
+        )
+        self.assertEqual(x, before)
+
     def test_input_unchanged(self):
         x=make()
         original=deepcopy(x)
