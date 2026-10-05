@@ -18,6 +18,7 @@ from typing import Any
 
 from .commander_plan_adapter import (
     CommanderPlanBlocked, REQUIRED_GOVERNANCE, REQUIRED_LINE_FIELDS,
+    ALLOWED_ASSETS, ALLOWED_LINE_TYPES, ALLOWED_DIRECTIONS,
     seal_commander_plan, validate_commander_plan,
 )
 from .deployment_posture_research_gate import translate_research_state_to_posture_constraints
@@ -308,3 +309,81 @@ def run_gpt_commander_observation(judgment: Any, *, source_bundle: Any,
         ledger_path=ledger_path, dedupe_state_path=dedupe_state_path,
         observation_journal_path=observation_journal_path, report_path=report_path,
         now=now, feed_factory=feed_factory)
+
+
+def commander_judgment_response_format(context: dict) -> dict:
+    """Provider projection of the existing judgment contract, not a new judgment.
+
+    Context comes from a locally validated bundle. Singleton enums constrain
+    provider output; local Commander validation remains authoritative.
+    """
+    required = {"source_main_sha", "source_bundle_hash", "asset", "posture_candidate"}
+    _require(isinstance(context, dict) and set(context) == required, "JUDGMENT_CONTEXT_INVALID")
+    for field, size in (("source_main_sha", 40), ("source_bundle_hash", 64)):
+        _require(isinstance(context[field], str) and
+                 re.fullmatch("[0-9a-f]{" + str(size) + "}", context[field]) is not None,
+                 "JUDGMENT_CONTEXT_INVALID:" + field)
+    _require(context["asset"] in ALLOWED_ASSETS, "UNKNOWN_ASSET")
+    _require(context["posture_candidate"] in ("SCOUT", "BRIDGEHEAD", "REINFORCEMENT"),
+             "POSTURE_CANDIDATE_UNAVAILABLE")
+
+    def obj(properties):
+        return {"type": "object", "properties": properties,
+                "required": sorted(properties), "additionalProperties": False}
+
+    properties = {key: {"type": "string"} for key in JUDGMENT_FIELDS}
+    for key, value in {**context, "schema_version": JUDGMENT_SCHEMA,
+                       "state": "READY_FOR_VALIDATION"}.items():
+        properties[key] = {"type": "string", "enum": [value]}
+    properties["governance"] = obj({key: {"type": "string", "enum": [value]}
+                                    for key, value in AUTHORITY.items()})
+    line = {key: {"type": "string"} for key in LINE_FIELDS}
+    line.update(price={"type": "number"},
+                line_type={"type": "string", "enum": sorted(ALLOWED_LINE_TYPES)},
+                direction={"type": "string", "enum": sorted(ALLOWED_DIRECTIONS)})
+    properties["lines"] = {"type": "array", "items": obj(line), "minItems": 4, "maxItems": 4}
+    return {"type": "json_schema", "name": JUDGMENT_SCHEMA,
+            "strict": True, "schema": obj(properties)}
+
+
+def parse_commander_judgment_response(response: dict, *, source_bundle: dict,
+        current_main_sha: str, asset: str, now: datetime | None = None) -> tuple[dict, dict]:
+    """Extract exactly one JSON judgment without inference, then reuse validation."""
+    _require(isinstance(response, dict) and response.get("status") == "completed"
+             and not response.get("error") and not response.get("incomplete_details"),
+             "PROVIDER_RESPONSE_NOT_COMPLETE")
+    output = response.get("output")
+    _require(isinstance(output, list), "PROVIDER_OUTPUT_INVALID")
+    messages = []
+    for item in output:
+        _require(isinstance(item, dict), "PROVIDER_OUTPUT_INVALID")
+        if item.get("type") == "reasoning":
+            continue
+        _require(item.get("type") == "message" and item.get("role") == "assistant"
+                 and item.get("status") == "completed", "PROVIDER_MESSAGE_INVALID")
+        messages.append(item)
+    _require(len(messages) == 1, "ONE_JUDGMENT_MESSAGE_REQUIRED")
+    parts = messages[0].get("content")
+    _require(isinstance(parts, list) and len(parts) == 1 and isinstance(parts[0], dict)
+             and parts[0].get("type") == "output_text"
+             and isinstance(parts[0].get("text"), str), "PROVIDER_REFUSAL_OR_INVALID_CONTENT")
+
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            _require(key not in result, "DUPLICATE_JSON_KEY")
+            result[key] = value
+        return result
+
+    def constant(value):
+        raise CommanderPlanBlocked(["NONFINITE_JSON_NUMBER"])
+
+    try:
+        judgment = json.loads(parts[0]["text"], object_pairs_hook=pairs, parse_constant=constant)
+    except (ValueError, TypeError) as exc:
+        raise CommanderPlanBlocked(["MALFORMED_JUDGMENT_JSON"]) from exc
+    _require(isinstance(judgment, dict) and judgment.get("asset") == asset,
+             "REQUESTED_ASSET_MISMATCH")
+    candidate = build_candidate_commander_plan(judgment, source_bundle=source_bundle,
+        current_main_sha=current_main_sha, now=now)
+    return judgment, candidate

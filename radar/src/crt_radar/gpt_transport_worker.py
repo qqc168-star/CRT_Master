@@ -7,6 +7,8 @@ No provider exactly-once guarantee is assumed from an idempotency header.
 from __future__ import annotations
 
 import argparse
+from copy import deepcopy
+from datetime import datetime, timezone
 import json
 import os
 import re
@@ -16,7 +18,10 @@ from typing import Any, Callable
 from urllib import request as urlrequest
 
 from .gpt_bridge_outbox import _validate_bridge_payload
-from .gpt_handoff import _assert_bridge_privacy, expand_bridge_field_names
+from .gpt_handoff import _assert_bridge_privacy, expand_bridge_field_names, build_minimized_bridge_payload
+from .gpt_commander_plan_closure import (
+    _validate_bundle, _asset_facts, parse_commander_judgment_response,
+)
 from .gpt_transport_boundary import (
     _read_json, _seal_state, _validate_state, _write_no_clobber,
     claim_delivery, delivery_lock, ensure_pending_boundary_state,
@@ -82,7 +87,8 @@ class _NoRedirect(urlrequest.HTTPRedirectHandler):
 def send_response(envelope: dict[str, Any]) -> dict[str, Any]:
     """Send only the validated request body to the fixed TLS provider endpoint."""
     validate_request_envelope(envelope)
-    validate_transport_payload(json.loads(envelope["request_body"]["input"]))
+    decoded = json.loads(envelope["request_body"]["input"])
+    validate_transport_payload(decoded["bridge_payload"] if "text" in envelope["request_body"] else decoded)
     key = os.environ.get(API_KEY_ENV_VAR, "").strip()
     if not key:
         raise ValueError("Provider credential unavailable")
@@ -118,12 +124,54 @@ def deliver_event(
     outbox_path: Path, state_dir: Path, *,
     transport: Callable[[dict[str, Any]], dict[str, Any]] = send_response,
     now_ms: int | None = None,
+    source_bundle: dict | None = None,
+    current_main_sha: str | None = None,
+    asset: str | None = None,
 ) -> dict[str, Any]:
     payload = _read_json(outbox_path)
     event_id, payload_hash = validate_transport_payload(payload)
     if outbox_path.stem != event_id:
         raise ValueError("Outbox event filename mismatch")
-    envelope = build_request_envelope(payload, model=SMOKE_MODEL)
+    # Freeze caller-owned source inputs before validation or provider dispatch.
+    source_bundle = deepcopy(source_bundle)
+    context = None
+    now = int(time.time() * 1000) if now_ms is None else now_ms
+    check_time = datetime.fromtimestamp(now / 1000, tz=timezone.utc)
+    if any(value is not None for value in (source_bundle, current_main_sha, asset)):
+        if source_bundle is None or current_main_sha is None or asset is None:
+            raise ValueError("Structured delivery requires bundle, verified main and asset")
+        _validate_bundle(source_bundle)
+        if source_bundle["source_main_sha"] != current_main_sha:
+            raise ValueError("Source main lineage mismatch")
+        if asset not in {"MSTR", "ASST", "STRC", "SATA"}:
+            raise ValueError("Unknown requested asset")
+        _asset_facts(source_bundle, asset, check_time)
+        expected_payload = build_minimized_bridge_payload(
+            source_bundle["evidence_pack"], source_bundle["handoff"])
+        if payload != expected_payload:
+            raise ValueError("Source bundle does not bind this exact minimized bridge")
+        context = {"source_main_sha": current_main_sha,
+                   "source_bundle_hash": source_bundle["bundle_hash"], "asset": asset,
+                   "posture_candidate": source_bundle["posture_gate"]["posture_candidate"]}
+    envelope = build_request_envelope(payload, model=SMOKE_MODEL, judgment_context=context)
+
+    def validated_receipt(response):
+        receipt = _receipt(response, envelope)
+        if context is not None:
+            judgment, candidate = parse_commander_judgment_response(response,
+                source_bundle=source_bundle, current_main_sha=current_main_sha,
+                asset=asset, now=(datetime.now(timezone.utc) if now_ms is None else check_time))
+            artifact = {"request_hash": envelope["request_hash"],
+                        "response_hash": receipt["response_hash"],
+                        "judgment": judgment, "candidate": candidate}
+            destination = state_dir / "judgments" / f"{event_id}.json"
+            if destination.exists():
+                if _read_json(destination) != artifact:
+                    raise ValueError("Persisted judgment mismatch")
+            else:
+                _write_no_clobber(destination, artifact)
+        return receipt
+
     result = {"event_id": event_id, "transport_performed": False,
               "notification_eligible": False}
     with delivery_lock(state_dir, event_id) as acquired:
@@ -138,11 +186,10 @@ def deliver_event(
 
         if state["state"] == "DELIVERED":
             evidence = _read_json(evidence_path)
-            if evidence["request"] != envelope or state["receipt"] != _receipt(evidence["response"], envelope):
+            if evidence["request"] != envelope or state["receipt"] != validated_receipt(evidence["response"]):
                 raise ValueError("Delivered evidence mismatch")
             return {**result, "state": "ALREADY_DELIVERED"}
 
-        now = int(time.time() * 1000) if now_ms is None else now_ms
         if state["state"] == "CLAIMED" and now < state["claim"]["expires_at_ms"]:
             return {**result, "state": "CLAIMED"}
 
@@ -156,7 +203,10 @@ def deliver_event(
             evidence = _read_json(evidence_path)
             if evidence["request"] != envelope:
                 raise ValueError("Persisted request mismatch")
-            receipt = _receipt(evidence["response"], envelope)
+            try:
+                receipt = validated_receipt(evidence["response"])
+            except Exception:
+                return {**result, "state": "RECONCILIATION_REQUIRED"}
         else:
             if evidence_path.exists():
                 raise ValueError("Unbound provider evidence")
@@ -177,8 +227,10 @@ def deliver_event(
             try:
                 response = transport(envelope)
                 result["transport_performed"] = True
-                receipt = _receipt(response, envelope)
+                # Preserve the complete provider object before semantic validation,
+                # including refusals, malformed judgment text and incomplete output.
                 _write_no_clobber(evidence_path, {"request": envelope, "response": response})
+                receipt = validated_receipt(response)
             except Exception:
                 # Never persist exception text, headers, URLs, or credentials.
                 state = mark_retryable(state, claim_token=token,
@@ -199,7 +251,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--outbox-dir", required=True, type=Path)
     parser.add_argument("--state-dir", required=True, type=Path)
     parser.add_argument("--event-id", help="Restrict live acceptance to one existing event")
+    parser.add_argument("--source-bundle", type=Path)
+    parser.add_argument("--current-main-sha", help="Independently verified source main SHA")
+    parser.add_argument("--asset", choices=("MSTR", "ASST", "STRC", "SATA"))
     args = parser.parse_args(argv)
+    structured = any((args.source_bundle, args.current_main_sha, args.asset))
+    if structured and not all((args.source_bundle, args.current_main_sha, args.asset, args.event_id)):
+        parser.error("Structured delivery requires source-bundle, current-main-sha, asset and event-id")
+    bundle = _read_json(args.source_bundle) if args.source_bundle else None
     paths = sorted(args.outbox_dir.glob("*.json"))
     if args.event_id:
         if not re.fullmatch(r"[0-9a-f]{64}", args.event_id):
@@ -208,7 +267,8 @@ def main(argv: list[str] | None = None) -> int:
     failed = False
     for path in paths:
         try:
-            result = deliver_event(path, args.state_dir)
+            result = deliver_event(path, args.state_dir, source_bundle=bundle,
+                                   current_main_sha=args.current_main_sha, asset=args.asset)
         except Exception:
             result = {"state": "VALIDATION_OR_PERSISTENCE_BLOCKED"}
         print(json.dumps(result, sort_keys=True))
