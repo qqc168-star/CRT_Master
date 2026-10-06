@@ -97,6 +97,7 @@ if (Test-Path $CollectorRunner) {
     }
 }
 
+$IssuerAnnouncementReady = $false
 if (Test-Path -LiteralPath $IssuerAnnouncementRegistry) {
     $IssuerAnnouncementArgs = @(
         "-m", "crt_radar.issuer_announcement_runner",
@@ -108,6 +109,9 @@ if (Test-Path -LiteralPath $IssuerAnnouncementRegistry) {
     & $Python @IssuerAnnouncementArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "Issuer announcement radar requires attention."
+    }
+    else {
+        $IssuerAnnouncementReady = $true
     }
 }
 
@@ -128,6 +132,17 @@ $RunnerArgs = @(
     "--phone-l4-freshness-path", $PhoneL4,
     "--phone-l4-max-age-seconds", "$PhoneL4MaxAgeSeconds"
 )
+
+if (
+    $IssuerAnnouncementReady -and
+    (Test-Path -LiteralPath $IssuerAnnouncementOutput)
+) {
+    $RunnerArgs += @(
+        "--issuer-announcement-wake",
+        $IssuerAnnouncementOutput
+    )
+    Write-Host "ISSUER_ANNOUNCEMENT_WAKE_RUNTIME_INPUT_READY" -ForegroundColor Green
+}
 
 if ($null -ne $AcceptanceWakePercentile) {
     $RunnerArgs += @(

@@ -11,6 +11,10 @@ from pathlib import Path
 from typing import Any
 
 from .gpt_bridge_outbox import enqueue_bridge_payload
+from .issuer_announcement_runner import (
+    compact_issuer_announcement_wake,
+    validate_issuer_announcement_wake,
+)
 from .mstr_asst_market_health import (
     validate_issuer_ratio_observation, compact_issuer_ratio_observation,
 )
@@ -120,6 +124,7 @@ BRIDGE_OPTIONAL_MARKET_SECTIONS = (
     "btc_bull_validation",
     "season_transition_warning_overlay",
     "mstr_asst_market_health",
+    "issuer_announcement_wake",
     "asset_strategy_delta",
     "premarket_market_data",
 )
@@ -522,9 +527,17 @@ def _bridge_market_context(
                     pack[key]
                 )
 
-            result[key] = deepcopy(
-                pack[key]
-            )
+            if key == "issuer_announcement_wake":
+                if pack[key].get("state") != "REANALYSIS_REQUESTED":
+                    continue
+                result[key] = compact_issuer_announcement_wake(
+                    pack[key],
+                    generated_at_ms=pack.get("generated_at_ms"),
+                )
+            else:
+                result[key] = deepcopy(
+                    pack[key]
+                )
 
     btc_etf = compact_btc_etf_evidence(pack)
     if btc_etf:
@@ -1964,6 +1977,33 @@ def _semantic_descriptor(
         ),
     }
 
+    if (
+        "issuer_announcement_wake" in pack
+        and "ISSUER_ANNOUNCEMENT" in wake_sources
+    ):
+        announcement = validate_issuer_announcement_wake(
+            pack["issuer_announcement_wake"],
+            generated_at_ms=pack.get("generated_at_ms"),
+        )
+        descriptor["issuer_announcement_events"] = [
+            {
+                key: event.get(key)
+                for key in (
+                    "event_id",
+                    "event_hash",
+                    "issuer_id",
+                    "source_type",
+                    "classification",
+                    "form",
+                    "items",
+                    "filing_date",
+                    "accepted_at",
+                    "title",
+                )
+            }
+            for event in announcement["new_events"]
+        ]
+
     if "issuer_ratio_observation" in pack:
         observation = validate_issuer_ratio_observation(
             pack["issuer_ratio_observation"], generated_at_ms=pack["generated_at_ms"],
@@ -2280,6 +2320,11 @@ def run_gpt_handoff_gate(
             "LATEST_NOTICE",
             *(["LATEST_ISSUER_RATIO_OBSERVATION"] if "issuer_ratio_observation" in pack else []),
             *(
+                ["LATEST_ISSUER_ANNOUNCEMENT"]
+                if "ISSUER_ANNOUNCEMENT" in descriptor["wake_sources"]
+                else []
+            ),
+            *(
                 [
                     "LATEST_MSTR_ASST_MARKET_HEALTH",
                     "LATEST_THREE_ARMY_COMMANDER_LINES",
@@ -2291,6 +2336,11 @@ def run_gpt_handoff_gate(
         "required_behavior": [
             "READ_CURRENT_EVIDENCE",
             "REANALYZE",
+            *(
+                ["DISTINGUISH_PROPOSED_APPROVED_EFFECTIVE_ISSUER_POLICY"]
+                if "ISSUER_ANNOUNCEMENT" in descriptor["wake_sources"]
+                else []
+            ),
             "APPLY_THREE_ARMY_COMMANDER_DOCTRINE",
             "DECIDE_USER_NOTIFICATION_AFTER_REANALYSIS",
             "ADVISE_USER_ONLY",

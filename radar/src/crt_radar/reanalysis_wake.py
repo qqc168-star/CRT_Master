@@ -7,6 +7,9 @@ from typing import Any, Iterable
 from .mstr_asst_market_health import (
     validate_mstr_asst_market_health, validate_issuer_ratio_observation,
 )
+from .issuer_announcement_runner import (
+    validate_issuer_announcement_wake,
+)
 from .observation_store import Observation
 
 
@@ -175,6 +178,7 @@ def fuse_reanalysis_wake(
     plan_drift: dict[str, Any] | None,
     mstr_asst_market_health: dict[str, Any] | None = None,
     issuer_ratio_observation: dict[str, Any] | None = None,
+    issuer_announcement_wake: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Fuse read-only BTC, plan-drift, equity-health and issuer observation wakes."""
 
@@ -189,6 +193,14 @@ def fuse_reanalysis_wake(
         market_health = validate_mstr_asst_market_health(
             mstr_asst_market_health
         )
+
+    issuer_announcement = (
+        validate_issuer_announcement_wake(
+            issuer_announcement_wake
+        )
+        if issuer_announcement_wake is not None
+        else None
+    )
 
     if isinstance(base_wake, dict):
         _assert_optional_authority(
@@ -217,8 +229,18 @@ def fuse_reanalysis_wake(
     issuer_assets = [asset for asset, row in issuer["observations"].items()
                      if row["current_btc_per_diluted_share"] < row["previous_btc_per_diluted_share"]] if issuer else []
     issuer_requested = bool(issuer_assets)
+    announcement_requested = bool(
+        isinstance(issuer_announcement, dict)
+        and issuer_announcement.get("state") == "REANALYSIS_REQUESTED"
+    )
 
-    if base_wake is None and not plan_requested and not market_requested and not issuer_requested:
+    if (
+        base_wake is None
+        and not plan_requested
+        and not market_requested
+        and not issuer_requested
+        and not announcement_requested
+    ):
         return None
 
     if base_wake is None:
@@ -295,6 +317,30 @@ def fuse_reanalysis_wake(
                 "historical_percentile": None, "baseline_count": 0,
             })
 
+    if announcement_requested:
+        announcement_reason = str(
+            issuer_announcement.get(
+                "reason",
+                "NEW_OFFICIAL_ISSUER_ANNOUNCEMENT",
+            )
+        )
+        wake_sources.append("ISSUER_ANNOUNCEMENT")
+        wake_reasons.append(announcement_reason)
+        if not base_requested and not market_requested and not issuer_requested:
+            result.update(
+                {
+                    "state": "REANALYSIS_REQUESTED",
+                    "reason": announcement_reason,
+                    "metric": "official_issuer_announcement",
+                    "input_family": "ISSUER_ANNOUNCEMENT",
+                    "current_value": None,
+                    "previous_value": None,
+                    "percent_change": None,
+                    "historical_percentile": None,
+                    "baseline_count": 0,
+                }
+            )
+
     if plan_requested:
         plan_reason = str(
             plan_drift.get(
@@ -306,7 +352,12 @@ def fuse_reanalysis_wake(
         wake_sources.append("PLAN_DRIFT")
         wake_reasons.append(plan_reason)
 
-        if not base_requested and not market_requested and not issuer_requested:
+        if (
+            not base_requested
+            and not market_requested
+            and not issuer_requested
+            and not announcement_requested
+        ):
             result.update(
                 {
                     "state": "REANALYSIS_REQUESTED",
@@ -351,6 +402,10 @@ def fuse_reanalysis_wake(
         market_health.get("reanalysis_required")
         if isinstance(market_health, dict)
         else None
+    )
+
+    result["issuer_announcement_reanalysis_requested"] = (
+        announcement_requested
     )
 
     result["action_output"] = "NONE"

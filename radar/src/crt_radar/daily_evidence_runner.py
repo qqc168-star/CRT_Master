@@ -149,6 +149,7 @@ def run_daily_evidence(
     assumption_watch_context: dict[str, Any] | None = None,
     mstr_asst_market_health: dict[str, Any] | None = None,
     issuer_ratio_observation: dict[str, Any] | None = None,
+    issuer_announcement_wake: dict[str, Any] | None = None,
     institutional_flow_context: dict[str, Any] | None = None,
     previous_season_transition_overlay: dict[str, Any] | None = None,
     season_transition_replay_context: dict[str, Any] | None = None,
@@ -313,6 +314,7 @@ def run_daily_evidence(
         user_capital_intent=user_capital_intent,
         mstr_asst_market_health=mstr_asst_market_health,
         issuer_ratio_observation=issuer_ratio_observation,
+        issuer_announcement_wake=issuer_announcement_wake,
         institutional_flow_context=institutional_flow_context,
         previous_season_transition_overlay=previous_season_transition_overlay,
         season_transition_replay_context=season_transition_replay_context,
@@ -492,6 +494,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--issuer-ratio-proof", type=Path, default=None,
         help="Existing sealed issuer proof; independent reported observation lane, no Commander requirement.")
+    parser.add_argument(
+        "--issuer-announcement-wake",
+        type=Path,
+        default=None,
+        help="Fresh official issuer-announcement radar output for Evidence/Wake fusion.",
+    )
     parser.add_argument("--issuer-ct-archive", type=Path, default=None,
         help="Read-only retained official SEC archive; four-clock CT binding, no collection.")
     args = parser.parse_args(argv)
@@ -595,6 +603,14 @@ def main(argv: list[str] | None = None) -> int:
             _load_json_object(args.issuer_ratio_proof, label="Issuer ratio source proof"),
             generated_at_ms=int(time.time() * 1000),
         )
+    issuer_announcement = (
+        _load_json_object(
+            args.issuer_announcement_wake,
+            label="Issuer announcement wake",
+        )
+        if args.issuer_announcement_wake is not None
+        else None
+    )
     pack = run_daily_evidence(
         registry,
         observation_db=args.observation_db,
@@ -634,6 +650,7 @@ def main(argv: list[str] | None = None) -> int:
         assumption_watch_context=assumption_watch_context,
         mstr_asst_market_health=mstr_asst_market_health,
         issuer_ratio_observation=issuer_observation,
+        issuer_announcement_wake=issuer_announcement,
         institutional_flow_context=institutional_flow_context,
         previous_season_transition_overlay=(
             previous_season_transition_overlay
