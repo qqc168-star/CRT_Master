@@ -1316,6 +1316,7 @@ def compact_issuer_announcement_wake(
                         "unit",
                         "effective_at_ms",
                         "quality_state",
+                        "reported_context",
                     )
                 }
                 for fact in facts
@@ -1346,6 +1347,15 @@ def default_registry_path() -> Path:
     return Path(__file__).resolve().parents[2] / "CONFIG" / "ISSUER_ANNOUNCEMENT_REGISTRY_V1.json"
 
 
+def _console_json(payload: dict[str, Any]) -> str:
+    return json.dumps(
+        payload,
+        ensure_ascii=True,
+        indent=2,
+        sort_keys=True,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Poll official Strategy and Strive issuer announcements read-only.")
     parser.add_argument("--registry", type=Path, default=default_registry_path())
@@ -1361,7 +1371,7 @@ def main(argv: list[str] | None = None) -> int:
         ledger_path=args.ledger,
     )
     _write_json_atomic(args.output, result)
-    print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+    print(_console_json(result))
     return 0
 
 

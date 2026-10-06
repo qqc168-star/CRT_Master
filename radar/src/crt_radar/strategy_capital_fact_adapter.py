@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any
 
+from .issuer_disclosure_tables import dated_table_facts, bind_table_context
+
 
 ADAPTER_SCHEMA_VERSION = "CRT_STRATEGY_CAPITAL_FACT_ADAPTER_V0.1"
 SOURCE_ID = "STRATEGY_OFFICIAL_CAPITAL_DISCLOSURE"
@@ -394,6 +396,10 @@ def build_strategy_capital_reflexivity_input(
         )
 
     text, raw_bytes = _plain(raw_document)
+    table_facts = dated_table_facts(raw_bytes, "STRATEGY", disclosed_at_ms=accepted_at_ms)
+
+    def read_value(kind, fallback):
+        return table_facts[kind]["value"] if kind in table_facts else fallback(text)
 
     source_ref = _source_ref(
         raw_bytes,
@@ -404,6 +410,9 @@ def build_strategy_capital_reflexivity_input(
 
     blockers: list[dict[str, Any]] = []
     facts: list[dict[str, Any]] = []
+    for kind, item in table_facts.items():
+        if item.get("reason"):
+            blockers.append(_blocker(item["reason"], [kind], "Dated table claim is ambiguous; no narrative fallback is allowed."))
 
     if accepted_at_ms is None:
         blockers.append(
@@ -416,9 +425,9 @@ def build_strategy_capital_reflexivity_input(
         )
 
     if mode == "MSTR_CAPITAL":
-        btc = _btc_holdings(text)
-        shares = _diluted_shares(text)
-        atm = _atm_shares(text)
+        btc = read_value("BTC_HOLDINGS", _btc_holdings)
+        shares = read_value("DILUTED_SHARES", _diluted_shares)
+        atm = read_value("ATM_SHARES_ISSUED", _atm_shares)
 
         if btc is None:
             blockers.append(
@@ -486,6 +495,7 @@ def build_strategy_capital_reflexivity_input(
                     )
                 )
 
+        bind_table_context(facts, table_facts)
         return _result(
             facts=facts,
             blockers=blockers,
@@ -568,6 +578,7 @@ def build_strategy_capital_reflexivity_input(
                     )
                 )
 
+    bind_table_context(facts, table_facts)
     return _result(
         facts=facts,
         blockers=blockers,

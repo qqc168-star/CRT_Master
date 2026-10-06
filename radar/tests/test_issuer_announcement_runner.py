@@ -13,6 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from crt_radar.issuer_announcement_runner import (
     IssuerAnnouncementError,
+    _console_json,
     load_registry,
     parse_q4_press_feed,
     parse_sec_submissions,
@@ -541,6 +542,19 @@ class IssuerAnnouncementRunnerTests(unittest.TestCase):
                 1,
             )
             self.assertEqual(second["new_event_count"], 0)
+
+    def test_console_json_is_cp950_safe(self):
+        rendered = _console_json(
+            {
+                "arrow": "Strategy \u2192 STRC",
+                "checkbox": "\u2610",
+            }
+        )
+
+        rendered.encode("cp950")
+
+        self.assertIn("\\u2192", rendered)
+        self.assertIn("\\u2610", rendered)
 
     def test_source_is_get_only_and_contains_no_execution_surface(self):
         source = (ROOT / "src" / "crt_radar" / "issuer_announcement_runner.py").read_text(encoding="utf-8")
