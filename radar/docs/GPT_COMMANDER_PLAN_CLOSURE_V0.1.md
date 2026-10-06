@@ -85,3 +85,64 @@ weight, light threshold, mNAV semantic or external-action authority is changed.
 
 The offline tests exercise the real operator with a fake market feed. They do
 not start a brokerage connection or establish trading/production readiness.
+
+## Responses structured judgment transport
+
+`gpt_transport_worker` accepts `--source-bundle`, `--current-main-sha`, `--asset`
+with `--event-id` to opt into structured judgments. All four are required together.
+The caller must independently verify GitHub main; the worker does not relabel
+source evidence or fetch Git. The local bundle is validated and its canonical
+minimized Bridge must exactly equal the selected outbox payload before any send.
+Only that Bridge and four binding identifiers are sent, never the local bundle.
+
+The Responses adapter uses native `text.format` / `json_schema` / `strict: true`.
+Its schema is a projection of the existing judgment constants in this module.
+The context binds main SHA, bundle hash, requested asset and posture; no parser
+fills in a price, reason, condition or evidence. Legacy smoke delivery remains
+unchanged when the structured mode is not selected. The same model, 1,800 output
+tokens, one attempt, no automatic retry and 16,384-byte input ceiling apply.
+The new input wrapper and binding identifiers count toward that input ceiling.
+
+The worker saves the complete provider JSON object under `responses/<event>.json`
+before interpreting its content, including refusal/incomplete output. Successful
+structured delivery additionally saves `judgments/<event>.json` containing the
+unaltered parsed judgment, request/response hashes and an **unsealed** candidate.
+Completion requires the existing Commander validator, not just JSON compliance.
+Duplicate JSON keys, non-finite numbers, unknown fields, wrong lineage, requested
+asset mismatch, invalid lines, refusal and incomplete responses fail closed.
+Persisted send intent prevents a retry from resending an invalid or ambiguous
+result. A saved candidate still requires fresh validation before observation;
+transport never arms a monitor or performs a capital action.
+
+Validation time is checked after the response arrives. A delayed response can
+therefore fail the existing live-price freshness policy. Duplicate attempts may
+also fail freshness on a later invocation, but cannot cause another provider call.
+The original provider object is retained as JSON audit evidence, not a byte-for-
+byte HTTP archive; response headers and credentials are never persisted.
+
+These offline tests prove parsing/Commander validation and worker persistence,
+not successful live inference. Worker protocol tests isolate the Bridge projection
+with an explicit stub while retaining real source and Commander validators.
+The full synthetic source-bundle projection has a separate over-budget rejection
+test. A full live bundle exceeding 16 KiB remains a #8 blocker; it is not trimmed
+here to produce a successful test. Provider capability for the fixed smoke model,
+fresh market evidence and an actual accepted live response remain live-acceptance
+requirements. There is no model migration or new production approval.
+
+## Capital recommendation boundary (proposal only)
+
+The existing four lines are observation thresholds and reanalysis context. They
+cannot express an entire BUY/SELL/HOLD/WAIT/ROTATE capital recommendation, budget
+or quantity. Do not overload line types, seal a recommendation as a Commander
+plan, or interpret delivery as user approval.
+
+If separately authorized later, the minimum independent recommendation record
+would reference `source_main_sha`, `source_bundle_hash`, `judgment_id` (optional
+when no observation lines apply), `asset`, `generated_at`, `valid_until`, and the
+capital-state evidence hash/as-of. It would contain the analyst's proposed action,
+conditions, rationale, opposing evidence and explicit missing-input blockers.
+Quantity, currency, amount, reference/trigger price, fees and calculation basis
+must be nullable together when not supported; a null amount is not zero. ROTATE
+must identify both asset legs without treating expected proceeds as settled cash.
+Authority stays USER_ONLY / NONE / NOT_APPROVED. This is a proposed data boundary,
+not a new implemented schema, inference engine, allocation plan or trade permit.

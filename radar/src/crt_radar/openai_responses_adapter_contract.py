@@ -4,6 +4,7 @@ import hashlib
 import json
 from typing import Any
 
+from .gpt_commander_plan_closure import commander_judgment_response_format
 from .gpt_bridge_outbox import _validate_bridge_payload
 from .gpt_handoff import (
     CAUSAL_GUARDRAILS,
@@ -39,8 +40,10 @@ def _hash(value: Any) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def build_instructions() -> str:
-    return "\n".join(
+def build_instructions(*, structured: bool = False) -> str:
+    return ("Return only the requested Commander observation judgment JSON. Never invent missing "
+            "prices, reasons, conditions or evidence. Refuse if evidence is insufficient. "
+            "This is not a capital recommendation or permission to arm or trade.\n" if structured else "") + "\n".join(
         [
             "CRT post-wake reanalysis contract.",
             "Sequence: " + " > ".join(REANALYSIS_SEQUENCE),
@@ -57,13 +60,18 @@ def build_request_envelope(
     bridge_payload: dict[str, Any],
     *,
     model: str,
+    judgment_context: dict | None = None,
 ) -> dict[str, Any]:
     event_id, payload_hash = _validate_bridge_payload(bridge_payload)
     if model != SMOKE_MODEL:
         raise ValueError(f"Smoke model must be exactly {SMOKE_MODEL}")
 
+    response_format = (commander_judgment_response_format(judgment_context)
+                       if judgment_context is not None else None)
+    input_value = ({"bridge_payload": bridge_payload, "commander_judgment_request": judgment_context}
+                   if judgment_context is not None else bridge_payload)
     serialized_input = json.dumps(
-        bridge_payload,
+        input_value,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -92,7 +100,7 @@ def build_request_envelope(
         "bridge_payload_hash": payload_hash,
         "request_body": {
             "model": SMOKE_MODEL,
-            "instructions": build_instructions(),
+            "instructions": build_instructions(structured=response_format is not None),
             "input": serialized_input,
             "store": False,
             "background": False,
@@ -104,6 +112,8 @@ def build_request_envelope(
         "external_action_authority": "NONE",
         "action_output": "NONE",
     }
+    if response_format is not None:
+        envelope["request_body"]["text"] = {"format": response_format}
     envelope["request_hash"] = _hash(envelope)
     return validate_request_envelope(envelope)
 
@@ -137,11 +147,12 @@ def validate_request_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     if transport.get("secret_value_included") is not False:
         raise ValueError("Secret values must not be included")
 
-    if set(body) != _REQUEST_BODY_FIELDS:
+    structured = "text" in body
+    if set(body) != _REQUEST_BODY_FIELDS | ({"text"} if structured else set()):
         raise ValueError("Responses request body field set mismatch")
     if body.get("model") != SMOKE_MODEL:
         raise ValueError("Smoke request model mismatch")
-    if body.get("instructions") != build_instructions():
+    if body.get("instructions") != build_instructions(structured=structured):
         raise ValueError("Smoke instructions mismatch")
     if body.get("max_output_tokens") != MAX_OUTPUT_TOKENS:
         raise ValueError("Smoke output token ceiling mismatch")
@@ -165,6 +176,13 @@ def validate_request_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Smoke input exceeds UTF-8 byte ceiling")
 
     decoded = json.loads(serialized_input)
+    if structured:
+        if not isinstance(decoded, dict) or set(decoded) != {"bridge_payload", "commander_judgment_request"}:
+            raise ValueError("Structured input field set mismatch")
+        expected_format = commander_judgment_response_format(decoded["commander_judgment_request"])
+        if body["text"] != {"format": expected_format}:
+            raise ValueError("Commander structured output contract mismatch")
+        decoded = decoded["bridge_payload"]
     event_id, payload_hash = _validate_bridge_payload(decoded)
     if event_id != envelope.get("event_id"):
         raise ValueError("Event identity mismatch")
