@@ -110,6 +110,78 @@ class StrategyCapitalFactAdapterTests(unittest.TestCase):
             blocker_codes,
         )
 
+    def test_mstr_sec_tables_extract_latest_btc_and_mstr_sales(self):
+        raw = """
+        <table>
+          <tr><th>During Period September 28, 2026 to September 30, 2026</th></tr>
+          <tr><th>As of September 30, 2026</th></tr>
+          <tr><th>Security</th><th>Shares Sold</th></tr>
+          <tr><td>MSTR Stock</td><td>-</td></tr>
+        </table>
+
+        <table>
+          <tr><th>As of September 30, 2026</th></tr>
+          <tr>
+            <th>Aggregate BTC Holdings</th><th>Aggregate Purchase Price</th><th>Average Purchase Price</th>
+          </tr><tr>
+            <td>847,666</td>
+            <td>$63.95</td>
+            <td>$75,436.6</td>
+          </tr>
+        </table>
+
+        <table>
+          <tr><th>During Period October 1, 2026 to October 4, 2026</th></tr>
+          <tr><th>As of October 4, 2026</th></tr>
+          <tr><th>Security</th><th>Shares Sold</th></tr>
+          <tr>
+            <td>MSTR Stock</td>
+            <td>92,894</td>
+            <td>$15.7</td>
+          </tr>
+        </table>
+
+        <table>
+          <tr><th>As of October 4, 2026</th></tr>
+          <tr>
+            <th>Aggregate BTC Holdings</th><th>Aggregate Purchase Price</th><th>Average Purchase Price</th>
+          </tr><tr>
+            <td>848,000</td>
+            <td>$63.97</td>
+            <td>$75,440.7</td>
+          </tr>
+        </table>
+        """
+
+        result = build_strategy_capital_reflexivity_input(
+            raw,
+            mode="MSTR_CAPITAL",
+            accepted_at_ms=1791216015000,
+            require_atm=True,
+        )
+
+        facts = fact_map(result)
+
+        self.assertEqual(
+            facts["BTC_HOLDINGS"]["value"],
+            848000.0,
+        )
+        self.assertEqual(
+            facts["ATM_SHARES_ISSUED"]["value"],
+            92894.0,
+        )
+
+        # This filing does not report diluted shares.
+        self.assertNotIn("DILUTED_SHARES", facts)
+        self.assertIn(
+            "MSTR_DILUTED_SHARES_NOT_FOUND",
+            blocker_codes(result),
+        )
+        self.assertEqual(
+            result["issuer_facts"]["coverage_state"],
+            "PARTIAL",
+        )
+
     def test_mstr_missing_diluted_shares_fails_closed(self):
         result = build_strategy_capital_reflexivity_input(
             "Strategy holds 700,000 bitcoins.",

@@ -1,0 +1,19 @@
+[
+  {
+    "name": "strategy",
+    "url": "https://www.sec.gov/Archives/edgar/data/1050446/000119312526413164/mstr-20261005.htm",
+    "sha256": "3db81aa3da29978fb85e24cb7a9735dd9c70fbac9eafc9b084a9bdf7cd947d66",
+    "bytes": 326882,
+    "capture_file_written_at_utc": "2026-10-06T13:57:25.261465+00:00",
+    "provenance_note": "Fresh SEC accession retrieval; original replay raw bytes were not found. Not a byte-identical old replay.",
+    "prior_replay_document_hash": "9d14fb929855c6e47f8f2487aa0c9ffb4f2c5ea939e6e27c403a729c99f69ba8"
+  },
+  {
+    "name": "strive",
+    "url": "https://www.sec.gov/Archives/edgar/data/1920406/000162828026064753/asst-20261005.htm",
+    "sha256": "9f6b5fb94204ab631eba2c6e34d6bc4ed7d33a543c68cba7c73b0eb7cd322f19",
+    "bytes": 100219,
+    "capture_file_written_at_utc": "2026-10-06T13:57:25.400574+00:00",
+    "provenance_note": "Fresh SEC accession retrieval; original replay raw bytes were not found. Not a byte-identical old replay."
+  }
+]

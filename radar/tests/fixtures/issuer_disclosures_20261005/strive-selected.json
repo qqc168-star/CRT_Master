@@ -1,0 +1,61 @@
+{
+  "cik": "0001920406",
+  "name": "Strive, Inc.",
+  "filings": {
+    "recent": {
+      "accessionNumber": [
+        "0001628280-26-064753"
+      ],
+      "filingDate": [
+        "2026-10-05"
+      ],
+      "reportDate": [
+        "2026-10-05"
+      ],
+      "acceptanceDateTime": [
+        "2026-10-05T15:59:57.000Z"
+      ],
+      "act": [
+        "34"
+      ],
+      "form": [
+        "8-K"
+      ],
+      "fileNumber": [
+        "001-41612"
+      ],
+      "filmNumber": [
+        "261438801"
+      ],
+      "items": [
+        "8.01"
+      ],
+      "core_type": [
+        "XBRL"
+      ],
+      "size": [
+        359695
+      ],
+      "isXBRL": [
+        1
+      ],
+      "isInlineXBRL": [
+        1
+      ],
+      "isXBRLNumeric": [
+        0
+      ],
+      "primaryDocument": [
+        "asst-20261005.htm"
+      ],
+      "primaryDocDescription": [
+        "8-K"
+      ]
+    }
+  },
+  "replay_provenance": {
+    "url": "https://data.sec.gov/submissions/CIK0001920406.json",
+    "full_response_sha256": "53f2712e47653f5f85b20bab94553383d50fbbc0ab9d0d8a42a4a68bd7b47d4d",
+    "selection": "one accession retained without changing field values"
+  }
+}

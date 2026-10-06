@@ -1,0 +1,61 @@
+{
+  "cik": "0001050446",
+  "name": "Strategy Inc",
+  "filings": {
+    "recent": {
+      "accessionNumber": [
+        "0001193125-26-413164"
+      ],
+      "filingDate": [
+        "2026-10-05"
+      ],
+      "reportDate": [
+        "2026-10-05"
+      ],
+      "acceptanceDateTime": [
+        "2026-10-05T16:00:15.000Z"
+      ],
+      "act": [
+        "34"
+      ],
+      "form": [
+        "8-K"
+      ],
+      "fileNumber": [
+        "001-42509"
+      ],
+      "filmNumber": [
+        "261438806"
+      ],
+      "items": [
+        "7.01,8.01"
+      ],
+      "core_type": [
+        "XBRL"
+      ],
+      "size": [
+        632351
+      ],
+      "isXBRL": [
+        1
+      ],
+      "isInlineXBRL": [
+        1
+      ],
+      "isXBRLNumeric": [
+        0
+      ],
+      "primaryDocument": [
+        "mstr-20261005.htm"
+      ],
+      "primaryDocDescription": [
+        "8-K"
+      ]
+    }
+  },
+  "replay_provenance": {
+    "url": "https://data.sec.gov/submissions/CIK0001050446.json",
+    "full_response_sha256": "58e22e841b3e6196b905dd118671b6e288d05ef22b3947d727df5a57460d1fe1",
+    "selection": "one accession retained without changing field values"
+  }
+}

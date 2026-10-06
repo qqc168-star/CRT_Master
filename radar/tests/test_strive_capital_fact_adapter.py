@@ -120,6 +120,105 @@ class StriveCapitalFactAdapterTests(unittest.TestCase):
             blocker_codes,
         )
 
+    def test_asst_sec_comparison_table_extracts_current_values(self):
+        raw = """
+        <table>
+          <tr>
+            <th></th>
+            <th>As of September 25, 2026</th>
+            <th>As of October 2, 2026</th>
+            <th>Change</th>
+          </tr>
+          <tr>
+            <td>Shares of STRC held</td>
+            <td>505,000</td>
+            <td>505,000</td>
+            <td>?</td>
+          </tr>
+          <tr>
+            <td>Fair value of STRC Stock (in thousands)</td>
+            <td>$49,763</td>
+            <td>$50,202</td>
+            <td>$439</td>
+          </tr>
+          <tr>
+            <td>Bitcoin held</td>
+            <td>27,462</td>
+            <td>29,462</td>
+            <td>2,000</td>
+          </tr>
+          <tr>
+            <td>Assumed Fully Diluted Shares (4)</td>
+            <td>100,776,795</td>
+            <td>103,714,772</td>
+            <td>2,937,977</td>
+          </tr>
+          <tr>
+            <td>Shares Underlying Traditional Warrants (5)</td>
+            <td>25,349,806</td>
+            <td>23,249,706</td>
+            <td>(2,100,100)</td>
+          </tr>
+        </table>
+
+        <table>
+          <tr><th>9/30/2026</th></tr>
+          <tr><td>Bitcoin held</td><td>28,000</td></tr>
+          <tr>
+            <td>Assumed diluted shares outstanding 1</td>
+            <td>100,716,638</td>
+          </tr>
+        </table>
+        """
+
+        result = build_strive_capital_reflexivity_input(
+            raw,
+            mode="ASST_CAPITAL",
+            accepted_at_ms=1791201597000,
+        )
+
+        facts = fact_map(result)
+
+        self.assertEqual(
+            facts["BTC_HOLDINGS"]["value"],
+            29462.0,
+        )
+        self.assertEqual(
+            facts["DILUTED_SHARES"]["value"],
+            103714772.0,
+        )
+        self.assertEqual(
+            facts["WARRANTS_OUTSTANDING"]["value"],
+            23249706.0,
+        )
+
+        # SATA aggregate liquidation preference is not the same
+        # thing as the separately disclosed SATA stated amount.
+        self.assertNotIn(
+            "SATA_LIQUIDATION_PREFERENCE_AGGREGATE",
+            facts,
+        )
+        self.assertIn(
+            "ASST_SATA_LIQUIDATION_PREFERENCE_AGGREGATE_NOT_FOUND",
+            blocker_codes(result),
+        )
+
+        sata = build_strive_capital_reflexivity_input(
+            raw,
+            mode="SATA_TERMS",
+            accepted_at_ms=1791201597000,
+        )
+        sata_facts = fact_map(sata)
+
+        self.assertEqual(
+            sata_facts["STRIVE_STRC_HOLDINGS"]["value"],
+            505000.0,
+        )
+        self.assertEqual(
+            sata_facts["STRIVE_STRC_FAIR_VALUE"]["value"],
+            50202000.0,
+        )
+
     def test_asst_missing_sata_liquidation_preference_is_partial(self):
         raw = """
         Strive holds 21,356 bitcoins.

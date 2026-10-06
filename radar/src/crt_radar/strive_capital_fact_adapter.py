@@ -5,6 +5,8 @@ import re
 from html.parser import HTMLParser
 from typing import Any
 
+from .issuer_disclosure_tables import dated_table_facts, bind_table_context
+
 
 ADAPTER_SCHEMA_VERSION = "CRT_STRIVE_CAPITAL_FACT_ADAPTER_V0.1"
 SOURCE_ID = "STRIVE_OFFICIAL_CAPITAL_DISCLOSURE"
@@ -118,6 +120,10 @@ def _scaled_match(
         match = re.search(pattern, text, re.I)
 
         if match:
+            # Adjacent numbers in flattened tables can be a footnote and a value.
+            # Only dated cell extraction may resolve that ambiguity.
+            if not match.groupdict().get("scale") and re.match(r"\s*\d", text[match.end():]):
+                continue
             return _scale_number(
                 match.group("num"),
                 match.groupdict().get("scale"),
@@ -388,6 +394,10 @@ def build_strive_capital_reflexivity_input(
         )
 
     text, raw_bytes = _plain(raw_document)
+    table_facts = dated_table_facts(raw_bytes, "STRIVE", disclosed_at_ms=accepted_at_ms)
+
+    def read_value(kind, fallback):
+        return table_facts[kind]["value"] if kind in table_facts else fallback(text)
 
     source_ref = _source_ref(
         raw_bytes,
@@ -398,6 +408,9 @@ def build_strive_capital_reflexivity_input(
 
     blockers: list[dict[str, Any]] = []
     facts: list[dict[str, Any]] = []
+    for kind, item in table_facts.items():
+        if item.get("reason"):
+            blockers.append(_blocker(item["reason"], [kind], "Dated table claim is ambiguous; no narrative fallback is allowed."))
 
     if accepted_at_ms is None:
         blockers.append(
@@ -410,11 +423,11 @@ def build_strive_capital_reflexivity_input(
         )
 
     if mode == "ASST_CAPITAL":
-        btc = _btc(text)
-        shares = _diluted_shares(text)
+        btc = read_value("BTC_HOLDINGS", _btc)
+        shares = read_value("DILUTED_SHARES", _diluted_shares)
         sata_liquidation_preference_aggregate = _sata_liquidation_preference_aggregate(text)
-        warrants = _warrants(text)
-        atm = _atm_shares(text)
+        warrants = read_value("WARRANTS_OUTSTANDING", _warrants)
+        atm = read_value("ATM_SHARES_ISSUED", _atm_shares)
 
         required = {
             "ASST_BTC_HOLDINGS_NOT_FOUND": (
@@ -477,6 +490,7 @@ def build_strive_capital_reflexivity_input(
                         )
                     )
 
+        bind_table_context(facts, table_facts)
         return _result(
             facts=facts,
             blockers=blockers,
@@ -485,8 +499,8 @@ def build_strive_capital_reflexivity_input(
             mode=mode,
         )
 
-    holdings = _strc_holdings(text)
-    fair_value = _strc_fair_value(text)
+    holdings = read_value("STRIVE_STRC_HOLDINGS", _strc_holdings)
+    fair_value = read_value("STRIVE_STRC_FAIR_VALUE", _strc_fair_value)
     rate = _rate(text)
     stated = _per_share_amount(
         text,
@@ -556,6 +570,7 @@ def build_strive_capital_reflexivity_input(
                     )
                 )
 
+    bind_table_context(facts, table_facts)
     return _result(
         facts=facts,
         blockers=blockers,
