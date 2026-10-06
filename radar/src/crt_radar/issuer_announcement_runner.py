@@ -9,6 +9,8 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from copy import deepcopy
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Callable
@@ -391,6 +393,442 @@ def parse_q4_press_feed(
     return list(events_by_id.values())
 
 
+
+class _DocumentTextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        if data:
+            self.parts.append(data)
+
+
+def _document_text(raw: bytes) -> str:
+    text = raw.decode("utf-8", errors="replace")
+    parser = _DocumentTextParser()
+    parser.feed(text)
+    return re.sub(
+        r"\s+",
+        " ",
+        " ".join(parser.parts),
+    ).strip()
+
+
+def _event_accepted_at_ms(
+    event: dict[str, Any],
+) -> int | None:
+    value = event.get("accepted_at")
+    if not isinstance(value, str) or not value.strip():
+        return None
+
+    text = value.strip()
+
+    if re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}\d{2}:\d{2}:\d{2}(?:\.\d+)?Z",
+        text,
+    ):
+        text = text[:10] + "T" + text[10:]
+
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+
+    return int(parsed.timestamp() * 1000)
+
+
+_LOW_SIGNAL_WAKE_KEYWORDS = {
+    "capital",
+    "preferred",
+    "asst",
+    "strc",
+    "strk",
+    "strf",
+    "strd",
+    "stre",
+    "sata",
+}
+
+
+_STRONG_SEC_CLASSIFICATIONS = {
+    "CAPITAL_RAISE_OR_DILUTION",
+    "DEBT_OR_FINANCING",
+    "FINANCIAL_RESULTS",
+    "MATERIAL_AGREEMENT",
+    "GOVERNANCE_CHANGE",
+    "CAPITAL_OR_TREASURY_POLICY",
+}
+
+
+def _material_keyword_matches(
+    text: str,
+    material_keywords: list[str],
+) -> list[str]:
+    lowered = text.lower()
+    matches: set[str] = set()
+
+    for raw in material_keywords:
+        keyword = raw.strip().lower()
+
+        if (
+            not keyword
+            or keyword in _LOW_SIGNAL_WAKE_KEYWORDS
+        ):
+            continue
+
+        if re.fullmatch(r"[a-z0-9-]+", keyword):
+            pattern = (
+                rf"(?<![a-z0-9])"
+                rf"{re.escape(keyword)}"
+                rf"(?![a-z0-9])"
+            )
+            matched = re.search(pattern, lowered) is not None
+        else:
+            matched = keyword in lowered
+
+        if matched:
+            matches.add(keyword)
+
+    return sorted(matches)
+
+
+def _decision_relevant_event(
+    event: dict[str, Any],
+) -> bool:
+    if event.get("source_type") != "SEC_FILING":
+        return (
+            event.get("classification")
+            != "OFFICIAL_ANNOUNCEMENT"
+        )
+
+    fact_count = event.get("normalized_fact_count", 0)
+
+    if (
+        isinstance(fact_count, int)
+        and not isinstance(fact_count, bool)
+        and fact_count > 0
+    ):
+        return True
+
+    if event.get("policy_stage") in {
+        "PROPOSED",
+        "APPROVED",
+        "EFFECTIVE",
+    }:
+        return True
+
+    keyword_matches = event.get(
+        "material_keyword_matches",
+        [],
+    )
+
+    if isinstance(keyword_matches, list) and keyword_matches:
+        return True
+
+    return (
+        event.get("classification")
+        in _STRONG_SEC_CLASSIFICATIONS
+    )
+
+
+def _decision_excerpt(
+    text: str,
+    material_keywords: list[str],
+) -> str:
+    if not text:
+        return ""
+
+    lower = text.lower()
+    needles = sorted(
+        {
+            *material_keywords,
+            "daily dividend",
+            "semi-monthly",
+            "record date",
+            "payment date",
+            "shareholder approval",
+            "stockholder approval",
+            "subject to approval",
+        },
+        key=len,
+        reverse=True,
+    )
+
+    snippets: list[str] = []
+
+    for needle in needles:
+        pos = lower.find(needle.lower())
+        if pos < 0:
+            continue
+
+        start = max(0, pos - 220)
+        end = min(len(text), pos + 650)
+        snippet = text[start:end].strip()
+
+        if snippet and snippet not in snippets:
+            snippets.append(snippet)
+
+        if sum(len(item) for item in snippets) >= 1600:
+            break
+
+    if not snippets:
+        return text[:1200]
+
+    return " ... ".join(snippets)[:1600]
+
+
+def _policy_stage(
+    title: str,
+    text: str,
+) -> str:
+    probe = f"{title} {text}".lower()
+
+    # Proposal language wins over hypothetical future-effective wording.
+    if (
+        re.search(r"\bpropos(?:e|es|ed|al)\b", probe)
+        or "subject to shareholder approval" in probe
+        or "subject to stockholder approval" in probe
+        or "if approved" in probe
+    ):
+        return "PROPOSED"
+
+    if (
+        re.search(
+            r"\b(?:shareholders?|stockholders?)\s+"
+            r"(?:have\s+)?approved\b",
+            probe,
+        )
+        or re.search(
+            r"\bapproved by\s+"
+            r"(?:shareholders?|stockholders?)\b",
+            probe,
+        )
+    ):
+        return "APPROVED"
+
+    if re.search(
+        r"\b(?:became effective|is effective|effective as of)\b",
+        probe,
+    ):
+        return "EFFECTIVE"
+
+    return "UNRESOLVED"
+
+
+def _proposed_distribution_cadence(
+    stage: str,
+    title: str,
+    text: str,
+) -> str | None:
+    if stage != "PROPOSED":
+        return None
+
+    probe = f"{title} {text}".lower()
+
+    if re.search(
+        r"\bpropos\w*.{0,160}\bdaily dividends?\b"
+        r"|\bdaily dividends?\b.{0,160}\bpropos\w*",
+        probe,
+    ):
+        return "DAILY"
+
+    if re.search(
+        r"\bpropos\w*.{0,160}\bsemi-monthly\b"
+        r"|\bsemi-monthly\b.{0,160}\bpropos\w*",
+        probe,
+    ):
+        return "SEMI_MONTHLY"
+
+    if re.search(
+        r"\bpropos\w*.{0,160}\bmonthly\b"
+        r"|\bmonthly\b.{0,160}\bpropos\w*",
+        probe,
+    ):
+        return "MONTHLY"
+
+    return None
+
+
+def _normalized_official_facts(
+    event: dict[str, Any],
+    raw: bytes,
+    *,
+    observed_at_ms: int,
+) -> list[dict[str, Any]]:
+    if event.get("source_type") != "SEC_FILING":
+        return []
+
+    accepted_at_ms = _event_accepted_at_ms(event)
+    if accepted_at_ms is None:
+        return []
+
+    facts: list[dict[str, Any]] = []
+
+    if event.get("issuer_id") == "STRATEGY_INC":
+        from .strategy_capital_fact_adapter import (
+            StrategyCapitalFactError,
+            build_strategy_capital_reflexivity_input,
+        )
+
+        for mode in ("MSTR_CAPITAL", "STRC_DIVIDEND"):
+            try:
+                result = build_strategy_capital_reflexivity_input(
+                    raw,
+                    mode=mode,
+                    document_id=str(event["event_id"]),
+                    accepted_at_ms=accepted_at_ms,
+                    retrieved_at_ms=observed_at_ms,
+                )
+            except StrategyCapitalFactError:
+                continue
+
+            section = result.get("issuer_facts", {})
+            rows = section.get("items", [])
+            if isinstance(rows, list):
+                facts.extend(
+                    deepcopy(row)
+                    for row in rows
+                    if isinstance(row, dict)
+                )
+
+    elif event.get("issuer_id") == "STRIVE_INC":
+        from .strive_capital_fact_adapter import (
+            StriveCapitalFactError,
+            build_strive_capital_reflexivity_input,
+        )
+
+        for mode in ("ASST_CAPITAL", "SATA_TERMS"):
+            try:
+                result = build_strive_capital_reflexivity_input(
+                    raw,
+                    mode=mode,
+                    document_id=str(event["event_id"]),
+                    accepted_at_ms=accepted_at_ms,
+                    retrieved_at_ms=observed_at_ms,
+                )
+            except StriveCapitalFactError:
+                continue
+
+            section = result.get("issuer_facts", {})
+            rows = section.get("items", [])
+            if isinstance(rows, list):
+                facts.extend(
+                    deepcopy(row)
+                    for row in rows
+                    if isinstance(row, dict)
+                )
+
+    deduped: dict[str, dict[str, Any]] = {}
+
+    for fact in facts:
+        fact_id = fact.get("fact_id")
+        if isinstance(fact_id, str) and fact_id:
+            deduped[fact_id] = fact
+
+    return [
+        deduped[key]
+        for key in sorted(deduped)
+    ]
+
+
+def _enrich_new_event(
+    event: dict[str, Any],
+    issuer: dict[str, Any],
+    *,
+    fetcher: Callable[..., tuple[bytes, str, str]],
+    observed_at_ms: int,
+    timeout_seconds: int,
+    maximum_response_bytes: int,
+    material_keywords: list[str],
+) -> dict[str, Any]:
+    source_type = event.get("source_type")
+
+    if source_type == "SEC_FILING":
+        allowed_hosts = issuer["sec_allowed_hosts"]
+    else:
+        allowed_hosts = issuer["press_allowed_hosts"]
+
+    raw, content_type, final_url = fetcher(
+        event["source_url"],
+        allowed_hosts=allowed_hosts,
+        timeout_seconds=timeout_seconds,
+        maximum_response_bytes=maximum_response_bytes,
+    )
+
+    if content_type not in {
+        "text/html",
+        "text/plain",
+        "application/xhtml+xml",
+    }:
+        raise IssuerAnnouncementError(
+            "issuer event document content type is not text"
+        )
+
+    text = _document_text(raw)
+
+    if not text:
+        raise IssuerAnnouncementError(
+            "issuer event document yielded no text"
+        )
+
+    keyword_matches = _material_keyword_matches(
+        text,
+        material_keywords,
+    )
+
+    enriched = deepcopy(event)
+    enriched.pop("event_hash", None)
+
+    enriched["document_state"] = "VALID"
+    enriched["document_url"] = final_url
+    enriched["document_evidence_hash"] = hashlib.sha256(raw).hexdigest()
+    enriched["decision_excerpt"] = _decision_excerpt(
+        text,
+        material_keywords,
+    )
+    enriched["material_keyword_matches"] = (
+        keyword_matches
+    )
+
+    stage = _policy_stage(
+        str(enriched.get("title", "")),
+        text,
+    )
+    enriched["policy_stage"] = stage
+
+    cadence = _proposed_distribution_cadence(
+        stage,
+        str(enriched.get("title", "")),
+        text,
+    )
+    if cadence is not None:
+        enriched["proposed_distribution_cadence"] = cadence
+
+    normalized_facts = _normalized_official_facts(
+        enriched,
+        raw,
+        observed_at_ms=observed_at_ms,
+    )
+    enriched["normalized_fact_count"] = len(normalized_facts)
+    enriched["normalized_facts"] = normalized_facts
+    enriched["normalization_state"] = (
+        "AVAILABLE"
+        if normalized_facts
+        else "NO_MATCH_OR_DISCLOSURE_CLOCK_UNRESOLVED"
+    )
+
+    enriched["event_hash"] = _canonical_hash(enriched)
+
+    return enriched
+
+
 def _load_state(path: Path) -> dict[str, Any] | None:
     if not path.exists():
         return None
@@ -567,13 +1005,62 @@ def run_issuer_announcement_cycle(
     discovered_ids = set(events_by_id)
     valid_source_keys = {row["source_key"] for row in coverage if row["state"] == "VALID"}
     newly_baselined_sources = valid_source_keys - previously_baselined
-    new_events = []
+    observed_new_events = []
     for event_id in sorted(discovered_ids - previously_seen):
         event = events_by_id[event_id]
         source_key = f"{event['issuer_id']}:{event['source_type']}"
         if source_key in previously_baselined:
-            new_events.append(event)
-    seen_event_ids = sorted(previously_seen | discovered_ids)
+            observed_new_events.append(event)
+
+    suppressed_event_count = 0
+    detail_blocked_event_count = 0
+    retry_event_ids: set[str] = set()
+    new_events = []
+
+    for event in observed_new_events:
+        # A generic press-release title can be suppressed without
+        # spending another request on its detail page.
+        if (
+            event.get("source_type")
+            != "SEC_FILING"
+            and not _decision_relevant_event(event)
+        ):
+            suppressed_event_count += 1
+            continue
+
+        issuer = next(
+            row
+            for row in registry["issuers"]
+            if row["issuer_id"] == event["issuer_id"]
+        )
+
+        try:
+            enriched = _enrich_new_event(
+                event,
+                issuer,
+                fetcher=active_fetcher,
+                observed_at_ms=observed_at_ms,
+                timeout_seconds=timeout_seconds,
+                maximum_response_bytes=maximum_response_bytes,
+                material_keywords=material_keywords,
+            )
+        except IssuerAnnouncementError:
+            # Do not mark this event as seen.  The listing was valid,
+            # but the decision evidence was not retrievable yet.
+            detail_blocked_event_count += 1
+            retry_event_ids.add(event["event_id"])
+            continue
+
+        if not _decision_relevant_event(enriched):
+            suppressed_event_count += 1
+            continue
+
+        new_events.append(enriched)
+
+    seen_event_ids = sorted(
+        previously_seen
+        | (discovered_ids - retry_event_ids)
+    )
     baselined_sources = sorted(previously_baselined | valid_source_keys)
     blocked_count = sum(1 for row in coverage if row["state"] == "BLOCKED")
     valid_count = sum(1 for row in coverage if row["state"] == "VALID")
@@ -586,6 +1073,18 @@ def run_issuer_announcement_cycle(
     if new_events:
         wake_state = "REANALYSIS_REQUESTED"
         reason = "NEW_OFFICIAL_ISSUER_ANNOUNCEMENT"
+    elif retry_event_ids:
+        wake_state = "NO_WAKE"
+        reason = (
+            "DECISION_RELEVANT_EVENT_DETAIL_BLOCKED_"
+            "RETRY_PENDING"
+        )
+    elif observed_new_events:
+        wake_state = "NO_WAKE"
+        reason = (
+            "NEW_OFFICIAL_ANNOUNCEMENT_"
+            "NOT_DECISION_RELEVANT"
+        )
     elif newly_baselined_sources:
         wake_state = "NO_WAKE"
         reason = "BASELINE_ESTABLISHED"
@@ -621,6 +1120,14 @@ def run_issuer_announcement_cycle(
         "baseline_established_before_poll": bool(previously_baselined),
         "coverage_state": coverage_state,
         "coverage": coverage,
+        "observed_new_event_count": len(observed_new_events),
+        "suppressed_event_count": suppressed_event_count,
+        "detail_blocked_event_count": (
+            detail_blocked_event_count
+        ),
+        "retry_pending_event_count": len(
+            retry_event_ids
+        ),
         "new_event_count": len(new_events),
         "new_events": new_events,
         "analyst_reanalysis_requested": wake_state == "REANALYSIS_REQUESTED",
@@ -630,6 +1137,209 @@ def run_issuer_announcement_cycle(
     }
     result["wake_hash"] = _canonical_hash(result)
     return result
+
+
+
+def validate_issuer_announcement_wake(
+    payload: dict[str, Any],
+    *,
+    generated_at_ms: int | None = None,
+) -> dict[str, Any]:
+    """Validate one issuer-announcement radar output without inventing meaning."""
+
+    if not isinstance(payload, dict):
+        raise IssuerAnnouncementError(
+            "issuer announcement wake must be an object"
+        )
+    if payload.get("schema_version") != OUTPUT_SCHEMA:
+        raise IssuerAnnouncementError(
+            "issuer announcement wake schema invalid"
+        )
+
+    expected_authority = {
+        "action_output": "NONE",
+        "external_action_authority": "NONE",
+        "external_action_performed": False,
+    }
+    for key, value in expected_authority.items():
+        if payload.get(key) != value:
+            raise IssuerAnnouncementError(
+                f"issuer announcement {key} must remain {value!r}"
+            )
+
+    supplied_hash = payload.get("wake_hash")
+    if not isinstance(supplied_hash, str):
+        raise IssuerAnnouncementError(
+            "issuer announcement wake_hash missing"
+        )
+    material = deepcopy(payload)
+    material.pop("wake_hash", None)
+    if supplied_hash != _canonical_hash(material):
+        raise IssuerAnnouncementError(
+            "issuer announcement wake_hash mismatch"
+        )
+
+    observed_at_ms = payload.get("observed_at_ms")
+    if (
+        type(observed_at_ms) is not int
+        or observed_at_ms <= 0
+    ):
+        raise IssuerAnnouncementError(
+            "issuer announcement observed_at_ms invalid"
+        )
+    if (
+        generated_at_ms is not None
+        and observed_at_ms > generated_at_ms
+    ):
+        raise IssuerAnnouncementError(
+            "issuer announcement clock is in the future"
+        )
+
+    state = payload.get("state")
+    if state not in {"NO_WAKE", "REANALYSIS_REQUESTED"}:
+        raise IssuerAnnouncementError(
+            "issuer announcement wake state invalid"
+        )
+
+    events = payload.get("new_events")
+    if not isinstance(events, list):
+        raise IssuerAnnouncementError(
+            "issuer announcement new_events must be a list"
+        )
+    if payload.get("new_event_count") != len(events):
+        raise IssuerAnnouncementError(
+            "issuer announcement event count mismatch"
+        )
+
+    for event in events:
+        if not isinstance(event, dict):
+            raise IssuerAnnouncementError(
+                "issuer announcement event invalid"
+            )
+
+        for key in (
+            "event_id",
+            "issuer_id",
+            "source_type",
+            "source_id",
+            "source_url",
+            "classification",
+            "event_hash",
+        ):
+            if not isinstance(event.get(key), str) or not event[key]:
+                raise IssuerAnnouncementError(
+                    f"issuer announcement event {key} invalid"
+                )
+
+        event_hash = event["event_hash"]
+        event_material = deepcopy(event)
+        event_material.pop("event_hash", None)
+        if event_hash != _canonical_hash(event_material):
+            raise IssuerAnnouncementError(
+                "issuer announcement event_hash mismatch"
+            )
+
+    requested = state == "REANALYSIS_REQUESTED"
+    if payload.get("analyst_reanalysis_requested") is not requested:
+        raise IssuerAnnouncementError(
+            "issuer announcement reanalysis flag mismatch"
+        )
+
+    if requested:
+        if payload.get("reason") != "NEW_OFFICIAL_ISSUER_ANNOUNCEMENT":
+            raise IssuerAnnouncementError(
+                "issuer announcement wake reason invalid"
+            )
+        if not events:
+            raise IssuerAnnouncementError(
+                "issuer announcement wake has no triggering event"
+            )
+
+    return deepcopy(payload)
+
+
+def compact_issuer_announcement_wake(
+    payload: dict[str, Any],
+    *,
+    generated_at_ms: int | None = None,
+) -> dict[str, Any]:
+    """Keep decision-critical public issuer-event facts for GPT transport."""
+
+    validated = validate_issuer_announcement_wake(
+        payload,
+        generated_at_ms=generated_at_ms,
+    )
+    compact_events: list[dict[str, Any]] = []
+
+    for event in validated["new_events"]:
+        row = {
+            key: deepcopy(event.get(key))
+            for key in (
+                "event_id",
+                "event_hash",
+                "issuer_id",
+                "source_type",
+                "source_url",
+                "accession_number",
+                "filing_date",
+                "accepted_at",
+                "form",
+                "items",
+                "title",
+                "classification",
+                "symbols",
+                "position_relevance",
+                "document_state",
+                "document_evidence_hash",
+                "material_keyword_matches",
+                "policy_stage",
+                "proposed_distribution_cadence",
+                "normalization_state",
+            )
+            if key in event
+        }
+
+        excerpt = event.get("decision_excerpt")
+        if isinstance(excerpt, str) and excerpt:
+            row["decision_excerpt"] = excerpt[:700]
+
+        facts = event.get("normalized_facts")
+        if isinstance(facts, list) and facts:
+            row["normalized_facts"] = [
+                {
+                    key: deepcopy(fact.get(key))
+                    for key in (
+                        "issuer_id",
+                        "security_id",
+                        "fact_type",
+                        "value",
+                        "unit",
+                        "effective_at_ms",
+                        "quality_state",
+                    )
+                }
+                for fact in facts
+                if isinstance(fact, dict)
+            ]
+
+        compact_events.append(row)
+
+    return {
+        "schema_version": validated["schema_version"],
+        "state": validated["state"],
+        "reason": validated["reason"],
+        "observed_at_ms": validated["observed_at_ms"],
+        "coverage_state": validated["coverage_state"],
+        "new_event_count": validated["new_event_count"],
+        "new_events": compact_events,
+        "analyst_reanalysis_requested": (
+            validated["analyst_reanalysis_requested"]
+        ),
+        "action_output": "NONE",
+        "external_action_authority": "NONE",
+        "external_action_performed": False,
+        "wake_hash": validated["wake_hash"],
+    }
 
 
 def default_registry_path() -> Path:

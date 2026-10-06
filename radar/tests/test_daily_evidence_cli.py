@@ -15,6 +15,7 @@ class DailyEvidenceCliSmokeTests(unittest.TestCase):
                 main(["--help"])
         self.assertEqual(raised.exception.code, 0)
         self.assertIn("--assumption-context", stdout.getvalue())
+        self.assertIn("--issuer-announcement-wake", stdout.getvalue())
 
 
 if __name__ == "__main__":
