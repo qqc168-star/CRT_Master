@@ -113,13 +113,27 @@ class IssuerAnnouncementRunnerTests(unittest.TestCase):
             return self.press_html, "text/html", url
         if url == self.strive["press_feed_url"]:
             return json.dumps(self.strive_press_payload).encode(), "application/json", url
-        if url.endswith("/mstr-new.htm"):
+        if (
+            url.endswith("/mstr-new.htm")
+            or url.endswith("/mstr-retry.htm")
+        ):
             return (
                 b"""
                 <html><body>
                 As of August 15, 2026, Strategy held 700,000 bitcoins.
                 Fully diluted shares outstanding were 300 million.
                 Under its ATM program Strategy sold 1.5 million shares.
+                </body></html>
+                """,
+                "text/html",
+                url,
+            )
+        if url.endswith("/mstr-irrelevant.htm"):
+            return (
+                b"""
+                <html><body>
+                Strategy updated administrative information
+                on its corporate website.
                 </body></html>
                 """,
                 "text/html",
@@ -381,6 +395,152 @@ class IssuerAnnouncementRunnerTests(unittest.TestCase):
                 "stockholder approval",
                 event["decision_excerpt"].lower(),
             )
+
+
+    def test_detail_fetch_failure_remains_retryable(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            state = root / "state.json"
+            ledger = root / "events.jsonl"
+
+            first = run_issuer_announcement_cycle(
+                self.registry,
+                state_path=state,
+                ledger_path=ledger,
+                now_ms=NOW_MS,
+                fetcher=self.fetcher,
+            )
+            self.assertEqual(first["state"], "NO_WAKE")
+
+            retry_row = filing(
+                "0001193125-26-100004",
+                "8-K",
+                items="8.01",
+                document="mstr-retry.htm",
+            )
+            self.strategy_payload["filings"]["recent"] = (
+                sec_payload(
+                    self.strategy["cik"],
+                    "STRATEGY INC",
+                    [
+                        retry_row,
+                        filing(
+                            "0001193125-26-100001",
+                            "8-K",
+                            document="mstr.htm",
+                        ),
+                    ],
+                )["filings"]["recent"]
+            )
+
+            def transient_failure(url: str, **kwargs):
+                if url.endswith("/mstr-retry.htm"):
+                    raise IssuerAnnouncementError(
+                        "transient detail failure"
+                    )
+                return self.fetcher(url, **kwargs)
+
+            blocked = run_issuer_announcement_cycle(
+                self.registry,
+                state_path=state,
+                ledger_path=ledger,
+                now_ms=NOW_MS + 3_600_000,
+                fetcher=transient_failure,
+            )
+
+            self.assertEqual(blocked["state"], "NO_WAKE")
+            self.assertEqual(
+                blocked["reason"],
+                "DECISION_RELEVANT_EVENT_DETAIL_BLOCKED_"
+                "RETRY_PENDING",
+            )
+            self.assertEqual(
+                blocked["retry_pending_event_count"],
+                1,
+            )
+            self.assertEqual(blocked["new_event_count"], 0)
+
+            retained = json.loads(
+                state.read_text(encoding="utf-8")
+            )
+            self.assertNotIn(
+                "STRATEGY_INC:SEC:0001193125-26-100004",
+                retained["seen_event_ids"],
+            )
+
+            recovered = run_issuer_announcement_cycle(
+                self.registry,
+                state_path=state,
+                ledger_path=ledger,
+                now_ms=NOW_MS + 7_200_000,
+                fetcher=self.fetcher,
+            )
+
+            self.assertEqual(
+                recovered["state"],
+                "REANALYSIS_REQUESTED",
+            )
+            self.assertEqual(
+                recovered["retry_pending_event_count"],
+                0,
+            )
+            self.assertEqual(recovered["new_event_count"], 1)
+
+    def test_generic_8k_without_decision_evidence_does_not_wake(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            state = root / "state.json"
+            ledger = root / "events.jsonl"
+
+            first = run_issuer_announcement_cycle(
+                self.registry,
+                state_path=state,
+                ledger_path=ledger,
+                now_ms=NOW_MS,
+                fetcher=self.fetcher,
+            )
+            self.assertEqual(first["state"], "NO_WAKE")
+
+            irrelevant = filing(
+                "0001193125-26-100005",
+                "8-K",
+                items="8.01",
+                document="mstr-irrelevant.htm",
+            )
+            self.strategy_payload["filings"]["recent"] = (
+                sec_payload(
+                    self.strategy["cik"],
+                    "STRATEGY INC",
+                    [
+                        irrelevant,
+                        filing(
+                            "0001193125-26-100001",
+                            "8-K",
+                            document="mstr.htm",
+                        ),
+                    ],
+                )["filings"]["recent"]
+            )
+
+            second = run_issuer_announcement_cycle(
+                self.registry,
+                state_path=state,
+                ledger_path=ledger,
+                now_ms=NOW_MS + 3_600_000,
+                fetcher=self.fetcher,
+            )
+
+            self.assertEqual(second["state"], "NO_WAKE")
+            self.assertEqual(
+                second["reason"],
+                "NEW_OFFICIAL_ANNOUNCEMENT_"
+                "NOT_DECISION_RELEVANT",
+            )
+            self.assertEqual(
+                second["suppressed_event_count"],
+                1,
+            )
+            self.assertEqual(second["new_event_count"], 0)
 
     def test_source_is_get_only_and_contains_no_execution_surface(self):
         source = (ROOT / "src" / "crt_radar" / "issuer_announcement_runner.py").read_text(encoding="utf-8")

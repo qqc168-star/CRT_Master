@@ -444,17 +444,98 @@ def _event_accepted_at_ms(
     return int(parsed.timestamp() * 1000)
 
 
+_LOW_SIGNAL_WAKE_KEYWORDS = {
+    "capital",
+    "preferred",
+    "asst",
+    "strc",
+    "strk",
+    "strf",
+    "strd",
+    "stre",
+    "sata",
+}
+
+
+_STRONG_SEC_CLASSIFICATIONS = {
+    "CAPITAL_RAISE_OR_DILUTION",
+    "DEBT_OR_FINANCING",
+    "FINANCIAL_RESULTS",
+    "MATERIAL_AGREEMENT",
+    "GOVERNANCE_CHANGE",
+    "CAPITAL_OR_TREASURY_POLICY",
+}
+
+
+def _material_keyword_matches(
+    text: str,
+    material_keywords: list[str],
+) -> list[str]:
+    lowered = text.lower()
+    matches: set[str] = set()
+
+    for raw in material_keywords:
+        keyword = raw.strip().lower()
+
+        if (
+            not keyword
+            or keyword in _LOW_SIGNAL_WAKE_KEYWORDS
+        ):
+            continue
+
+        if re.fullmatch(r"[a-z0-9-]+", keyword):
+            pattern = (
+                rf"(?<![a-z0-9])"
+                rf"{re.escape(keyword)}"
+                rf"(?![a-z0-9])"
+            )
+            matched = re.search(pattern, lowered) is not None
+        else:
+            matched = keyword in lowered
+
+        if matched:
+            matches.add(keyword)
+
+    return sorted(matches)
+
+
 def _decision_relevant_event(
     event: dict[str, Any],
 ) -> bool:
-    # SEC material filings are explicitly allowlisted by the registry.
-    if event.get("source_type") == "SEC_FILING":
+    if event.get("source_type") != "SEC_FILING":
+        return (
+            event.get("classification")
+            != "OFFICIAL_ANNOUNCEMENT"
+        )
+
+    fact_count = event.get("normalized_fact_count", 0)
+
+    if (
+        isinstance(fact_count, int)
+        and not isinstance(fact_count, bool)
+        and fact_count > 0
+    ):
         return True
 
-    # Ordinary corporate publicity is retained as observed, but it must
-    # not wake GPT unless its title was classified into a CRT-relevant
-    # capital / treasury / financial / governance event.
-    return event.get("classification") != "OFFICIAL_ANNOUNCEMENT"
+    if event.get("policy_stage") in {
+        "PROPOSED",
+        "APPROVED",
+        "EFFECTIVE",
+    }:
+        return True
+
+    keyword_matches = event.get(
+        "material_keyword_matches",
+        [],
+    )
+
+    if isinstance(keyword_matches, list) and keyword_matches:
+        return True
+
+    return (
+        event.get("classification")
+        in _STRONG_SEC_CLASSIFICATIONS
+    )
 
 
 def _decision_excerpt(
@@ -697,6 +778,11 @@ def _enrich_new_event(
             "issuer event document yielded no text"
         )
 
+    keyword_matches = _material_keyword_matches(
+        text,
+        material_keywords,
+    )
+
     enriched = deepcopy(event)
     enriched.pop("event_hash", None)
 
@@ -706,6 +792,9 @@ def _enrich_new_event(
     enriched["decision_excerpt"] = _decision_excerpt(
         text,
         material_keywords,
+    )
+    enriched["material_keyword_matches"] = (
+        keyword_matches
     )
 
     stage = _policy_stage(
@@ -924,10 +1013,18 @@ def run_issuer_announcement_cycle(
             observed_new_events.append(event)
 
     suppressed_event_count = 0
+    detail_blocked_event_count = 0
+    retry_event_ids: set[str] = set()
     new_events = []
 
     for event in observed_new_events:
-        if not _decision_relevant_event(event):
+        # A generic press-release title can be suppressed without
+        # spending another request on its detail page.
+        if (
+            event.get("source_type")
+            != "SEC_FILING"
+            and not _decision_relevant_event(event)
+        ):
             suppressed_event_count += 1
             continue
 
@@ -947,22 +1044,23 @@ def run_issuer_announcement_cycle(
                 maximum_response_bytes=maximum_response_bytes,
                 material_keywords=material_keywords,
             )
-        except IssuerAnnouncementError as exc:
-            enriched = deepcopy(event)
-            enriched.pop("event_hash", None)
-            enriched["document_state"] = "BLOCKED"
-            enriched["document_reason"] = (
-                f"{type(exc).__name__}: {exc}"
-            )
-            enriched["normalized_fact_count"] = 0
-            enriched["normalized_facts"] = []
-            enriched["normalization_state"] = "BLOCKED"
-            enriched["policy_stage"] = "UNRESOLVED"
-            enriched["event_hash"] = _canonical_hash(enriched)
+        except IssuerAnnouncementError:
+            # Do not mark this event as seen.  The listing was valid,
+            # but the decision evidence was not retrievable yet.
+            detail_blocked_event_count += 1
+            retry_event_ids.add(event["event_id"])
+            continue
+
+        if not _decision_relevant_event(enriched):
+            suppressed_event_count += 1
+            continue
 
         new_events.append(enriched)
 
-    seen_event_ids = sorted(previously_seen | discovered_ids)
+    seen_event_ids = sorted(
+        previously_seen
+        | (discovered_ids - retry_event_ids)
+    )
     baselined_sources = sorted(previously_baselined | valid_source_keys)
     blocked_count = sum(1 for row in coverage if row["state"] == "BLOCKED")
     valid_count = sum(1 for row in coverage if row["state"] == "VALID")
@@ -975,9 +1073,18 @@ def run_issuer_announcement_cycle(
     if new_events:
         wake_state = "REANALYSIS_REQUESTED"
         reason = "NEW_OFFICIAL_ISSUER_ANNOUNCEMENT"
+    elif retry_event_ids:
+        wake_state = "NO_WAKE"
+        reason = (
+            "DECISION_RELEVANT_EVENT_DETAIL_BLOCKED_"
+            "RETRY_PENDING"
+        )
     elif observed_new_events:
         wake_state = "NO_WAKE"
-        reason = "NEW_OFFICIAL_ANNOUNCEMENT_NOT_DECISION_RELEVANT"
+        reason = (
+            "NEW_OFFICIAL_ANNOUNCEMENT_"
+            "NOT_DECISION_RELEVANT"
+        )
     elif newly_baselined_sources:
         wake_state = "NO_WAKE"
         reason = "BASELINE_ESTABLISHED"
@@ -1015,6 +1122,12 @@ def run_issuer_announcement_cycle(
         "coverage": coverage,
         "observed_new_event_count": len(observed_new_events),
         "suppressed_event_count": suppressed_event_count,
+        "detail_blocked_event_count": (
+            detail_blocked_event_count
+        ),
+        "retry_pending_event_count": len(
+            retry_event_ids
+        ),
         "new_event_count": len(new_events),
         "new_events": new_events,
         "analyst_reanalysis_requested": wake_state == "REANALYSIS_REQUESTED",
@@ -1178,6 +1291,7 @@ def compact_issuer_announcement_wake(
                 "position_relevance",
                 "document_state",
                 "document_evidence_hash",
+                "material_keyword_matches",
                 "policy_stage",
                 "proposed_distribution_cadence",
                 "normalization_state",
