@@ -35,6 +35,7 @@ $HandoffOutput = Join-Path $RuntimeRoot "gpt_handoff\latest.json"
 $HandoffLedger = Join-Path $RuntimeRoot "gpt_handoff\ledger.jsonl"
 $BridgeOutbox = Join-Path $RuntimeRoot "gpt_bridge\outbox"
 $TransportBoundary = Join-Path $RuntimeRoot "gpt_bridge\transport_boundary"
+$PostGptNotifications = Join-Path $RuntimeRoot "gpt_bridge\notifications"
 $MaturityLedger = Join-Path $RuntimeRoot "maturity\attempts.jsonl"
 $MaturityStatus = Join-Path $RuntimeRoot "maturity\status.json"
 $CollectorRunner = Join-Path $RadarRoot "scripts\windows\run_liquidation_collector_windows.ps1"
@@ -63,6 +64,7 @@ New-Item -ItemType Directory -Force (Split-Path $NoticeOutput -Parent) | Out-Nul
 New-Item -ItemType Directory -Force (Split-Path $HandoffOutput -Parent) | Out-Null
 New-Item -ItemType Directory -Force $BridgeOutbox | Out-Null
 New-Item -ItemType Directory -Force $TransportBoundary | Out-Null
+New-Item -ItemType Directory -Force $PostGptNotifications | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $MaturityStatus -Parent) | Out-Null
 New-Item -ItemType Directory -Force (Split-Path $IssuerAnnouncementOutput -Parent) | Out-Null
 
@@ -191,10 +193,22 @@ if ($TransportBoundaryExit -ne 0) {
 
 # Explicit local opt-in; no key or private runtime paths enter the GPT payload.
 if ($env:CRT_GPT_TRANSPORT_ENABLED -eq "1") {
-    & $Python -m crt_radar.gpt_transport_worker --outbox-dir $BridgeOutbox --state-dir $TransportBoundary
+        & $Python -m crt_radar.gpt_transport_worker `
+        --outbox-dir $BridgeOutbox `
+        --state-dir $TransportBoundary `
+        --notification-state-dir $PostGptNotifications
     if ($LASTEXITCODE -ne 0) {
         Write-Warning "GPT transport requires local attention; see boundary state."
     }
+}
+
+& $Python -m crt_radar.gpt_notification_boundary `
+    deliver-pending `
+    --transport-state-dir $TransportBoundary `
+    --notification-state-dir $PostGptNotifications
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "GPT notification boundary requires local attention."
 }
 
 if (Test-Path -LiteralPath $EtpCaptureIfDue) {

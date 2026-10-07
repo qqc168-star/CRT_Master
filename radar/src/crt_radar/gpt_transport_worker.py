@@ -32,6 +32,8 @@ from .openai_responses_adapter_contract import (
     build_request_envelope, validate_request_envelope,
 )
 
+from .gpt_notification_boundary import ensure_pending
+
 ADAPTER_ID = "CRT_OPENAI_RESPONSES_WORKER_V0.1"
 LEASE_MS = 180_000
 TIMEOUT_SECONDS = 120
@@ -122,6 +124,7 @@ def _receipt(response: dict[str, Any], envelope: dict[str, Any]) -> dict[str, An
 
 def deliver_event(
     outbox_path: Path, state_dir: Path, *,
+    notification_state_dir: Path | None = None,
     transport: Callable[[dict[str, Any]], dict[str, Any]] = send_response,
     now_ms: int | None = None,
     source_bundle: dict | None = None,
@@ -186,9 +189,27 @@ def deliver_event(
 
         if state["state"] == "DELIVERED":
             evidence = _read_json(evidence_path)
-            if evidence["request"] != envelope or state["receipt"] != validated_receipt(evidence["response"]):
+
+            if (
+                evidence["request"] != envelope
+                or state["receipt"]
+                != validated_receipt(evidence["response"])
+            ):
                 raise ValueError("Delivered evidence mismatch")
-            return {**result, "state": "ALREADY_DELIVERED"}
+
+            if (
+                state.get("notification_required") is True
+                and notification_state_dir is not None
+            ):
+                ensure_pending(
+                    notification_state_dir,
+                    state["receipt"],
+                )
+
+            return {
+                **result,
+                "state": "ALREADY_DELIVERED",
+            }
 
         if state["state"] == "CLAIMED" and now < state["claim"]["expires_at_ms"]:
             return {**result, "state": "CLAIMED"}
@@ -237,19 +258,51 @@ def deliver_event(
                                        reason="PROVIDER_RESULT_REQUIRES_RECONCILIATION")
                 persist_boundary_state(state_dir, state)
                 return {**result, "state": "RECONCILIATION_REQUIRED"}
-        delivered = mark_delivered(state, claim_token=token, receipt=receipt)
-        persist_boundary_state(state_dir, delivered)
-        stored = _validate_state(_read_json(state_dir / f"{event_id}.json"))
+        delivered = mark_delivered(
+            state,
+            claim_token=token,
+            receipt=receipt,
+        )
+
+        delivered = _seal_state({
+            **delivered,
+            "notification_required":
+                notification_state_dir is not None,
+        })
+
+        persist_boundary_state(
+            state_dir,
+            delivered,
+        )
+
+        stored = _validate_state(
+            _read_json(state_dir / f"{event_id}.json")
+        )
+
         if stored != delivered:
-            raise ValueError("Delivery persistence verification failed")
-        return {**result, "state": "DELIVERED", "notification_eligible": True,
-                "receipt_hash": receipt["receipt_hash"]}
+            raise ValueError(
+                "Delivery persistence verification failed"
+            )
+
+        if notification_state_dir is not None:
+            ensure_pending(
+                notification_state_dir,
+                receipt,
+            )
+
+        return {
+            **result,
+            "state": "DELIVERED",
+            "notification_eligible": True,
+            "receipt_hash": receipt["receipt_hash"],
+        }
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--outbox-dir", required=True, type=Path)
     parser.add_argument("--state-dir", required=True, type=Path)
+    parser.add_argument("--notification-state-dir", type=Path)
     parser.add_argument("--event-id", help="Restrict live acceptance to one existing event")
     parser.add_argument("--source-bundle", type=Path)
     parser.add_argument("--current-main-sha", help="Independently verified source main SHA")
@@ -267,8 +320,14 @@ def main(argv: list[str] | None = None) -> int:
     failed = False
     for path in paths:
         try:
-            result = deliver_event(path, args.state_dir, source_bundle=bundle,
-                                   current_main_sha=args.current_main_sha, asset=args.asset)
+            result = deliver_event(
+                path,
+                args.state_dir,
+                notification_state_dir=args.notification_state_dir,
+                source_bundle=bundle,
+                current_main_sha=args.current_main_sha,
+                asset=args.asset,
+            )
         except Exception:
             result = {"state": "VALIDATION_OR_PERSISTENCE_BLOCKED"}
         print(json.dumps(result, sort_keys=True))
