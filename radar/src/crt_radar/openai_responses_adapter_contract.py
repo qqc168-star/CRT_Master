@@ -119,6 +119,9 @@ def build_request_envelope(
 
 
 def validate_request_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
+    from .capital_decision_closure import REQUEST_VERSION, FULL_REQUEST_VERSION, validate_envelope
+    if envelope.get("contract_version") in {REQUEST_VERSION, FULL_REQUEST_VERSION}:
+        return validate_envelope(envelope)
     if envelope.get("contract_version") != CONTRACT_VERSION:
         raise ValueError("Adapter contract version mismatch")
 

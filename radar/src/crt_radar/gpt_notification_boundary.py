@@ -70,6 +70,11 @@ def _validate_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
     if _hash(raw) != expected:
         raise ValueError("receipt hash mismatch")
 
+    if "capital_validation" in receipt:
+        from .capital_decision_closure import render
+        if receipt["output_text"] != render(receipt["capital_validation"]):
+            raise ValueError("capital presentation mismatch")
+
     return receipt
 
 
@@ -119,6 +124,7 @@ def build_pending(receipt: dict[str, Any]) -> dict[str, Any]:
         "response_id": receipt["response_id"],
         "response_hash": receipt["response_hash"],
         "output_text": receipt["output_text"],
+        **({"capital_validation": receipt["capital_validation"]} if "capital_validation" in receipt else {}),
         "attempt_count": 0,
         "claim_token": None,
         "presentation": None,
@@ -353,6 +359,14 @@ def _validated_receipt_from_transport(
         request_hash=request["request_hash"],
     )
 
+    if "capital_source" in request:
+        from .capital_decision_closure import validated_receipt
+        artifact = _read_transport_json(root / "recommendations" / f"{event_id}.json")
+        expected = validated_receipt(response, request,
+            at_ms=artifact["capital_validation"]["evaluated_at_ms"])
+        if artifact != expected:
+            raise ValueError("capital artifact mismatch")
+
     if expected != state["receipt"]:
         raise ValueError("delivery receipt mismatch")
 
@@ -501,6 +515,7 @@ def present(
     presenter: Presenter | None = None,
     *,
     now_ms: int | None = None,
+    current_capital_source: dict | None = None,
 ) -> dict[str, Any]:
     path = Path(path)
 
@@ -520,6 +535,18 @@ def present(
                 "state": "BUSY",
                 "presentation_performed": False,
             }
+
+        if "capital_validation" in current:
+            from .capital_decision_closure import assert_current, render
+            if current_capital_source is None:
+                return {"state": "CURRENT_CAPITAL_SOURCE_REQUIRED", "presentation_performed": False}
+            try:
+                assert_current(current["capital_validation"], current_capital_source,
+                    at_ms=int(time.time() * 1000) if now_ms is None else now_ms)
+                if current["output_text"] != render(current["capital_validation"]):
+                    raise ValueError("capital presentation mismatch")
+            except (ValueError, KeyError, TypeError):
+                return {"state": "CAPITAL_RECOMMENDATION_NOT_CURRENT", "presentation_performed": False}
 
         selected = (
             windows_popup_presenter
@@ -553,6 +580,8 @@ def _assert_notification_binds_receipt(
             raise ValueError(
                 "notification does not bind validated GPT delivery"
             )
+    if notification.get("capital_validation") != expected.get("capital_validation"):
+        raise ValueError("capital notification does not bind validated delivery")
 
 
 def present_from_transport(
@@ -561,6 +590,7 @@ def present_from_transport(
     presenter: Presenter | None = None,
     *,
     now_ms: int | None = None,
+    current_capital_source: dict | None = None,
 ) -> dict[str, Any]:
     path = Path(path)
 
@@ -584,6 +614,7 @@ def present_from_transport(
         path,
         presenter,
         now_ms=now_ms,
+        current_capital_source=current_capital_source,
     )
 
 
@@ -591,6 +622,8 @@ def deliver_pending(
     transport_state_dir: str | Path,
     notification_state_dir: str | Path,
     presenter: Presenter | None = None,
+    *,
+    current_capital_source: dict | None = None,
 ) -> dict[str, Any]:
     root = Path(notification_state_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -602,6 +635,7 @@ def deliver_pending(
             path,
             transport_state_dir,
             presenter,
+            current_capital_source=current_capital_source,
         )
         results.append(result)
 
@@ -645,12 +679,14 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         type=Path,
     )
+    sweep.add_argument("--capital-source", type=Path)
 
     args = parser.parse_args(argv)
 
     result = deliver_pending(
         args.transport_state_dir,
         args.notification_state_dir,
+        current_capital_source=json.loads(args.capital_source.read_text(encoding="utf-8")) if args.capital_source else None,
     )
 
     print(

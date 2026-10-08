@@ -89,8 +89,11 @@ class _NoRedirect(urlrequest.HTTPRedirectHandler):
 def send_response(envelope: dict[str, Any]) -> dict[str, Any]:
     """Send only the validated request body to the fixed TLS provider endpoint."""
     validate_request_envelope(envelope)
+    if "capital_source" in envelope:
+        raise ValueError("Capital model delivery requires independent approval; OFFLINE_ONLY")
     decoded = json.loads(envelope["request_body"]["input"])
-    validate_transport_payload(decoded["bridge_payload"] if "text" in envelope["request_body"] else decoded)
+    validate_transport_payload(envelope["capital_bridge_payload"] if "capital_source" in envelope else
+                               decoded["bridge_payload"] if "text" in envelope["request_body"] else decoded)
     key = os.environ.get(API_KEY_ENV_VAR, "").strip()
     if not key:
         raise ValueError("Provider credential unavailable")
@@ -130,6 +133,7 @@ def deliver_event(
     source_bundle: dict | None = None,
     current_main_sha: str | None = None,
     asset: str | None = None,
+    capital_source: dict | None = None,
 ) -> dict[str, Any]:
     payload = _read_json(outbox_path)
     event_id, payload_hash = validate_transport_payload(payload)
@@ -140,7 +144,14 @@ def deliver_event(
     context = None
     now = int(time.time() * 1000) if now_ms is None else now_ms
     check_time = datetime.fromtimestamp(now / 1000, tz=timezone.utc)
-    if any(value is not None for value in (source_bundle, current_main_sha, asset)):
+    if capital_source is not None:
+        if transport is send_response:
+            raise ValueError("Capital model delivery requires independent approval; OFFLINE_ONLY")
+        if source_bundle is not None or asset is not None:
+            raise ValueError("Capital and Commander sources must remain separate")
+        if capital_source.get("source_main_sha") != current_main_sha:
+            raise ValueError("Capital source main lineage mismatch")
+    elif any(value is not None for value in (source_bundle, current_main_sha, asset)):
         if source_bundle is None or current_main_sha is None or asset is None:
             raise ValueError("Structured delivery requires bundle, verified main and asset")
         _validate_bundle(source_bundle)
@@ -156,9 +167,30 @@ def deliver_event(
         context = {"source_main_sha": current_main_sha,
                    "source_bundle_hash": source_bundle["bundle_hash"], "asset": asset,
                    "posture_candidate": source_bundle["posture_gate"]["posture_candidate"]}
-    envelope = build_request_envelope(payload, model=SMOKE_MODEL, judgment_context=context)
+    if capital_source is not None:
+        from .capital_decision_closure import build_envelope, build_projection
+        if context is not None:
+            raise ValueError("Capital and Commander requests are distinct contracts")
+        build_projection(payload, capital_source, at_ms=now)
+        envelope = build_envelope(payload, deepcopy(capital_source), at_ms=capital_source["task"]["as_of_ms"], full_decision=True)
+    else:
+        envelope = build_request_envelope(payload, model=SMOKE_MODEL, judgment_context=context)
 
     def validated_receipt(response):
+        if capital_source is not None:
+            from .capital_decision_closure import validated_receipt as capital_receipt, assert_current
+            destination = state_dir / "recommendations" / f"{event_id}.json"
+            current_time = int(time.time() * 1000) if now_ms is None else now_ms
+            stored = _read_json(destination) if destination.exists() else None
+            evaluated = stored["capital_validation"]["evaluated_at_ms"] if stored else current_time
+            receipt = capital_receipt(response, envelope, at_ms=evaluated)
+            assert_current(receipt["capital_validation"], capital_source, at_ms=current_time)
+            if stored is not None:
+                if stored != receipt:
+                    raise ValueError("Persisted capital recommendation mismatch")
+            else:
+                _write_no_clobber(destination, receipt)
+            return receipt
         receipt = _receipt(response, envelope)
         if context is not None:
             judgment, candidate = parse_commander_judgment_response(response,
@@ -307,10 +339,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-bundle", type=Path)
     parser.add_argument("--current-main-sha", help="Independently verified source main SHA")
     parser.add_argument("--asset", choices=("MSTR", "ASST", "STRC", "SATA"))
+    parser.add_argument("--capital-source", type=Path, help="Current local capital recommendation source; independent of Commander")
     args = parser.parse_args(argv)
-    structured = any((args.source_bundle, args.current_main_sha, args.asset))
+    structured = args.capital_source is None and any((args.source_bundle, args.current_main_sha, args.asset))
     if structured and not all((args.source_bundle, args.current_main_sha, args.asset, args.event_id)):
         parser.error("Structured delivery requires source-bundle, current-main-sha, asset and event-id")
+    if args.capital_source and (not args.current_main_sha or not args.event_id or args.source_bundle or args.asset):
+        parser.error("Capital delivery requires current-main-sha and event-id, without Commander inputs")
     bundle = _read_json(args.source_bundle) if args.source_bundle else None
     paths = sorted(args.outbox_dir.glob("*.json"))
     if args.event_id:
@@ -327,6 +362,7 @@ def main(argv: list[str] | None = None) -> int:
                 source_bundle=bundle,
                 current_main_sha=args.current_main_sha,
                 asset=args.asset,
+                capital_source=_read_json(args.capital_source) if args.capital_source else None,
             )
         except Exception:
             result = {"state": "VALIDATION_OR_PERSISTENCE_BLOCKED"}
