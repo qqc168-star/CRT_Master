@@ -449,6 +449,7 @@ def validate_recommendation(recommendation, source, *, at_ms):
         scope, action = scopes[item["decision_scope"]], item["action"]
         require(item["asset"] == scope["asset"], "SCOPE_ASSET_MISMATCH")
         require(item["supporting_evidence"] and set(item["supporting_evidence"]) <= known_refs, "EVIDENCE_REFERENCE_UNKNOWN")
+        require(set(item["supporting_evidence"]) & {"bridge", "posture"}, "INVESTMENT_EVIDENCE_REQUIRED")
         require("posture" not in item["supporting_evidence"] or source["posture"] is not None, "POSTURE_EVIDENCE_MISSING")
         blockers, legs = list(item["blockers"]), item["legs"]
         try:
@@ -545,6 +546,11 @@ def validate_recommendation(recommendation, source, *, at_ms):
                                   "POOL_1" if leg["action"] == "BUY" else "CONFIRMED_HOLDING"})
         out["open_order_handling"] = _order_disclosure(source, item["asset"], at_ms)
         out["validation_state"] = "BLOCKED" if blockers or any(l["validation_state"] == "BLOCKED" for l in out["validated_legs"]) else "VALIDATED"
+        # Declared missing investment evidence can justify waiting, never a trade.
+        # Added source/instrument validation failures still block the conclusion.
+        if (action == "WAIT" and item["wait_kind"] == "EVIDENCE_BLOCKED"
+                and blockers == item["blockers"]):
+            out["validation_state"] = "VALIDATED_NON_TRADING_WAIT"
         validated.append(out)
     if cap["state"] == "AVAILABLE":
         require(used_cash <= number(cap["amount_usd"]), "SHARED_BUDGET_EXCEEDED_REJUDGMENT_REQUIRED")
@@ -594,6 +600,8 @@ def render(validated):
         lines.append("NO-TRADE（本次無已驗證立即交易腿；既有委託仍可能改變曝險）")
     for item in validated["items"]:
         lines.append(f"{item['decision_scope']} | {item['asset']} | {item['action']}（{labels[item['action']]}） | {item['validation_state']}（驗證狀態）")
+        if item["validation_state"] == "VALIDATED_NON_TRADING_WAIT":
+            lines.append("此決策範圍不得交易；等待補證據後重新驗證。")
         for key, label in (("reason", "理由"), ("supporting_evidence", "支持證據"), ("contradictions", "反證"),
                            ("applicability", "適用條件"), ("invalidation", "失效條件"), ("next_trigger", "下次重判觸發"),
                            ("wait_kind", "等待類型"), ("blockers", "阻塞"), ("open_order_handling", "既有委託與曝險")):
@@ -657,8 +665,8 @@ def validated_receipt(response, envelope, *, at_ms):
     recommendation = json.loads(receipt["output_text"], object_pairs_hook=unique,
                                 parse_constant=lambda _: require(False, "NONFINITE_JSON"))
     validation = validate_recommendation(recommendation, envelope["capital_source"], at_ms=at_ms)
-    # A bridge reference cannot qualify a valuation-dependent capital increase
-    # when its authoritative per-asset valuation explicitly remains blocked.
+    # Qualification belongs to the affected asset, not the model's choice of
+    # reference label. Execution facts cannot bypass an investment evidence gate.
     from .gpt_handoff import expand_bridge_field_names
     expanded = expand_bridge_field_names(envelope["capital_bridge_payload"])
     valuations = expanded["market_context"].get("treasury_valuation_context", {})
@@ -666,14 +674,15 @@ def validated_receipt(response, envelope, *, at_ms):
         valuations = {asset: {**valuations.get("common", {}), **row}
                       for asset, row in valuations["assets"].items()}
     for item in recommendation.get("items", []):
-        if item.get("action") in {"BUY", "ROTATE"} and "bridge" in item.get("supporting_evidence", []):
+        if item.get("action") in {"BUY", "ROTATE"}:
             assets = {item.get("asset")} | {leg.get("asset") for leg in item.get("legs", []) if leg.get("action") == "BUY"}
             for asset in assets:
                 valuation = valuations.get(asset)
                 if valuation is not None:
                     require(valuation.get("formal_action_critical_state") == "AVAILABLE",
                             "VALUATION_EVIDENCE_UNQUALIFIED:" + str(asset))
-    require(all(item["validation_state"] == "VALIDATED" for item in validation["items"]),
+    require(all(item["validation_state"] in {"VALIDATED", "VALIDATED_NON_TRADING_WAIT"}
+                for item in validation["items"]),
             "CAPITAL_RECOMMENDATION_NOT_VALIDATED")
     receipt["capital_validation"] = validation
     receipt["output_text"] = render(validation)

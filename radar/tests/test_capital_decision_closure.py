@@ -369,14 +369,139 @@ class TransportClosureTests(unittest.TestCase):
         transport.assert_called_once()
         self.assertFalse(list((self.root / "valuation-notices").glob("*.json")))
 
-    def test_blocked_capital_response_never_creates_success_notification(self):
+    def test_same_event_smoke_and_capital_share_roots_without_collisions(self):
+        enqueue_bridge_payload(self.root / "shared-outbox", self.payload)
+        path = self.root / "shared-outbox" / (self.payload["event"]["event_id"] + ".json")
+        for order in (("smoke", "capital"), ("capital", "smoke")):
+            with self.subTest(order=order):
+                root = self.root / order[0]
+                transports = {mode: Mock(return_value=provider_response(self.rec)) for mode in order}
+                for replay in (False, True):
+                    for mode in order:
+                        kw = dict(transport=transports[mode], now_ms=NOW,
+                                  notification_state_dir=root / "notices")
+                        if mode == "capital":
+                            kw.update(capital_source=self.source, current_main_sha=MAIN)
+                        result = deliver_event(path, root / "states", **kw)
+                        self.assertEqual(result["state"], "ALREADY_DELIVERED" if replay else "DELIVERED")
+                for transport in transports.values():
+                    transport.assert_called_once()
+                responses = list((root / "states").rglob("responses/*.json"))
+                self.assertEqual(len(responses), 2)
+                self.assertEqual(len({json.loads(p.read_text(encoding="utf-8"))["request"]["request_hash"] for p in responses}), 2)
+                notices = list((root / "notices").glob("*.json"))
+                self.assertEqual(len(notices), 2)
+                presenter = Mock(return_value=1)
+                for replay in (False, True):
+                    for notice in notices:
+                        result = present_from_transport(notice, root / "states", presenter, now_ms=NOW,
+                                                        current_capital_source=self.source)
+                        self.assertEqual(result["presentation_performed"], not replay)
+                self.assertEqual(presenter.call_count, 2)
+
+    def test_evidence_blocked_wait_is_presented_as_verified_non_trade(self):
         enqueue_bridge_payload(self.root / "blocked-outbox", self.payload)
         rec = recommendation(item("WAIT", wait_kind="EVIDENCE_BLOCKED", blockers=["缺少資格"] ))
+        transport = Mock(return_value=provider_response(rec))
         result = deliver_event(self.root / "blocked-outbox" / (self.payload["event"]["event_id"] + ".json"),
             self.root / "blocked-states", capital_source=self.source, current_main_sha=MAIN, now_ms=NOW,
-            transport=Mock(return_value=provider_response(rec)), notification_state_dir=self.root / "blocked-notices")
-        self.assertEqual(result["state"], "RECONCILIATION_REQUIRED")
-        self.assertFalse(list((self.root / "blocked-notices").glob("*.json")))
+            transport=transport, notification_state_dir=self.root / "blocked-notices")
+        self.assertEqual(result["state"], "DELIVERED")
+        notice = next((self.root / "blocked-notices").glob("*.json"))
+        stored = json.loads(notice.read_text(encoding="utf-8"))
+        validated = stored["capital_validation"]["items"][0]
+        self.assertEqual(validated["validation_state"], "VALIDATED_NON_TRADING_WAIT")
+        self.assertEqual(validated["blockers"], ["缺少資格"])
+        self.assertEqual(validated["validated_legs"], [])
+        self.assertIn("不得交易", stored["output_text"])
+        self.assertIn("等待補證據", stored["output_text"])
+        presenter = Mock(return_value=1)
+        for replay in (False, True):
+            result = present_from_transport(notice, self.root / "blocked-states", presenter, now_ms=NOW,
+                                            current_capital_source=self.source)
+            self.assertEqual(result["presentation_performed"], not replay)
+        presenter.assert_called_once()
+        transport.assert_called_once()
+
+    def test_invalid_blocked_wait_never_becomes_verified_non_trade(self):
+        for defect in ("missing_reason", "stale_evidence", "unknown_reference", "trade_leg", "wrong_scope", "missing_instrument"):
+            with self.subTest(defect=defect):
+                source = deepcopy(self.source)
+                rec = recommendation(item("WAIT", wait_kind="EVIDENCE_BLOCKED", blockers=["缺少資格"]))
+                if defect == "missing_reason":
+                    rec["items"][0]["blockers"] = []
+                elif defect == "stale_evidence":
+                    source["evidence_validity"]["valid_until_ms"] = NOW
+                elif defect == "unknown_reference":
+                    rec["items"][0]["supporting_evidence"] = ["unknown"]
+                elif defect == "trade_leg":
+                    rec["items"][0]["legs"] = [leg()]
+                elif defect == "wrong_scope":
+                    source["task"]["scopes"][0]["exposure"] = "EXISTING"
+                else:
+                    source["instruments"] = []
+                with self.assertRaises(ValueError):
+                    envelope = c.build_envelope(self.payload, source, at_ms=NOW)
+                    c.validated_receipt(provider_response(rec), envelope, at_ms=NOW)
+
+    def test_blocked_trades_still_never_create_success_notifications(self):
+        enqueue_bridge_payload(self.root / "trade-outbox", self.payload)
+        for action in ("BUY", "SELL", "ROTATE"):
+            with self.subTest(action=action):
+                proposal = item(action, blockers=["缺少資格"])
+                if action == "ROTATE":
+                    proposal["legs"] = [leg("SELL", leg_id="sale"),
+                        leg("BUY", asset="STRC", leg_id="purchase", dependent_legs=["sale"])]
+                rec = recommendation(item("WAIT", scope="MSTR-evidence-wait",
+                    wait_kind="EVIDENCE_BLOCKED", blockers=["待補估值"]), proposal)
+                source = deepcopy(self.source)
+                match_scopes(source, rec)
+                result = deliver_event(self.root / "trade-outbox" / (self.payload["event"]["event_id"] + ".json"),
+                    self.root / action / "states", capital_source=source, current_main_sha=MAIN, now_ms=NOW,
+                    transport=Mock(return_value=provider_response(rec)), notification_state_dir=self.root / action / "notices")
+                self.assertEqual(result["state"], "RECONCILIATION_REQUIRED")
+                self.assertFalse(list((self.root / action / "notices").glob("*.json")))
+
+    def test_execution_fact_references_cannot_replace_investment_evidence(self):
+        for ref in (self.source["fees"][0]["source_ref"], self.source["instruments"][0]["source_ref"]):
+            with self.subTest(ref=ref):
+                rec = recommendation(item(supporting_evidence=[ref]))
+                with self.assertRaisesRegex(ValueError, "INVESTMENT_EVIDENCE_REQUIRED"):
+                    c.validated_receipt(provider_response(rec), self.envelope, at_ms=NOW)
+                receipt = c.validated_receipt(provider_response(recommendation(
+                    item("WAIT", supporting_evidence=["bridge", ref]))), self.envelope, at_ms=NOW)
+                self.assertEqual(receipt["capital_validation"]["items"][0]["validation_state"], "VALIDATED")
+
+    def test_posture_reference_does_not_bypass_blocked_asset_valuation(self):
+        rec = recommendation(item(supporting_evidence=["posture"]))
+        with self.assertRaisesRegex(ValueError, "VALUATION_EVIDENCE_UNQUALIFIED"):
+            c.validated_receipt(provider_response(rec), self.envelope, at_ms=NOW)
+
+    def test_legacy_capital_state_cannot_trigger_new_namespaced_send(self):
+        # Reproduce the pre-fix durable send marker at the original root, both
+        # before and after its response was persisted. Never resend either one.
+        from crt_radar.gpt_transport_boundary import build_pending_state, _seal_state
+        enqueue_bridge_payload(self.root / "legacy-outbox", self.payload)
+        path = self.root / "legacy-outbox" / (self.payload["event"]["event_id"] + ".json")
+        envelope = c.build_envelope(self.payload, self.source, at_ms=NOW, full_decision=True)
+        for has_response in (False, True):
+            with self.subTest(has_response=has_response):
+                root = self.root / str(has_response)
+                root.mkdir()
+                state = _seal_state({**build_pending_state(self.payload), "request_hash": envelope["request_hash"]})
+                (root / path.name).write_text(json.dumps(state), encoding="utf-8")
+                if has_response:
+                    (root / "responses").mkdir()
+                    (root / "responses" / path.name).write_text(json.dumps({
+                        "request": envelope, "response": provider_response(self.rec)}), encoding="utf-8")
+                before = {p.relative_to(root): p.read_bytes() for p in root.rglob("*.json")}
+                transport = Mock()
+                result = deliver_event(path, root, capital_source=self.source, current_main_sha=MAIN,
+                                       now_ms=NOW, transport=transport)
+                self.assertEqual(result["state"], "RECONCILIATION_REQUIRED")
+                self.assertEqual(result["reason"], "LEGACY_CAPITAL_STATE_REQUIRES_RECONCILIATION")
+                transport.assert_not_called()
+                self.assertEqual(before, {p.relative_to(root): p.read_bytes() for p in root.rglob("*.json")})
 
     def test_real_capital_dispatch_is_blocked_before_credentials_or_network(self):
         from crt_radar.gpt_transport_worker import send_response

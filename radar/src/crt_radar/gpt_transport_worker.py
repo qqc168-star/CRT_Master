@@ -168,11 +168,22 @@ def deliver_event(
                    "source_bundle_hash": source_bundle["bundle_hash"], "asset": asset,
                    "posture_candidate": source_bundle["posture_gate"]["posture_candidate"]}
     if capital_source is not None:
-        from .capital_decision_closure import build_envelope, build_projection
+        from .capital_decision_closure import FULL_REQUEST_VERSION, build_envelope, build_projection
         if context is not None:
             raise ValueError("Capital and Commander requests are distinct contracts")
         build_projection(payload, capital_source, at_ms=now)
         envelope = build_envelope(payload, deepcopy(capital_source), at_ms=capital_source["task"]["as_of_ms"], full_decision=True)
+        # Keep Smoke's paths stable; capital shares the same durable machinery
+        # inside a contract namespace, including locks, responses and artifacts.
+        legacy_state = state_dir / f"{event_id}.json"
+        legacy_response = state_dir / "responses" / f"{event_id}.json"
+        if ((legacy_state.exists() and _read_json(legacy_state).get("request_hash") == envelope["request_hash"])
+                or (legacy_response.exists() and "capital_source" in _read_json(legacy_response).get("request", {}))):
+            # Never turn an old unnamespaced send into a fresh delivery.
+            return {"event_id": event_id, "state": "RECONCILIATION_REQUIRED",
+                    "reason": "LEGACY_CAPITAL_STATE_REQUIRES_RECONCILIATION",
+                    "transport_performed": False, "notification_eligible": False}
+        state_dir = state_dir / FULL_REQUEST_VERSION
     else:
         envelope = build_request_envelope(payload, model=SMOKE_MODEL, judgment_context=context)
 

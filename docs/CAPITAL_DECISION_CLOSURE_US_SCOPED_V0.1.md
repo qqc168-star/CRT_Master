@@ -50,13 +50,33 @@ Commander Observation and uses the existing deterministic validator.
 
 The synthetic allocation valuation is derived from the same captured evidence
 as the treasury valuation view. Unqualified valuation remains BLOCKED and cannot
-support a bridge-backed capital increase. Blocked recommendations cannot become
-successful delivery receipts or notifications. Source seals detect mutation,
+support a capital increase, independently of the chosen reference label. Fees
+and instrument references can supplement, but cannot replace, bridge or posture
+investment evidence. Blocked trades cannot become successful delivery receipts
+or notifications. Source seals detect mutation,
 not authenticity; model judgment itself is not proven by these offline checks.
 
-Acceptance: 96 targeted tests and 1,301 full offline regression tests passed.
-The prior test-directory isolation failure did not recur. Complete synthetic
-request body: 30,076 UTF-8 bytes; projection: 23,964 bytes. The original
+For the same event and shared state root, Smoke retains its original paths and
+Capital uses the `CRT_CAPITAL_FULL_DECISION_OFFLINE_V0.1` subdirectory. Locks,
+responses, receipts and recommendation artifacts use that namespace; notification
+identities already include the receipt hash, and receipt lookup selects the
+matching namespace. Both delivery orders and repeated delivery/presentation are
+tested. Existing unnamespaced capital send records require reconciliation rather
+than automatic migration/resend; they are preserved unchanged.
+
+`WAIT + EVIDENCE_BLOCKED` with valid scope, attributed fresh evidence, instrument
+qualification, explicit blocker reasons and no trade legs now yields
+`VALIDATED_NON_TRADING_WAIT`. This permits only a notice saying not to trade and
+to wait for evidence. Source validation failures remain BLOCKED. Unverified
+BUY/SELL/ROTATE remain ineligible, including when mixed with a valid waiting
+conclusion. Existing stored receipts are not rewritten automatically.
+
+Initial acceptance: 96 targeted tests and 1,301 full offline regression tests
+passed. Directed PR #133 repairs passed 106 affected tests and one full offline
+regression of 1,307 tests. The prior test-directory isolation failure did not
+recur. No capacity analysis was repeated for these repairs. Retained initial
+measurement: complete synthetic request body 30,076 UTF-8 bytes; projection
+23,964 bytes. The original
 23,999-byte projection (SHA-256
 `82024692e6ee53d84e407dbe1143c7750d95ea4933cf4d0ae7e5e7dc70f7d6d7`)
 is retained only as the unqualified synthetic composition's capacity baseline.

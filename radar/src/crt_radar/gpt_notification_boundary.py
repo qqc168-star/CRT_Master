@@ -302,6 +302,8 @@ def present(
 def _validated_receipt_from_transport(
     transport_state_dir: str | Path,
     event_id: str,
+    *,
+    capital: bool = False,
 ) -> dict[str, Any]:
     from .gpt_transport_boundary import (
         _read_json as _read_transport_json,
@@ -320,6 +322,9 @@ def _validated_receipt_from_transport(
         raise ValueError("invalid event identity")
 
     root = Path(transport_state_dir)
+    if capital:
+        from .capital_decision_closure import FULL_REQUEST_VERSION
+        root = root / FULL_REQUEST_VERSION
 
     state = _validate_transport_state(
         _read_transport_json(root / f"{event_id}.json")
@@ -377,10 +382,13 @@ def ensure_from_transport(
     transport_state_dir: str | Path,
     notification_state_dir: str | Path,
     event_id: str,
+    *,
+    capital: bool = False,
 ) -> dict[str, Any]:
     receipt = _validated_receipt_from_transport(
         transport_state_dir,
         event_id,
+        capital=capital,
     )
 
     return ensure_pending(
@@ -603,6 +611,7 @@ def present_from_transport(
     receipt = _validated_receipt_from_transport(
         transport_state_dir,
         notification["event_id"],
+        capital="capital_validation" in notification,
     )
 
     _assert_notification_binds_receipt(
