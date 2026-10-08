@@ -168,6 +168,16 @@ def _position_line(private_context: dict[str, Any] | None) -> str:
     rate = strc.get("current_annual_distribution_rate")
     six_month_cash = derived.get("six_month_cash_usd")
     minimum = derived.get("minimum_shares_for_target")
+    if not all(isinstance(value, (int, float)) and not isinstance(value, bool)
+               for value in (rate, six_month_cash)):
+        reconciliation = profile.get("capital_reconciliation") or {}
+        broker = reconciliation.get("broker_observed") or {}
+        holdings = ", ".join(f'{row["asset"]} {row["quantity"]} 股' for row in broker.get("holdings", []))
+        return (
+            f"本次券商資本觀測狀態為 {reconciliation.get('state', 'BLOCKED')}（資本資料資格），"
+            f"已觀測持倉：{holdings or '尚無可驗證持倉'}；"
+            "歷史配息政策資料不足，配息與目標股數主張受阻，不推估數值。"
+        )
     return (
         f"\u672c\u6a5f\u8a2d\u5b9a\u70ba STRC {shares} \u80a1\u3001\u76ee\u524d\u52d5\u614b\u914d\u606f\u7387 {float(rate) * 100:.2f}%\uff1b"
         f"\u4f30\u7b97\u672a\u6263\u7a05\u534a\u5e74\u73fe\u91d1\u70ba ${float(six_month_cash):,.2f}\uff0c\u76ee\u6a19\u6240\u9700\u81f3\u5c11 {minimum} \u80a1\u3002"
@@ -222,6 +232,7 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
         requested
         and wake.get("input_family") == "COMMANDER_PLAN_OBSERVATION"
     )
+    capital_requested = requested and "BROKER_CAPITAL_STATE" in wake.get("wake_sources", [])
     commander_event = wake.get("commander_event")
     if commander_observation and not isinstance(commander_event, dict):
         raise ValueError("Commander observation wake event is unavailable")
@@ -242,7 +253,12 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
                      if str(reason).endswith(":BTC_PER_DILUTED_SHARE_DECREASED")
                      and str(reason).split(":")[0] + "_ISSUER_RATIO_OBSERVATION" in wake.get("wake_sources", [])]
     issuer_observation_requested = requested and wake.get("input_family") == "ISSUER_RATIO_OBSERVATION" and bool(issuer_events)
-    if issuer_observation_requested:
+    if capital_requested:
+        what_happened = (
+            "已驗證的券商資本觀測或使用者確認意圖出現實質變化，"
+            "需重新判斷資本配置。這是重新分析要求，沒有交易授權。"
+        )
+    elif issuer_observation_requested:
         what_happened = (
             "Issuer BTC/share observation requires GPT reanalysis: " + ", ".join(issuer_events)
             + ". Observation only; no Company Health deterioration or trade action is inferred."
@@ -364,7 +380,15 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(blockers, list):
         blockers = []
 
-    if issuer_observation_requested:
+    if capital_requested:
+        title = "資本狀態變化，需重新分析"
+        state = "GPT_REANALYSIS_REQUESTED"
+        instruction = (
+            "讀取本次每日證據、同次券商觀測、資本調節結果與使用者確認意圖。"
+            "重新評估資本決策，揭露資金、持倉、委託與資格限制；"
+            "不得把喚醒或分析資金提升成交易資格。僅提供建議，禁止執行交易。"
+        )
+    elif issuer_observation_requested:
         title = "Issuer ratio observation requires GPT reanalysis"
         state = "GPT_REANALYSIS_REQUESTED"
         instruction = (

@@ -940,6 +940,8 @@ def _bridge_plan_drift(
 def build_minimized_bridge_payload(
     pack: dict[str, Any],
     handoff: dict[str, Any],
+    *,
+    full_decision: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(pack, dict):
         raise ValueError(
@@ -959,6 +961,12 @@ def build_minimized_bridge_payload(
             "Bridge payload requires "
             "GPT_HANDOFF_READY"
         )
+
+    handoff_scope = handoff.get("semantic_descriptor", {}).get("delivery_scope")
+    if full_decision and handoff_scope != "FULL_DECISION_OFFLINE":
+        raise ValueError("Full-decision bridge requires its own current handoff; old events cannot be rebound")
+    if not full_decision and handoff_scope == "FULL_DECISION_OFFLINE":
+        raise ValueError("Full-decision handoff cannot be used as a Smoke bridge")
 
     pack_hash = pack.get(
         "evidence_pack_hash"
@@ -1224,8 +1232,15 @@ def build_minimized_bridge_payload(
         payload["issuer_ratio_observation"] = compact_issuer_ratio_observation(
             pack["issuer_ratio_observation"], generated_at_ms=pack["generated_at_ms"],
         )
+    if full_decision:
+        payload["analysis_contract"]["delivery_scope"] = "FULL_DECISION_OFFLINE"
     _assert_bridge_privacy(payload)
-    _bound_bridge_detail(payload, pack)
+    if full_decision:
+        # Share literal equal observations only. Full-decision evidence never
+        # inherits Smoke's capacity-triggered audit/history omissions.
+        _compact_premarket_refs(payload)
+    else:
+        _bound_bridge_detail(payload, pack)
 
     payload[
         "bridge_payload_hash"
@@ -1233,9 +1248,20 @@ def build_minimized_bridge_payload(
 
     _assert_bridge_privacy(expand_bridge_field_names(payload))
 
-    if _bridge_size(payload) >= BRIDGE_CEILING_BYTES:
+    if not full_decision and _bridge_size(payload) >= BRIDGE_CEILING_BYTES:
         raise ValueError("Decision-critical bridge exceeds the unchanged 16 KiB ceiling")
     return payload
+
+
+def build_full_decision_bridge_payload(
+    pack: dict[str, Any], handoff: dict[str, Any],
+) -> dict[str, Any]:
+    """Reuse the local bridge projection under the distinct offline contract.
+
+    The Smoke request ceiling is not a full-decision evidence limit. This
+    wrapper grants no provider delivery or production authority.
+    """
+    return build_minimized_bridge_payload(pack, handoff, full_decision=True)
 
 
 def _bridge_size(value: Any) -> int:
@@ -1920,6 +1946,7 @@ def _violated_condition_signatures(
 
 def _semantic_descriptor(
     pack: dict[str, Any],
+    *, full_decision: bool = False,
 ) -> dict[str, Any]:
     wake = pack.get("reanalysis_wake")
     plan_drift = pack.get("plan_drift")
@@ -1976,6 +2003,11 @@ def _semantic_descriptor(
             )
         ),
     }
+    if full_decision:
+        descriptor["delivery_scope"] = "FULL_DECISION_OFFLINE"
+    capital_change = wake.get("capital_change")
+    if isinstance(capital_change, dict) and capital_change.get("current_state_hash") is not None:
+        descriptor["capital_state_hash"] = capital_change["current_state_hash"]
 
     if (
         "issuer_announcement_wake" in pack
@@ -2025,21 +2057,26 @@ def _semantic_descriptor(
 
 def semantic_wake_key(
     pack: dict[str, Any],
+    *, full_decision: bool = False,
 ) -> str:
     return _canonical_hash(
-        _semantic_descriptor(pack)
+        _semantic_descriptor(pack, full_decision=full_decision)
     )
 
 
 def _last_gate_record(
     ledger: RunLedger,
+    *, full_decision: bool = False,
 ) -> dict[str, Any] | None:
     for row in reversed(ledger.records()):
         if row.get("record_type") in {
             HANDOFF_RECORD_TYPE,
             RESET_RECORD_TYPE,
         }:
-            return row
+            payload = row.get("payload", {})
+            scope = payload.get("delivery_scope", payload.get("semantic_descriptor", {}).get("delivery_scope"))
+            if scope == ("FULL_DECISION_OFFLINE" if full_decision else None):
+                return row
 
     return None
 
@@ -2067,6 +2104,7 @@ def run_gpt_handoff_gate(
     *,
     ledger_path: str | Path,
     bridge_outbox_dir: str | Path | None = None,
+    full_decision: bool = False,
 ) -> dict[str, Any]:
     if not isinstance(pack, dict):
         raise ValueError(
@@ -2159,7 +2197,7 @@ def run_gpt_handoff_gate(
                 + "; ".join(validation.errors)
             )
 
-        last = _last_gate_record(ledger)
+        last = _last_gate_record(ledger, full_decision=full_decision)
 
         if (
             last is None
@@ -2194,6 +2232,7 @@ def run_gpt_handoff_gate(
                 "source_notice_hash": notice.get(
                     "notice_hash"
                 ),
+                **({"delivery_scope": "FULL_DECISION_OFFLINE"} if full_decision else {}),
                 **_authority(),
             },
         )
@@ -2209,7 +2248,7 @@ def run_gpt_handoff_gate(
         ]
         return result
 
-    descriptor = _semantic_descriptor(pack)
+    descriptor = _semantic_descriptor(pack, full_decision=full_decision)
     semantic_key = _canonical_hash(descriptor)
 
     ledger = RunLedger(ledger_file)
@@ -2221,7 +2260,7 @@ def run_gpt_handoff_gate(
             + "; ".join(validation.errors)
         )
 
-    last = _last_gate_record(ledger)
+    last = _last_gate_record(ledger, full_decision=full_decision)
 
     if (
         last is not None
@@ -2359,6 +2398,7 @@ def run_gpt_handoff_gate(
         bridge_payload = build_minimized_bridge_payload(
             pack,
             payload,
+            full_decision=full_decision,
         )
         outbox_result = enqueue_bridge_payload(
             bridge_outbox_dir,

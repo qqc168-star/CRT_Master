@@ -86,14 +86,38 @@ class _NoRedirect(urlrequest.HTTPRedirectHandler):
         raise ValueError("Provider redirects forbidden")
 
 
+class _ProviderHTTPResponse(dict):
+    """In-process provenance for the shared HTTP boundary, never provider text."""
+
+
+def _requires_capital_contract(payload: dict[str, Any]) -> bool:
+    expanded = expand_bridge_field_names(payload)
+    return (expanded["analysis_contract"].get("delivery_scope") == "FULL_DECISION_OFFLINE"
+            or "BROKER_CAPITAL_STATE" in expanded["event"].get("wake", {}).get("wake_sources", []))
+
+
 def send_response(envelope: dict[str, Any]) -> dict[str, Any]:
     """Send only the validated request body to the fixed TLS provider endpoint."""
     validate_request_envelope(envelope)
     if "capital_source" in envelope:
         raise ValueError("Capital model delivery requires independent approval; OFFLINE_ONLY")
+    return _post_response(envelope)
+
+
+def _post_response(envelope: dict[str, Any]) -> dict[str, Any]:
+    """Shared fixed-endpoint HTTP implementation; callers own authorization.
+
+    The normal sender above continues to reject capital. The repository-only
+    controlled acceptance entry is the sole additional caller and checks an
+    exact synthetic request plus one-shot human approval before reaching here.
+    """
+    validate_request_envelope(envelope)
     decoded = json.loads(envelope["request_body"]["input"])
-    validate_transport_payload(envelope["capital_bridge_payload"] if "capital_source" in envelope else
-                               decoded["bridge_payload"] if "text" in envelope["request_body"] else decoded)
+    payload = (envelope["capital_bridge_payload"] if "capital_source" in envelope else
+               decoded["bridge_payload"] if "text" in envelope["request_body"] else decoded)
+    validate_transport_payload(payload)
+    if _requires_capital_contract(payload) and "capital_source" not in envelope:
+        raise ValueError("Capital wake/full decision cannot be downgraded to Smoke; capital source required")
     key = os.environ.get(API_KEY_ENV_VAR, "").strip()
     if not key:
         raise ValueError("Provider credential unavailable")
@@ -114,7 +138,7 @@ def send_response(envelope: dict[str, Any]) -> dict[str, Any]:
     response = json.loads(raw)
     if not isinstance(response, dict):
         raise ValueError("Provider response is not an object")
-    return response
+    return _ProviderHTTPResponse(response)
 
 
 def _receipt(response: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
@@ -139,6 +163,8 @@ def deliver_event(
     event_id, payload_hash = validate_transport_payload(payload)
     if outbox_path.stem != event_id:
         raise ValueError("Outbox event filename mismatch")
+    if _requires_capital_contract(payload) and capital_source is None:
+        raise ValueError("Capital wake/full decision cannot be downgraded to Smoke; capital source required")
     # Freeze caller-owned source inputs before validation or provider dispatch.
     source_bundle = deepcopy(source_bundle)
     context = None

@@ -142,6 +142,10 @@ def run_daily_evidence(
     private_context: dict[str, Any] | None = None,
     broker_capital_observation: dict[str, Any] | None = None,
     user_capital_intent: dict[str, Any] | None = None,
+    full_decision_intent: dict[str, Any] | None = None,
+    previous_capital_reconciliation: dict[str, Any] | None = None,
+    previous_capital_at_ms: int | None = None,
+    previous_full_decision_intent: dict[str, Any] | None = None,
     dvol_regime_runner: Callable[..., dict[str, Any]] | None = None,
     transition_diagnostic_runner: Callable[..., dict[str, Any]] | None = None,
     btc_entry_gate_context: dict[str, Any] | None = None,
@@ -170,6 +174,24 @@ def run_daily_evidence(
         now_ms=now_ms,
     )
     source_gate = apply_runtime_checks(source_gate, runtime_checks)
+    # One evaluation clock and one captured account snapshot serve the wake,
+    # reconciliation, Evidence Pack and later capital-source binding.
+    if generated_at_ms is None:
+        generated_at_ms = now_ms if now_ms is not None else int(time.time() * 1000)
+    retained = ((private_context or {}).get("profile", {}).get("capital_reconciliation") or {})
+    current_capital = None
+    if broker_capital_observation is not None or user_capital_intent is not None or retained:
+        from .broker_capital_observation import adapt_capital_intent, reconcile_capital
+        from .private_profile import apply_broker_capital_state
+        broker_capital_observation = (broker_capital_observation if broker_capital_observation is not None
+                                      else retained.get("broker_observed"))
+        user_capital_intent = (user_capital_intent if user_capital_intent is not None
+                               else retained.get("user_confirmed"))
+        intent_adapter = adapt_capital_intent(user_capital_intent, full_decision_intent)
+        full_decision_intent = intent_adapter["full_decision_intent"]
+        current_capital = reconcile_capital(broker_capital_observation, user_capital_intent, at_ms=generated_at_ms)
+        private_context = apply_broker_capital_state(private_context, current_capital)
+        private_context["profile"]["full_decision_intent"] = full_decision_intent
     recorded_at_ms = int(generated_at_ms) if generated_at_ms is not None else None
     current_observations = extract_observations(source_gate, recorded_at_ms=recorded_at_ms)
 
@@ -259,6 +281,16 @@ def run_daily_evidence(
             acceptance_override_metadata
         )
 
+    if current_capital is not None:
+        from .reanalysis_wake import apply_capital_reanalysis_wake
+        reanalysis_wake = apply_capital_reanalysis_wake(
+            reanalysis_wake, current_capital, at_ms=generated_at_ms,
+            previous_reconciliation=previous_capital_reconciliation,
+            previous_at_ms=previous_capital_at_ms,
+            decision_intent=full_decision_intent,
+            previous_decision_intent=previous_full_decision_intent,
+        )
+
     if reanalysis_wake["state"] == "REANALYSIS_REQUESTED":
         if transition_diagnostic_runner is None:
             transition_diagnostic = blocked_transition_diagnostic(
@@ -343,6 +375,87 @@ def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
     return payload
 
 
+def _load_previous_evidence_pack(path: Path) -> dict[str, Any] | None:
+    """Use the previous authenticated pack as a historical comparison only."""
+    if not path.exists():
+        return None
+    try:
+        pack = _load_json_object(path, label="Previous Evidence Pack")
+        from .capital_decision_closure import digest
+        if pack.get("evidence_pack_hash") != digest({k: v for k, v in pack.items() if k != "evidence_pack_hash"}):
+            return None
+        return pack
+    except (ValueError, TypeError):
+        return None
+
+
+def build_daily_capital_source(
+    pack: dict[str, Any], payload: dict[str, Any], *,
+    handoff: dict[str, Any],
+    broker_observation: dict[str, Any] | None,
+    user_capital_intent: dict[str, Any] | None,
+    decision_inputs: dict[str, Any], source_main_sha: str, at_ms: int,
+) -> dict[str, Any]:
+    """Bind one day's existing source assembler to the same local account proof.
+
+    This local wrapper adds provenance, not a second capital engine. Missing
+    fee/instrument/cash permissions remain absent facts in the existing source;
+    each affected claim is blocked by the existing deterministic validator.
+    """
+    from . import capital_decision_closure as c
+    from .broker_capital_observation import MAX_AGE_MS, adapt_capital_intent, reconcile_capital
+    result = {"state": "BLOCKED", "storage": "LOCAL_ONLY", "source": None,
+              "blockers": [], "production": "NOT_APPROVED", "external_action_authority": "NONE",
+              "capital_decision_authority": "USER_ONLY", "machine_execution": "FORBIDDEN"}
+    try:
+        c.require(type(at_ms) is int and pack.get("generated_at_ms") == at_ms, "DAILY_SOURCE_CLOCK_MISMATCH")
+        c.require(pack.get("evidence_pack_hash") == c.digest({k: v for k, v in pack.items() if k != "evidence_pack_hash"}),
+                  "DAILY_EVIDENCE_HASH_INVALID")
+        c.require(payload.get("event", {}).get("source_evidence_pack_hash") == pack["evidence_pack_hash"],
+                  "DAILY_BRIDGE_EVIDENCE_MISMATCH")
+        expected = reconcile_capital(broker_observation, user_capital_intent, at_ms=at_ms)
+        supplied = pack.get("private_context", {}).get("profile", {}).get("capital_reconciliation")
+        c.require(supplied == expected, "DAILY_RECONCILIATION_IDENTITY_MISMATCH")
+        from .gpt_handoff import _bridge_capital_state
+        c.require(payload.get("capital_state") == _bridge_capital_state(pack.get("private_context"), generated_at_ms=at_ms),
+                  "DAILY_BRIDGE_CAPITAL_MISMATCH")
+        from .gpt_handoff import build_full_decision_bridge_payload
+        c.require(payload == build_full_decision_bridge_payload(pack, handoff), "DAILY_BRIDGE_PROJECTION_MISMATCH")
+        c.require(isinstance(decision_inputs, dict), "FULL_DECISION_INPUTS_REQUIRED")
+        c.require(set(decision_inputs) <= {"user_intent", "qualification", "instruments", "fees", "task",
+                                         "evidence_validity", "posture_context"}, "FULL_DECISION_INPUTS_FIELDS_INVALID")
+        c.require("task" in decision_inputs and "evidence_validity" in decision_inputs, "FULL_DECISION_TASK_AND_VALIDITY_REQUIRED")
+        adapter = adapt_capital_intent(user_capital_intent, decision_inputs.get("user_intent"))
+        c.require("CAPITAL_INTENT_IDENTITY_MISMATCH" not in adapter["blockers"], "CAPITAL_INTENT_IDENTITY_MISMATCH")
+        q = decision_inputs.get("qualification")
+        if q is not None:
+            c.require(q.get("observation_hash") == (expected.get("broker_observed") or {}).get("observation_hash"),
+                      "QUALIFICATION_SNAPSHOT_MISMATCH")
+        c.fresh(decision_inputs["evidence_validity"], at_ms)
+        source = c.build_source(payload=payload, source_main_sha=source_main_sha,
+            broker_observation=expected.get("broker_observed"), user_intent=adapter["full_decision_intent"],
+            qualification=q, instruments=decision_inputs.get("instruments", []), fees=decision_inputs.get("fees", []),
+            task=decision_inputs["task"], evidence_validity=decision_inputs["evidence_validity"],
+            posture_context=decision_inputs.get("posture_context"), at_ms=at_ms)
+        projection = c.build_projection(payload, source, at_ms=at_ms)
+        clocks = [source["task"]["valid_until_ms"], source["evidence_validity"]["valid_until_ms"]]
+        broker = source["broker_observation"]
+        if broker is not None:
+            clocks.append(broker["observed_at_ms"] + MAX_AGE_MS)
+        if q is not None:
+            clocks.append(q["valid_until_ms"])
+        result.update(state="SOURCE_BOUND", source=source, source_hash=c.source_hash(source),
+            binding={"evidence_pack_hash": pack["evidence_pack_hash"], "bridge_payload_hash": payload["bridge_payload_hash"],
+                     "broker_observation_hash": (broker or {}).get("observation_hash"),
+                     "reconciliation_hash": c.digest(expected), "as_of_ms": at_ms, "valid_until_ms": min(clocks)},
+            claim_states={"spending_cap": projection["spending_cap"]}, blockers=adapter["blockers"])
+        if projection["spending_cap"]["state"] == "BLOCKED":
+            result["blockers"].append(projection["spending_cap"]["reason"])
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        result["blockers"] = [str(exc)]
+    return result
+
+
 def _load_previous_season_transition_overlay(
     evidence_pack_path: Path,
 ) -> dict[str, Any] | None:
@@ -392,6 +505,12 @@ def main(argv: list[str] | None = None) -> int:
                                 help="Read current capital from existing local TWS, without order authority.")
     parser.add_argument("--user-capital-intent", type=Path,
                         help="Private USER_CONFIRMED reserve and cancellation facts; never infer from old plans.")
+    parser.add_argument("--capital-decision-inputs", type=Path,
+                        help="LOCAL_ONLY explicit full-decision intent, qualifications, fees, task and validity; no inferred facts.")
+    parser.add_argument("--capital-source-output", type=Path,
+                        help="LOCAL_ONLY source binding status; per-event sources are immutable beside this file.")
+    parser.add_argument("--source-main-sha", type=str,
+                        help="Verified engineering source commit for full-decision source binding.")
     parser.add_argument("--treasury-valuation-inputs", type=Path, default=None,
         help="Local verified CT histories for MSTR/ASST; absent claims remain BLOCKED.")
     parser.add_argument("--btc-etf-archive", type=Path, default=None,
@@ -531,6 +650,11 @@ def main(argv: list[str] | None = None) -> int:
             "--handoff-output and --handoff-ledger"
         )
 
+    if args.capital_decision_inputs is not None and (
+        args.capital_source_output is None or args.source_main_sha is None or args.bridge_outbox_dir is None
+    ):
+        raise ValueError("--capital-decision-inputs requires --capital-source-output, --source-main-sha and --bridge-outbox-dir")
+
     registry = SourceRegistry.load(args.registry)
     liquidation_payload = _load_liquidation_snapshot(args.liquidation_snapshot)
     runtime_checks: list[dict[str, Any]] = []
@@ -543,7 +667,9 @@ def main(argv: list[str] | None = None) -> int:
             )
         )
 
-    private_context = load_private_profile(args.private_profile)
+    private_context = load_private_profile(args.private_profile,
+        include_capital_sidecars=not (args.observe_broker_capital or args.broker_capital_observation is not None
+                                     or args.user_capital_intent is not None))
     broker_observation = None
     if args.observe_broker_capital:
         from .broker_capital_observation import BLOCKED_BROKER_REASONS, capture_ibkr_capital
@@ -559,6 +685,10 @@ def main(argv: list[str] | None = None) -> int:
         broker_observation = _load_json_object(args.broker_capital_observation, label="Broker capital observation")
     capital_intent = (_load_json_object(args.user_capital_intent, label="User capital intent")
                       if args.user_capital_intent is not None else None)
+    decision_inputs = (_load_json_object(args.capital_decision_inputs, label="Full capital decision inputs")
+                       if args.capital_decision_inputs is not None else None)
+    previous_pack = _load_previous_evidence_pack(args.output)
+    previous_profile = (previous_pack or {}).get("private_context", {}).get("profile", {})
     btc_entry_gate_context = load_btc_entry_gate_context(args.btc_entry_context)
     assumption_watch_context = load_assumption_watch_context(args.assumption_context)
     mstr_asst_market_health = (
@@ -620,6 +750,10 @@ def main(argv: list[str] | None = None) -> int:
         private_context=private_context,
         broker_capital_observation=broker_observation,
         user_capital_intent=capital_intent,
+        full_decision_intent=(decision_inputs or {}).get("user_intent"),
+        previous_capital_reconciliation=previous_profile.get("capital_reconciliation"),
+        previous_capital_at_ms=(previous_pack or {}).get("generated_at_ms"),
+        previous_full_decision_intent=previous_profile.get("full_decision_intent"),
         treasury_valuation_inputs=(
             _load_json_object(args.treasury_valuation_inputs, label="Treasury valuation inputs")
             if args.treasury_valuation_inputs is not None else {}
@@ -683,6 +817,7 @@ def main(argv: list[str] | None = None) -> int:
             notice,
         )
 
+    handoff = None
     if args.handoff_output is not None:
         assert notice is not None
         assert args.handoff_ledger is not None
@@ -692,12 +827,39 @@ def main(argv: list[str] | None = None) -> int:
             notice,
             ledger_path=args.handoff_ledger,
             bridge_outbox_dir=args.bridge_outbox_dir,
+            full_decision=decision_inputs is not None,
         )
 
         write_json_atomic(
             args.handoff_output,
             handoff,
         )
+
+    if args.capital_source_output is not None:
+        bound = {"state": "BLOCKED", "storage": "LOCAL_ONLY", "source": None,
+                 "blockers": ["FULL_DECISION_INPUTS_NOT_SUPPLIED"], "production": "NOT_APPROVED",
+                 "external_action_authority": "NONE", "capital_decision_authority": "USER_ONLY",
+                 "machine_execution": "FORBIDDEN"}
+        if decision_inputs is not None:
+            if handoff is None or handoff.get("append_status") != "APPENDED":
+                bound["blockers"] = ["NO_NEW_FULL_DECISION_EVENT_SOURCE_NOT_REBOUND"]
+            else:
+                event_id = handoff["event_id"]
+                payload = _load_json_object(args.bridge_outbox_dir / f"{event_id}.json", label="Current full decision bridge")
+                bound = build_daily_capital_source(pack, payload, broker_observation=broker_observation,
+                    handoff=handoff,
+                    user_capital_intent=capital_intent, decision_inputs=decision_inputs,
+                    source_main_sha=args.source_main_sha, at_ms=pack["generated_at_ms"])
+                if bound["source"] is not None:
+                    target = args.capital_source_output.parent / "sources" / f"{event_id}.json"
+                    if target.exists():
+                        if _load_json_object(target, label="Existing capital source") != bound["source"]:
+                            raise ValueError("Existing event capital source must not be rebound")
+                    else:
+                        write_json_atomic(target, bound["source"])
+                    bound["event_id"] = event_id
+                    bound["source_path"] = str(target)
+        write_json_atomic(args.capital_source_output, bound)
 
     if (args.maturity_ledger is None) != (args.maturity_status is None):
         raise ValueError("--maturity-ledger and --maturity-status must be supplied together")

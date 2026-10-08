@@ -643,7 +643,7 @@ def _load_historical_private_profile(path: str | Path | None = None) -> dict[str
     }
 
 
-def load_private_profile(path: str | Path | None = None) -> dict[str, Any]:
+def load_private_profile(path: str | Path | None = None, *, include_capital_sidecars: bool = True) -> dict[str, Any]:
     """Reuse the local profile with optional private broker/intent sidecars.
 
     Retained observations keep their original clock: loading a file is not a
@@ -651,6 +651,8 @@ def load_private_profile(path: str | Path | None = None) -> dict[str, Any]:
     """
     target = default_private_profile_path() if path is None else Path(path)
     context = _load_historical_private_profile(target)
+    if not include_capital_sidecars:
+        return context
     observed_path = target.with_name("broker-capital-observation.json")
     intent_path = target.with_name("capital-intent.json")
     if not observed_path.exists() and not intent_path.exists():

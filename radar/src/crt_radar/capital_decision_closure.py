@@ -670,17 +670,21 @@ def validated_receipt(response, envelope, *, at_ms):
     from .gpt_handoff import expand_bridge_field_names
     expanded = expand_bridge_field_names(envelope["capital_bridge_payload"])
     valuations = expanded["market_context"].get("treasury_valuation_context", {})
+    if not isinstance(valuations, dict):
+        valuations = {}
     if "assets" in valuations:
-        valuations = {asset: {**valuations.get("common", {}), **row}
-                      for asset, row in valuations["assets"].items()}
+        common = valuations.get("common", {})
+        rows = valuations["assets"]
+        valuations = {asset: {**(common if isinstance(common, dict) else {}), **row}
+                      if isinstance(row, dict) else None
+                      for asset, row in (rows.items() if isinstance(rows, dict) else [])}
     for item in recommendation.get("items", []):
         if item.get("action") in {"BUY", "ROTATE"}:
-            assets = {item.get("asset")} | {leg.get("asset") for leg in item.get("legs", []) if leg.get("action") == "BUY"}
-            for asset in assets:
+            buy_assets = {leg["asset"] for leg in item["legs"] if leg["action"] == "BUY"}
+            for asset in buy_assets & {"MSTR", "ASST"}:
                 valuation = valuations.get(asset)
-                if valuation is not None:
-                    require(valuation.get("formal_action_critical_state") == "AVAILABLE",
-                            "VALUATION_EVIDENCE_UNQUALIFIED:" + str(asset))
+                require(isinstance(valuation, dict) and valuation.get("formal_action_critical_state") == "AVAILABLE",
+                        "VALUATION_EVIDENCE_UNQUALIFIED:" + asset)
     require(all(item["validation_state"] in {"VALIDATED", "VALIDATED_NON_TRADING_WAIT"}
                 for item in validation["items"]),
             "CAPITAL_RECOMMENDATION_NOT_VALIDATED")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from crt_radar.gpt_bridge_outbox import (
 )
 from crt_radar.gpt_handoff import (
     build_minimized_bridge_payload,
+    build_full_decision_bridge_payload,
     run_gpt_handoff_gate,
     semantic_wake_key,
 )
@@ -18,6 +20,11 @@ from crt_radar.plain_language_notice import (
     build_plain_language_notice,
 )
 from crt_radar.run_ledger import RunLedger
+from crt_radar.broker_capital_observation import reconcile_capital
+from crt_radar.private_profile import apply_broker_capital_state
+from crt_radar.reanalysis_wake import apply_capital_reanalysis_wake
+
+NOW = 1790930000000
 
 
 def authority() -> dict:
@@ -1605,6 +1612,110 @@ class GptHandoffGateTests(unittest.TestCase):
                 stored["bridge_payload_hash"],
                 first_bridge["bridge_payload_hash"],
             )
+
+
+class CapitalHandoffTests(unittest.TestCase):
+    def capital_pack(self, evidence_hash, *, at=NOW, cash=1000, previous=None):
+        from tests.test_broker_capital_observation import synthetic_intent, synthetic_observation
+        current = reconcile_capital(synthetic_observation(at=at,
+            funds={"cash_usd": cash, "available_funds_usd": 800, "settled_cash_usd": None}),
+            synthetic_intent(at=at), at_ms=at)
+        result = bridge_pack(pack(evidence_hash=evidence_hash, requested=False))
+        result["generated_at_ms"] = at
+        result["private_context"] = apply_broker_capital_state(result["private_context"], current)
+        result["reanalysis_wake"] = apply_capital_reanalysis_wake(result["reanalysis_wake"], current,
+            at_ms=at, previous_reconciliation=previous, previous_at_ms=NOW if previous else None)
+        return result, current
+
+    def test_changed_capital_emits_new_current_event_without_rebinding_previous_outbox(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); ledger = root / "handoff.jsonl"; outbox = root / "outbox"
+            first_pack, first_reconciliation = self.capital_pack("a" * 64)
+            first = run_gpt_handoff_gate(first_pack, build_plain_language_notice(first_pack),
+                ledger_path=ledger, bridge_outbox_dir=outbox, full_decision=True)
+            old_path = outbox / (first["event_id"] + ".json")
+            old_bytes = old_path.read_bytes()
+            changed_pack, changed_reconciliation = self.capital_pack("b" * 64, cash=1200,
+                previous=first_reconciliation)
+            changed = run_gpt_handoff_gate(changed_pack, build_plain_language_notice(changed_pack),
+                ledger_path=ledger, bridge_outbox_dir=outbox, full_decision=True)
+            self.assertEqual(changed["state"], "GPT_HANDOFF_READY")
+            self.assertNotEqual(first["event_id"], changed["event_id"])
+            self.assertEqual(old_path.read_bytes(), old_bytes)
+            self.assertEqual(changed["source_evidence_pack_hash"], "b" * 64)
+            # A -> B -> A is a new observed capital change, not a global hash ban.
+            back_pack, _ = self.capital_pack("c" * 64, previous=changed_reconciliation)
+            back = run_gpt_handoff_gate(back_pack, build_plain_language_notice(back_pack),
+                ledger_path=ledger, bridge_outbox_dir=outbox, full_decision=True)
+            self.assertNotEqual(back["event_id"], first["event_id"])
+            self.assertEqual(len(list(outbox.glob("*.json"))), 3)
+
+    def test_timestamp_only_refresh_does_not_create_event_and_duplicate_call_does_not_rebind(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); ledger = root / "handoff.jsonl"; outbox = root / "outbox"
+            initial, reconciliation = self.capital_pack("a" * 64)
+            first = run_gpt_handoff_gate(initial, build_plain_language_notice(initial),
+                ledger_path=ledger, bridge_outbox_dir=outbox, full_decision=True)
+            duplicate_pack = deepcopy(initial); duplicate_pack["evidence_pack_hash"] = "b" * 64
+            duplicate = run_gpt_handoff_gate(duplicate_pack, build_plain_language_notice(duplicate_pack),
+                ledger_path=ledger, bridge_outbox_dir=outbox, full_decision=True)
+            self.assertEqual(duplicate["state"], "DUPLICATE_SKIPPED")
+            self.assertEqual(duplicate["event_id"], first["event_id"])
+            refreshed, _ = self.capital_pack("c" * 64, at=NOW + 1000, previous=reconciliation)
+            result = run_gpt_handoff_gate(refreshed, build_plain_language_notice(refreshed),
+                ledger_path=ledger, bridge_outbox_dir=outbox, full_decision=True)
+            self.assertEqual(result["state"], "NO_HANDOFF")
+            self.assertEqual(len(list(outbox.glob("*.json"))), 1)
+            self.assertEqual(len([row for row in RunLedger(ledger).records()
+                if row["record_type"] == "GPT_HANDOFF"]), 1)
+
+    def test_full_scope_is_distinct_and_old_smoke_event_cannot_be_rebound(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            current, _ = self.capital_pack("a" * 64)
+            smoke = run_gpt_handoff_gate(current, build_plain_language_notice(current),
+                ledger_path=root / "handoff.jsonl")
+            with self.assertRaisesRegex(ValueError, "old events cannot be rebound"):
+                build_full_decision_bridge_payload(current, smoke)
+            full = run_gpt_handoff_gate(current, build_plain_language_notice(current),
+                ledger_path=root / "handoff.jsonl", full_decision=True)
+            self.assertNotEqual(smoke["event_id"], full["event_id"])
+            payload = build_full_decision_bridge_payload(current, full)
+            self.assertEqual(payload["analysis_contract"]["delivery_scope"], "FULL_DECISION_OFFLINE")
+            self.assertEqual(payload["authority"]["production"], "NOT_APPROVED")
+            self.assertEqual(payload["authority"]["external_action_authority"], "NONE")
+            self.assertFalse(payload["authority"]["machine_may_execute_trade"])
+            with self.assertRaisesRegex(ValueError, "Smoke"):
+                build_minimized_bridge_payload(current, full)
+
+    def test_capital_notice_requests_review_with_no_trading_permission(self):
+        current, _ = self.capital_pack("a" * 64)
+        notice = build_plain_language_notice(current)
+        self.assertEqual(notice["title"], "資本狀態變化，需重新分析")
+        self.assertIn("禁止執行交易", notice["instruction_for_gpt"])
+        self.assertEqual(notice["external_action_authority"], "NONE")
+
+    def test_smoke_and_full_ledger_episodes_dedupe_and_reset_independently(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td); ledger = root / "handoff.jsonl"
+            current, _ = self.capital_pack("a" * 64)
+            notice = build_plain_language_notice(current)
+            smoke = run_gpt_handoff_gate(current, notice, ledger_path=ledger)
+            full = run_gpt_handoff_gate(current, notice, ledger_path=ledger, full_decision=True)
+            for mode, original in ((False, smoke), (True, full)):
+                duplicate = run_gpt_handoff_gate(current, notice, ledger_path=ledger, full_decision=mode)
+                self.assertEqual(duplicate["state"], "DUPLICATE_SKIPPED")
+                self.assertEqual(duplicate["event_id"], original["event_id"])
+            quiet = deepcopy(current); quiet["reanalysis_wake"] = pack(evidence_hash="b" * 64,
+                requested=False)["reanalysis_wake"]
+            reset = run_gpt_handoff_gate(quiet, build_plain_language_notice(quiet),
+                ledger_path=ledger, full_decision=True)
+            self.assertEqual(reset["append_status"], "RESET_APPENDED")
+            unchanged_smoke = run_gpt_handoff_gate(current, notice, ledger_path=ledger)
+            self.assertEqual(unchanged_smoke["state"], "DUPLICATE_SKIPPED")
+            self.assertEqual(unchanged_smoke["event_id"], smoke["event_id"])
+            repeated_full = run_gpt_handoff_gate(current, notice, ledger_path=ledger, full_decision=True)
+            self.assertNotEqual(repeated_full["event_id"], full["event_id"])
 
 
 if __name__ == "__main__":

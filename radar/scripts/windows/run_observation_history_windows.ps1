@@ -29,6 +29,9 @@ $PhoneL4 = Join-Path $RuntimeRoot "incoming\l4\latest.json"
 $ObservationDb = Join-Path $RuntimeRoot "observations.sqlite3"
 $EvidenceOutput = Join-Path $RuntimeRoot "evidence\latest.json"
 $PrivateProfile = Join-Path $RuntimeRoot "private\portfolio.json"
+$CapitalIntent = Join-Path $RuntimeRoot "private\capital-intent.json"
+$CapitalDecisionInputs = Join-Path $RuntimeRoot "private\capital-decision-inputs.json"
+$CapitalSourceOutput = Join-Path $RuntimeRoot "private\capital-decision-source.json"
 $WakeOutput = Join-Path $RuntimeRoot "wake\latest.json"
 $NoticeOutput = Join-Path $RuntimeRoot "notifications\latest.json"
 $HandoffOutput = Join-Path $RuntimeRoot "gpt_handoff\latest.json"
@@ -124,6 +127,8 @@ $RunnerArgs = @(
     "--observation-db", $ObservationDb,
     "--output", $EvidenceOutput,
     "--private-profile", $PrivateProfile,
+    "--observe-broker-capital",
+    "--capital-source-output", $CapitalSourceOutput,
     "--wake-output", $WakeOutput,
     "--notice-output", $NoticeOutput,
     "--handoff-output", $HandoffOutput,
@@ -134,6 +139,23 @@ $RunnerArgs = @(
     "--phone-l4-freshness-path", $PhoneL4,
     "--phone-l4-max-age-seconds", "$PhoneL4MaxAgeSeconds"
 )
+
+# Capture once inside the daily runner. Its immutable observation is reused for
+# reconciliation, wake, Evidence Pack and full-decision source construction.
+if (Test-Path -LiteralPath $CapitalIntent) {
+    $RunnerArgs += @("--user-capital-intent", $CapitalIntent)
+}
+$FullCapitalDecisionRequested = Test-Path -LiteralPath $CapitalDecisionInputs
+if ($FullCapitalDecisionRequested) {
+    $EngineeringSourceSha = & git -C $RepoRoot rev-parse HEAD
+    if ($LASTEXITCODE -ne 0 -or $EngineeringSourceSha -notmatch '^[0-9a-f]{40}$') {
+        throw "Engineering source commit cannot be verified"
+    }
+    $RunnerArgs += @(
+        "--capital-decision-inputs", $CapitalDecisionInputs,
+        "--source-main-sha", $EngineeringSourceSha
+    )
+}
 
 if (
     $IssuerAnnouncementReady -and
@@ -192,7 +214,9 @@ if ($TransportBoundaryExit -ne 0) {
 }
 
 # Explicit local opt-in; no key or private runtime paths enter the GPT payload.
-if ($env:CRT_GPT_TRANSPORT_ENABLED -eq "1") {
+$CurrentHandoff = Get-Content -LiteralPath $HandoffOutput -Raw | ConvertFrom-Json
+$CapitalWakeRequested = @($CurrentHandoff.semantic_descriptor.wake_sources) -contains "BROKER_CAPITAL_STATE"
+if ($env:CRT_GPT_TRANSPORT_ENABLED -eq "1" -and -not $FullCapitalDecisionRequested -and -not $CapitalWakeRequested) {
         & $Python -m crt_radar.gpt_transport_worker `
         --outbox-dir $BridgeOutbox `
         --state-dir $TransportBoundary `
@@ -201,6 +225,9 @@ if ($env:CRT_GPT_TRANSPORT_ENABLED -eq "1") {
         Write-Warning "GPT transport requires local attention; see boundary state."
     }
 }
+
+# Full-decision daily provider delivery is still separately approved and closed.
+# Neither source readiness nor the existing Smoke opt-in grants that authority.
 
 & $Python -m crt_radar.gpt_notification_boundary `
     deliver-pending `
