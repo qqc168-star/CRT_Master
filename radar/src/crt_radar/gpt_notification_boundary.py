@@ -210,6 +210,59 @@ def ensure_pending(
 Presenter = Callable[[str], int]
 
 
+def _current_capital_qualification(pack: dict | None, *, at_ms: int) -> dict[str, Any]:
+    """Verify the independent current daily observation before historical advice."""
+    from .capital_decision_closure import digest
+    from .broker_capital_observation import BLOCKED_BROKER_REASONS, reconcile_capital
+    result = {"state": "BLOCKED", "reason": "CURRENT_CAPITAL_STATE_REQUIRED"}
+    if not isinstance(pack, dict):
+        return result
+    try:
+        if digest({k: v for k, v in pack.items() if k != "evidence_pack_hash"}) != pack.get("evidence_pack_hash"):
+            raise ValueError("CURRENT_CAPITAL_EVIDENCE_HASH_INVALID")
+        generated = pack["generated_at_ms"]
+        if type(generated) is not int or type(at_ms) is not int or not 0 < generated <= at_ms:
+            raise ValueError("CURRENT_CAPITAL_EVIDENCE_CLOCK_INVALID")
+        reconciliation = pack["private_context"]["profile"]["capital_reconciliation"]
+        observation = reconciliation.get("broker_observed")
+        # A failed capture contains no broker facts. Preserve its recorded,
+        # allowlisted failure reason rather than replace it with missing data.
+        if (observation is None and reconciliation.get("state") == "BLOCKED"
+                and reconciliation.get("reason") in BLOCKED_BROKER_REASONS):
+            observation = {"capture_failed": True, "reason": reconciliation["reason"]}
+        intent = reconciliation.get("user_confirmed")
+        if reconcile_capital(observation, intent, at_ms=generated) != reconciliation:
+            raise ValueError("CURRENT_CAPITAL_RECONCILIATION_MISMATCH")
+        checked = reconcile_capital(observation, intent, at_ms=at_ms)
+        return {"state": checked["state"], "reason": checked["reason"],
+                "evidence_pack_hash": pack["evidence_pack_hash"],
+                "capital_snapshot_hash": digest(checked["broker_observed"]),
+                "broker_observed": checked["broker_observed"],
+                "user_confirmed": checked["user_confirmed"],
+                "full_decision_intent": pack["private_context"]["profile"].get("full_decision_intent")}
+    except (ValueError, KeyError, TypeError, AttributeError) as exc:
+        result["reason"] = str(exc) if isinstance(exc, ValueError) else "CURRENT_CAPITAL_STATE_INVALID"
+        return result
+
+
+def _record_capital_qualification(path: Path, current: dict, qualification: dict,
+                                  *, current_recommendation: bool, invalidated: bool = False) -> dict:
+    """Mutable presentation status only; the receipt-bound advice stays intact."""
+    status = {
+        "state": qualification["state"], "reason": qualification["reason"],
+        "recommendation_state": "CURRENT" if current_recommendation else "NOT_CURRENT",
+        "invalidated": invalidated,
+        "message": ("本資本建議仍須依原契約及有效期驗證。" if current_recommendation else
+                    f"本次資本資料為 {qualification['state']}（資料資格），原因：{qualification['reason']}。"
+                    "此舊資本建議不得作為當前合格建議使用；等待補齊證據並重新驗證，沒有交易指令。"),
+    }
+    status["status_hash"] = _hash(status)
+    if current.get("current_qualification") != status:
+        current = _seal({**current, "current_qualification": status})
+        _write_atomic(path, current)
+    return current
+
+
 def present(
     path: str | Path,
     presenter: Presenter,
@@ -524,6 +577,7 @@ def present(
     *,
     now_ms: int | None = None,
     current_capital_source: dict | None = None,
+    current_capital_state: dict | None = None,
 ) -> dict[str, Any]:
     path = Path(path)
 
@@ -546,15 +600,60 @@ def present(
 
         if "capital_validation" in current:
             from .capital_decision_closure import assert_current, render
+            evaluated_at = int(time.time() * 1000) if now_ms is None else now_ms
+            qualification = _current_capital_qualification(current_capital_state, at_ms=evaluated_at)
+            if current_capital_state is None:
+                return {"state": "CURRENT_CAPITAL_STATE_REQUIRED", "presentation_performed": False}
             if current_capital_source is None:
+                if qualification["state"] != "AVAILABLE":
+                    _record_capital_qualification(path, current, qualification,
+                                                  current_recommendation=False, invalidated=True)
+                    return {"state": "CAPITAL_RECOMMENDATION_NOT_CURRENT", "reason": qualification["reason"],
+                            "presentation_performed": False}
                 return {"state": "CURRENT_CAPITAL_SOURCE_REQUIRED", "presentation_performed": False}
+            validated = current["capital_validation"]
+            belongs_to_current = (
+                validated.get("capital_snapshot_hash") == qualification.get("capital_snapshot_hash")
+                and validated.get("evidence_lineage") == qualification.get("evidence_pack_hash")
+            )
+            previously_invalidated = current.get("current_qualification", {}).get("invalidated") is True
+            if qualification["state"] == "AVAILABLE":
+                # Clock refreshes do not change capital facts. A fresh qualified
+                # pack still cannot lend its status to a different old source.
+                def facts(value, clocks):
+                    return ({k: v for k, v in value.items() if k not in clocks}
+                            if isinstance(value, dict) else value)
+                source_intent = current_capital_source.get("user_intent")
+                if (facts(qualification.get("broker_observed"), {"observed_at_ms", "started_at_ms", "observation_hash"})
+                        != facts(current_capital_source.get("broker_observation"), {"observed_at_ms", "started_at_ms", "observation_hash"})
+                        or facts(qualification.get("full_decision_intent"), {"confirmed_at_ms"})
+                        != facts(source_intent, {"confirmed_at_ms"})
+                        or (isinstance(source_intent, dict)
+                            and (qualification.get("user_confirmed") or {}).get("reserved_usd")
+                            != source_intent.get("reserved_usd"))):
+                    qualification = {**qualification, "reason": "CAPITAL_RECOMMENDATION_SUPERSEDED"}
+                    previously_invalidated = True
+            if ((qualification["state"] != "AVAILABLE" and not belongs_to_current)
+                    or previously_invalidated):
+                if (previously_invalidated and qualification["state"] == "AVAILABLE"
+                        and qualification["reason"] != "CAPITAL_RECOMMENDATION_SUPERSEDED"):
+                    qualification = {**qualification, "reason": "CAPITAL_RECOMMENDATION_REJUDGMENT_REQUIRED"}
+                _record_capital_qualification(path, current, qualification,
+                                              current_recommendation=False, invalidated=True)
+                return {"state": "CAPITAL_RECOMMENDATION_NOT_CURRENT", "reason": qualification["reason"],
+                        "presentation_performed": False}
             try:
                 assert_current(current["capital_validation"], current_capital_source,
-                    at_ms=int(time.time() * 1000) if now_ms is None else now_ms)
+                    at_ms=evaluated_at)
                 if current["output_text"] != render(current["capital_validation"]):
                     raise ValueError("capital presentation mismatch")
-            except (ValueError, KeyError, TypeError):
-                return {"state": "CAPITAL_RECOMMENDATION_NOT_CURRENT", "presentation_performed": False}
+            except (ValueError, KeyError, TypeError) as exc:
+                qualification = {**qualification, "reason": str(exc)}
+                _record_capital_qualification(path, current, qualification,
+                                              current_recommendation=False, invalidated=True)
+                return {"state": "CAPITAL_RECOMMENDATION_NOT_CURRENT", "reason": qualification["reason"],
+                        "presentation_performed": False}
+            _record_capital_qualification(path, current, qualification, current_recommendation=True)
 
         selected = (
             windows_popup_presenter
@@ -599,6 +698,7 @@ def present_from_transport(
     *,
     now_ms: int | None = None,
     current_capital_source: dict | None = None,
+    current_capital_state: dict | None = None,
 ) -> dict[str, Any]:
     path = Path(path)
 
@@ -624,6 +724,7 @@ def present_from_transport(
         presenter,
         now_ms=now_ms,
         current_capital_source=current_capital_source,
+        current_capital_state=current_capital_state,
     )
 
 
@@ -633,6 +734,7 @@ def deliver_pending(
     presenter: Presenter | None = None,
     *,
     current_capital_source: dict | None = None,
+    current_capital_state: dict | None = None,
 ) -> dict[str, Any]:
     root = Path(notification_state_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -645,6 +747,7 @@ def deliver_pending(
             transport_state_dir,
             presenter,
             current_capital_source=current_capital_source,
+            current_capital_state=current_capital_state,
         )
         results.append(result)
 
@@ -689,6 +792,8 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
     )
     sweep.add_argument("--capital-source", type=Path)
+    sweep.add_argument("--capital-state", type=Path,
+                       help="The current sealed daily Evidence Pack, never a historical event source.")
 
     args = parser.parse_args(argv)
 
@@ -696,6 +801,7 @@ def main(argv: list[str] | None = None) -> int:
         args.transport_state_dir,
         args.notification_state_dir,
         current_capital_source=json.loads(args.capital_source.read_text(encoding="utf-8")) if args.capital_source else None,
+        current_capital_state=json.loads(args.capital_state.read_text(encoding="utf-8")) if args.capital_state else None,
     )
 
     print(

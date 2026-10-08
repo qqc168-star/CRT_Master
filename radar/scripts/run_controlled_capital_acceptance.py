@@ -33,9 +33,10 @@ from crt_radar.openai_responses_adapter_contract import API_KEY_ENV_VAR, SMOKE_M
 from crt_radar.plain_language_notice import build_plain_language_notice
 from crt_radar.treasury_company_ct import build_treasury_valuation_context
 
-CASE_VERSION = "CRT_CONTROLLED_SYNTHETIC_CAPITAL_CASE_V0.1"
+CASE_VERSION = "CRT_CONTROLLED_SYNTHETIC_CAPITAL_CASE_V0.2"
 APPROVAL_VERSION = "CRT_CONTROLLED_CAPITAL_APPROVAL_V0.1"
 INPUT_USD_PER_MILLION = Decimal("0.20")
+INPUT_PLANNING_USD_PER_MILLION = INPUT_USD_PER_MILLION * Decimal("1.25")
 OUTPUT_USD_PER_MILLION = Decimal("1.20")
 PRICING_SOURCE = "https://developers.openai.com/api/docs/models/gpt-5.6-luna"
 
@@ -65,6 +66,7 @@ def synthetic_case(*, at_ms: int, source_main_sha: str) -> dict:
     reconciliation = reconcile_capital(source["broker_observation"], intent, at_ms=at_ms)
     evidence["private_context"] = {"state": "AVAILABLE", "profile": {
         "capital_reconciliation": reconciliation,
+        "full_decision_intent": deepcopy(source["user_intent"]),
         "strc": {"shares": 75, "current_annual_distribution_rate": 0.10},
         "derived": {"six_month_cash_usd": 375, "minimum_shares_for_target": 75}}}
     evidence["layers"] = {f"L{i}": {"status": "VALID", "metrics": {
@@ -88,7 +90,8 @@ def synthetic_case(*, at_ms: int, source_main_sha: str) -> dict:
     envelope = capital.build_envelope(payload, source, at_ms=at_ms, full_decision=True)
     result = {"contract_version": CASE_VERSION, "data_scope": "SYNTHETIC_MARKET_AND_CAPITAL_ONLY",
         "evaluation_clock": "SYNTHETIC_SNAPSHOT_REPLAY", "snapshot_at_ms": at_ms,
-        "source_main_sha": source_main_sha, "payload": payload, "source": source, "envelope": envelope}
+        "source_main_sha": source_main_sha, "evidence_pack": evidence,
+        "payload": payload, "source": source, "envelope": envelope}
     result["case_hash"] = capital.digest(result)
     return result
 
@@ -116,7 +119,7 @@ def preflight(root: Path, *, source_main_sha: str, at_ms: int | None = None) -> 
     # This conservative byte-based planning figure is not a tokenizer or a
     # measured model token count. It creates no new formal input ceiling.
     planning_input_units = len(json.dumps(body, ensure_ascii=False).encode("utf-8"))
-    cost_estimate = (Decimal(planning_input_units) * INPUT_USD_PER_MILLION +
+    cost_estimate = (Decimal(planning_input_units) * INPUT_PLANNING_USD_PER_MILLION +
                      Decimal(body["max_output_tokens"]) * OUTPUT_USD_PER_MILLION) / Decimal(1_000_000)
     return {"state": "PRECHECK_READY_HUMAN_APPROVAL_REQUIRED", "mode": "PREFLIGHT_NO_NETWORK",
         "case_hash": case["case_hash"], "request_hash": case["envelope"]["request_hash"],
@@ -129,7 +132,8 @@ def preflight(root: Path, *, source_main_sha: str, at_ms: int | None = None) -> 
         "model_tokens": "NOT_MEASURED", "model_cost": "NOT_MEASURED",
         "model_comprehension": "NOT_YET_PROVEN", "network_performed": False,
         "credential_available": bool(os.environ.get(API_KEY_ENV_VAR, "").strip()),
-        "cost_estimate_usd": str(cost_estimate), "cost_estimate_basis": "CONSERVATIVE_UTF8_BYTES_NOT_MEASURED_TOKENS",
+        "cost_estimate_usd": str(cost_estimate),
+        "cost_estimate_basis": "CONSERVATIVE_UTF8_BYTES_WITH_CACHE_WRITE_SURCHARGE_NOT_MEASURED_TOKENS",
         "pricing_source": PRICING_SOURCE, "max_output_tokens": body["max_output_tokens"]}
 
 
@@ -149,7 +153,7 @@ def validate_approval(approval: dict, case: dict, *, now_ms: int) -> None:
         raise ValueError("Explicit approved USD cost ceiling required")
     ceiling = Decimal(str(approval["max_cost_usd"]))
     body = case["envelope"]["request_body"]
-    estimated = (Decimal(len(json.dumps(body, ensure_ascii=False).encode("utf-8"))) * INPUT_USD_PER_MILLION +
+    estimated = (Decimal(len(json.dumps(body, ensure_ascii=False).encode("utf-8"))) * INPUT_PLANNING_USD_PER_MILLION +
                  Decimal(body["max_output_tokens"]) * OUTPUT_USD_PER_MILLION) / Decimal(1_000_000)
     if not ceiling.is_finite() or ceiling <= 0 or estimated > ceiling:
         raise ValueError("Controlled model estimate exceeds approved cost ceiling")
@@ -208,7 +212,8 @@ def execute(root: Path, *, mode: str, approval: dict | None = None,
     presentations = []
     notification_results = [present_from_transport(path, destination / "transport",
         lambda text: presentations.append(text) or 1, now_ms=case["snapshot_at_ms"],
-        current_capital_source=case["source"]) for path in sorted((destination / "notifications").glob("*.json"))]
+        current_capital_source=case["source"], current_capital_state=case["evidence_pack"])
+        for path in sorted((destination / "notifications").glob("*.json"))]
     report = {"mode": mode, "execution_at_ms": actual_now, "data_scope": case["data_scope"],
         "evaluation_clock": case["evaluation_clock"], "case_hash": case["case_hash"],
         "request_hash": case["envelope"]["request_hash"], "delivery": result,
@@ -232,7 +237,7 @@ def execute(root: Path, *, mode: str, approval: dict | None = None,
             if type(inputs) is int and type(outputs) is int and inputs >= 0 and outputs >= 0:
                 report["model_tokens"] = {"input_tokens": inputs, "output_tokens": outputs}
                 report["model_cost"] = {"usd_upper_bound_from_reported_usage": str(
-                    (Decimal(inputs) * INPUT_USD_PER_MILLION + Decimal(outputs) * OUTPUT_USD_PER_MILLION) /
+                    (Decimal(inputs) * INPUT_PLANNING_USD_PER_MILLION + Decimal(outputs) * OUTPUT_USD_PER_MILLION) /
                     Decimal(1_000_000)), "invoice_cost": "NOT_MEASURED", "pricing_source": PRICING_SOURCE}
     return report
 

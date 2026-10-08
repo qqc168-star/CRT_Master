@@ -17,6 +17,7 @@ from .broker_capital_observation import validate_broker_observation, MAX_AGE_MS
 VERSION = "CRT_CAPITAL_RECOMMENDATION_V0.1"
 REQUEST_VERSION = "CRT_CAPITAL_RECOMMENDATION_REQUEST_V0.1"
 FULL_REQUEST_VERSION = "CRT_CAPITAL_FULL_DECISION_OFFLINE_V0.1"
+EVIDENCE_REFERENCE_CONTRACT_VERSION = "CRT_CAPITAL_EVIDENCE_REFERENCES_V0.1"
 LOCKS = {"production": "NOT_APPROVED", "external_action_authority": "NONE",
          "capital_decision_authority": "USER_ONLY", "machine_execution": "FORBIDDEN"}
 ACTIONS = ("BUY", "SELL", "HOLD", "WAIT", "ROTATE")
@@ -350,7 +351,32 @@ def _object(properties):
             "required": list(properties), "additionalProperties": False}
 
 
-def response_format():
+def evidence_reference_catalog(source):
+    """Describe only references accepted from this request's actual sources.
+
+    Execution facts stay separate from the investment evidence requirement.
+    Metadata source_ref values (qualification, task, clocks) do not become new
+    recommendation references merely because they appear in the projection.
+    """
+    catalog = {"bridge": [
+        "The supplied market_context and evidence_validity from this bound bridge; "
+        "includes market and formal valuation evidence, with qualifications and blockers preserved."]}
+    if source["posture"] is not None:
+        catalog["posture"] = [
+            "The supplied attributed posture projection: research state, rail, contradictions, "
+            "blockers and any supplied health evidence; it grants no trading authority."]
+    for row in source["instruments"]:
+        catalog.setdefault(row["source_ref"], []).append(
+            f"instruments asset={row['asset']}: supplied instrument class, currency and quantity step; "
+            "execution facts, not an investment rationale.")
+    for row in source["fees"]:
+        catalog.setdefault(row["source_ref"], []).append(
+            f"fees asset={row['asset']} side={row['side']}: supplied fee upper bound and quantity coverage; "
+            "execution facts, not an investment rationale.")
+    return {ref: sorted(set(descriptions)) for ref, descriptions in sorted(catalog.items())}
+
+
+def response_format(source=None):
     string = {"type": "string"}
     strings = {"type": "array", "items": string}
     nullable_number = {"type": ["number", "null"]}
@@ -358,9 +384,11 @@ def response_format():
         "quantity": nullable_number, "price_condition": string,
         "order_type": {"type": "string", "enum": ["LIMIT", "MARKET"]},
         "limit_price_usd": nullable_number, "dependent_legs": strings})
+    evidence = strings if source is None else {"type": "array", "items": {
+        "type": "string", "enum": list(evidence_reference_catalog(source))}}
     item = _object({"decision_scope": string, "asset": string,
         "action": {"type": "string", "enum": list(ACTIONS)}, "reason": string,
-        "supporting_evidence": strings, "contradictions": strings, "applicability": string,
+        "supporting_evidence": evidence, "contradictions": strings, "applicability": string,
         "invalidation": string, "next_trigger": string, "blockers": strings,
         "wait_kind": {"type": ["string", "null"], "enum": [None, *WAIT_KINDS]},
         "legs": {"type": "array", "items": leg}})
@@ -369,7 +397,7 @@ def response_format():
             "task_id": string, "items": {"type": "array", "items": item}})}
 
 
-INSTRUCTIONS = (
+LEGACY_INSTRUCTIONS = (
     "Return one complete portfolio capital recommendation JSON for every requested decision_scope. "
     "You own causal judgment, opposing evidence, opportunity cost versus cash and other assets, "
     "portfolio interaction and decision asymmetry. Select BUY/SELL/HOLD/WAIT/ROTATE yourself. "
@@ -389,6 +417,19 @@ INSTRUCTIONS = (
     "Decision support only: Production NOT_APPROVED, external authority NONE, user capital "
     "authority USER_ONLY, machine execution FORBIDDEN. Synthetic fixtures are never live advice."
 )
+
+INSTRUCTIONS = LEGACY_INSTRUCTIONS.replace(
+    "Use supporting_evidence references bridge or posture, and supplied source_ref values. ",
+    "Use only the exact supporting_evidence codes enumerated in the response schema and "
+    "the request-specific reference catalog below. Use at least bridge or an actually supplied "
+    "posture for investment evidence. Instrument specifications and fees cannot replace an "
+    "investment rationale. Do not cite field paths, asset names, invented aliases, or other "
+    "metadata source_ref values as supporting_evidence. ")
+
+
+def request_instructions(source):
+    return INSTRUCTIONS + "\nAllowed supporting_evidence reference catalog (code: meanings):\n" + json.dumps(
+        evidence_reference_catalog(source), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _check_shape(value, schema):
@@ -612,6 +653,10 @@ def render(validated):
 
 
 def build_envelope(payload, source, *, at_ms, full_decision=False):
+    return _build_envelope(payload, source, at_ms=at_ms, full_decision=full_decision)
+
+
+def _build_envelope(payload, source, *, at_ms, full_decision=False, legacy_references=False):
     from .openai_responses_adapter_contract import (SMOKE_MODEL, MAX_INPUT_UTF8_BYTES,
         MAX_OUTPUT_TOKENS, API_KEY_ENV_VAR, RESPONSES_PATH)
     projection = build_projection(payload, source, at_ms=at_ms)
@@ -622,9 +667,10 @@ def build_envelope(payload, source, *, at_ms, full_decision=False):
         "bridge_payload_hash": payload["bridge_payload_hash"], "capital_bridge_payload": deepcopy(payload),
         "capital_source": _canonical_source(source), "request_at_ms": at_ms,
         "transport": {"method": "POST", "path": RESPONSES_PATH, "auth_env_var": API_KEY_ENV_VAR, "secret_value_included": False},
-        "request_body": {"model": SMOKE_MODEL, "instructions": INSTRUCTIONS, "input": serialized,
+        "request_body": {"model": SMOKE_MODEL,
+            "instructions": LEGACY_INSTRUCTIONS if legacy_references else request_instructions(source), "input": serialized,
             "store": False, "background": False, "max_output_tokens": MAX_OUTPUT_TOKENS,
-            "text": {"format": response_format()}},
+            "text": {"format": response_format() if legacy_references else response_format(source)}},
         "tools_allowed": False, "network_performed": False,
         "production": "NOT_APPROVED", "external_action_authority": "NONE", "action_output": "NONE"}
     if full_decision:
@@ -635,13 +681,18 @@ def build_envelope(payload, source, *, at_ms, full_decision=False):
             "formal_input_capacity": "NOT_APPROVED",
             "model_tokens": "NOT_MEASURED", "model_cost": "NOT_MEASURED",
             "model_comprehension": "NOT_YET_PROVEN"}
+    if not legacy_references:
+        result["evidence_reference_contract"] = EVIDENCE_REFERENCE_CONTRACT_VERSION
     result["request_hash"] = digest(result)
     return result
 
 
 def validate_envelope(envelope):
-    expected = build_envelope(envelope["capital_bridge_payload"], envelope["capital_source"], at_ms=envelope["request_at_ms"],
-                              full_decision=envelope.get("contract_version") == FULL_REQUEST_VERSION)
+    # Historical requests retain their exact original body/hash. This branch
+    # only validates that saved shape; every new build uses the bound enum.
+    expected = _build_envelope(envelope["capital_bridge_payload"], envelope["capital_source"], at_ms=envelope["request_at_ms"],
+        full_decision=envelope.get("contract_version") == FULL_REQUEST_VERSION,
+        legacy_references="evidence_reference_contract" not in envelope)
     require(envelope == expected, "CAPITAL_ENVELOPE_MISMATCH")
     return envelope
 

@@ -162,6 +162,13 @@ def _position_line(private_context: dict[str, Any] | None) -> str:
     if not isinstance(private_context, dict) or private_context.get("state") != "AVAILABLE":
         return "\u672c\u6a5f\u79c1\u4eba\u6301\u5009\u8a2d\u5b9a\u5c1a\u4e0d\u53ef\u7528\uff0c\u672c\u6b21\u4e0d\u505a\u500b\u4eba\u6301\u5009\u5c0d\u7167\u3002"
     profile = private_context.get("profile", {})
+    status = profile.get("capital_state_status") or {}
+    if status.get("state") in {"BLOCKED", "PARTIAL", "STALE"}:
+        return (
+            f"本次券商資本資料為 {status['state']}（資料資格），原因：{status.get('reason', 'UNKNOWN')}。"
+            "既有資本建議不得視為當前合格建議；需依受影響的決策範圍補齊證據後重新驗證。"
+            "歷史持倉及配息設定（含 STRC）不能代替本次合格券商觀測。"
+        )
     strc = profile.get("strc", {})
     derived = profile.get("derived", {})
     shares = strc.get("shares")
@@ -233,6 +240,8 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
         and wake.get("input_family") == "COMMANDER_PLAN_OBSERVATION"
     )
     capital_requested = requested and "BROKER_CAPITAL_STATE" in wake.get("wake_sources", [])
+    capital_status = ((pack.get("private_context") or {}).get("profile") or {}).get("capital_state_status") or {}
+    capital_unqualified = capital_status.get("state") in {"BLOCKED", "PARTIAL", "STALE"}
     commander_event = wake.get("commander_event")
     if commander_observation and not isinstance(commander_event, dict):
         raise ValueError("Commander observation wake event is unavailable")
@@ -341,6 +350,14 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
     else:
         what_happened = (
             "?????? BTC ?????????"
+        )
+
+    if capital_unqualified:
+        what_happened += (
+            f" 本次券商資本資料為 {capital_status['state']}（資料資格），"
+            f"原因：{capital_status.get('reason', 'UNKNOWN')}。"
+            "受影響的舊資本建議不得再視為當前合格建議。"
+            "資料失效本身不觸發模型請求，也不是交易建議。"
         )
 
     top_changes = _top_change_lines(pack)
@@ -461,5 +478,16 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
         "external_action_authority": "NONE",
         "external_action_performed": False,
     }
+    if capital_unqualified:
+        # The existing latest notice exposes safety status without a new wake,
+        # model request or a repeated post-model notification.
+        result["capital_qualification"] = {
+            "state": capital_status["state"],
+            "reason": capital_status.get("reason", "UNKNOWN"),
+            "recommendation_state": "REVALIDATION_REQUIRED",
+        }
+        if not requested:
+            result.update(title="資本資料失效，舊建議需重新驗證",
+                          instruction_for_gpt="資本資料資格不足；補齊證據前不得提出合格交易主張。")
     result["notice_hash"] = _canonical_hash(result)
     return result

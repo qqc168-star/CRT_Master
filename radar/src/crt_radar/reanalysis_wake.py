@@ -91,12 +91,20 @@ def apply_capital_reanalysis_wake(
                                        decision_intent=previous_decision_intent)
                 if type(previous_at_ms) is int and previous_at_ms <= at_ms else None)
     requested = current is not None and current != previous
+    qualification = (reconciliation.get("state", "BLOCKED")
+                     if isinstance(reconciliation, dict) else "BLOCKED")
+    qualification_reason = (reconciliation.get("reason", "CAPITAL_STATE_MISSING")
+                            if isinstance(reconciliation, dict) else "CAPITAL_STATE_MISSING")
+    qualification_lost = previous is not None and current is None
     change = {
         "state": "REANALYSIS_REQUESTED" if requested else "NO_WAKE",
         "reason": ("INITIAL_QUALIFIED_CAPITAL_STATE" if previous is None else "CAPITAL_STATE_CHANGED")
                   if requested else "CAPITAL_STATE_UNCHANGED" if current else "CAPITAL_STATE_NOT_QUALIFIED",
         "current_state_hash": current,
         "previous_state_hash": previous,
+        "qualification_state": qualification,
+        "qualification_reason": qualification_reason,
+        "qualification_lost": qualification_lost,
         "action_output": "NONE", "external_action_authority": "NONE", "external_action_performed": False,
     }
     result = fuse_reanalysis_wake(base_wake, plan_drift=None, capital_change=change)

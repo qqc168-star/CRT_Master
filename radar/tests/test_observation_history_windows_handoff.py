@@ -119,6 +119,9 @@ class ObservationHistoryWindowsHandoffTests(
         self.assertIn('$CapitalWakeRequested = @($CurrentHandoff.semantic_descriptor.wake_sources) -contains "BROKER_CAPITAL_STATE"', self.text)
         self.assertNotIn("OFFLINE_ONLY", self.text)
 
+    def test_notification_checks_current_daily_capital_state(self):
+        self.assertIn("--capital-state $EvidenceOutput", self.text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -237,13 +237,15 @@ class DailyCapitalSourceTests(unittest.TestCase):
             presenter = Mock(return_value=1)
             notice_path = next((self.root / "notifications").glob("*.json"))
             self.assertEqual(present_from_transport(notice_path, self.root / "transport",
-                presenter=presenter, now_ms=NOW, current_capital_source=source)["state"], "DELIVERED")
+                presenter=presenter, now_ms=NOW, current_capital_source=source,
+                current_capital_state=pack)["state"], "DELIVERED")
             replay = deliver_event(event_path, self.root / "transport", transport=transport,
                 notification_state_dir=self.root / "notifications", now_ms=NOW + 1,
                 capital_source=source, current_main_sha=MAIN)
             self.assertEqual(replay["state"], "ALREADY_DELIVERED", replay)
             self.assertEqual(present_from_transport(notice_path, self.root / "transport",
-                presenter=presenter, now_ms=NOW + 1, current_capital_source=source)["state"], "ALREADY_DELIVERED")
+                presenter=presenter, now_ms=NOW + 1, current_capital_source=source,
+                current_capital_state=pack)["state"], "ALREADY_DELIVERED")
             transport.assert_called_once()
             presenter.assert_called_once()
             clock[0] += 1

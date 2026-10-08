@@ -232,7 +232,8 @@ if ($env:CRT_GPT_TRANSPORT_ENABLED -eq "1" -and -not $FullCapitalDecisionRequest
 & $Python -m crt_radar.gpt_notification_boundary `
     deliver-pending `
     --transport-state-dir $TransportBoundary `
-    --notification-state-dir $PostGptNotifications
+    --notification-state-dir $PostGptNotifications `
+    --capital-state $EvidenceOutput
 
 if ($LASTEXITCODE -ne 0) {
     Write-Warning "GPT notification boundary requires local attention."

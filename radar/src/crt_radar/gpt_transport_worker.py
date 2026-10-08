@@ -203,7 +203,13 @@ def deliver_event(
         # inside a contract namespace, including locks, responses and artifacts.
         legacy_state = state_dir / f"{event_id}.json"
         legacy_response = state_dir / "responses" / f"{event_id}.json"
-        if ((legacy_state.exists() and _read_json(legacy_state).get("request_hash") == envelope["request_hash"])
+        legacy_hashes = {envelope["request_hash"]}
+        if legacy_state.exists():
+            from .capital_decision_closure import _build_envelope
+            legacy_hashes.add(_build_envelope(payload, capital_source,
+                at_ms=capital_source["task"]["as_of_ms"], full_decision=True,
+                legacy_references=True)["request_hash"])
+        if ((legacy_state.exists() and _read_json(legacy_state).get("request_hash") in legacy_hashes)
                 or (legacy_response.exists() and "capital_source" in _read_json(legacy_response).get("request", {}))):
             # Never turn an old unnamespaced send into a fresh delivery.
             return {"event_id": event_id, "state": "RECONCILIATION_REQUIRED",
@@ -255,6 +261,17 @@ def deliver_event(
             raise ValueError("Boundary identity mismatch")
         evidence_dir = state_dir / "responses"
         evidence_path = evidence_dir / f"{event_id}.json"
+        if capital_source is not None and evidence_path.exists():
+            # A schema refinement must not rewrite or resend a prior event.
+            # Validate the immutable original request before replaying its receipt.
+            saved_request = _read_json(evidence_path)["request"]
+            validate_request_envelope(saved_request)
+            if (saved_request.get("contract_version") != FULL_REQUEST_VERSION
+                    or saved_request.get("capital_source") != envelope["capital_source"]
+                    or saved_request.get("capital_bridge_payload") != payload
+                    or saved_request.get("request_at_ms") != capital_source["task"]["as_of_ms"]):
+                raise ValueError("Persisted capital request lineage mismatch")
+            envelope = saved_request
 
         if state["state"] == "DELIVERED":
             evidence = _read_json(evidence_path)

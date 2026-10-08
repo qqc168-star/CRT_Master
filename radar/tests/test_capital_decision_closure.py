@@ -45,6 +45,21 @@ def source_fixture(payload=None, at=NOW):
         "governance": dict(c.LOCKS)}
 
 
+def current_capital_pack(source, *, at=NOW):
+    """Sealed current synthetic observation, separate from an event source."""
+    from crt_radar.broker_capital_observation import reconcile_capital
+    from crt_radar.private_profile import apply_broker_capital_state
+    intent = source.get("user_intent") or {}
+    legacy = {"source": "USER_CONFIRMED", "confirmed_at_ms": intent.get("confirmed_at_ms", at),
+              "reserved_usd": intent.get("reserved_usd", 0), "plan_policy": "CANCEL_ALL_NO_REPLACEMENT"}
+    pack = {"generated_at_ms": at,
+            "private_context": apply_broker_capital_state(None,
+                reconcile_capital(source.get("broker_observation"), legacy, at_ms=at))}
+    pack["private_context"]["profile"]["full_decision_intent"] = deepcopy(source.get("user_intent"))
+    pack["evidence_pack_hash"] = c.digest(pack)
+    return pack
+
+
 def leg(action="BUY", asset="MSTR", quantity=3, leg_id="leg1", **changes):
     return {"leg_id": leg_id, "asset": asset, "action": action, "quantity": quantity,
         "price_condition": "僅在限價內成交，條件失效則重新判斷", "order_type": "LIMIT",
@@ -352,8 +367,10 @@ class TransportClosureTests(unittest.TestCase):
         notice = next((self.root / "full-notices").glob("*.json"))
         presenter = Mock(return_value=1)
         self.assertTrue(present_from_transport(notice, self.root / "states", presenter, now_ms=NOW,
-                                              current_capital_source=source)["presentation_performed"])
-        present_from_transport(notice, self.root / "states", presenter, now_ms=NOW, current_capital_source=source)
+                                              current_capital_source=source,
+                                              current_capital_state=current_capital_pack(source))["presentation_performed"])
+        present_from_transport(notice, self.root / "states", presenter, now_ms=NOW, current_capital_source=source,
+                               current_capital_state=current_capital_pack(source))
         presenter.assert_called_once()
 
     def test_unqualified_valuation_cannot_support_capital_increase(self):
@@ -395,7 +412,8 @@ class TransportClosureTests(unittest.TestCase):
                 for replay in (False, True):
                     for notice in notices:
                         result = present_from_transport(notice, root / "states", presenter, now_ms=NOW,
-                                                        current_capital_source=self.source)
+                                                        current_capital_source=self.source,
+                                                        current_capital_state=current_capital_pack(self.source))
                         self.assertEqual(result["presentation_performed"], not replay)
                 self.assertEqual(presenter.call_count, 2)
 
@@ -418,7 +436,8 @@ class TransportClosureTests(unittest.TestCase):
         presenter = Mock(return_value=1)
         for replay in (False, True):
             result = present_from_transport(notice, self.root / "blocked-states", presenter, now_ms=NOW,
-                                            current_capital_source=self.source)
+                                            current_capital_source=self.source,
+                                            current_capital_state=current_capital_pack(self.source))
             self.assertEqual(result["presentation_performed"], not replay)
         presenter.assert_called_once()
         transport.assert_called_once()
@@ -540,7 +559,7 @@ class TransportClosureTests(unittest.TestCase):
         blocked = present(notice, presenter, now_ms=NOW)
         self.assertFalse(blocked["presentation_performed"])
         shown = present_from_transport(notice, self.root / "states", presenter, now_ms=NOW,
-                                       current_capital_source=self.source)
+                                       current_capital_source=self.source, current_capital_state=current_capital_pack(self.source))
         self.assertTrue(shown["presentation_performed"])
         stored = json.loads(notice.read_text(encoding="utf-8"))
         self.assertEqual(presenter.call_args.args[0], c.render(stored["capital_validation"]))
@@ -553,7 +572,8 @@ class TransportClosureTests(unittest.TestCase):
         path = self.root / (next(r.name for r in self.root.glob("*.json") if r.name != "handoff.jsonl"))
         presenter = Mock(return_value=1)
         self.source["user_intent"]["version"] = "new-intent"
-        result = present(path, presenter, now_ms=NOW, current_capital_source=self.source)
+        result = present(path, presenter, now_ms=NOW, current_capital_source=self.source,
+                         current_capital_state=current_capital_pack(self.source))
         self.assertEqual(result["state"], "CAPITAL_RECOMMENDATION_NOT_CURRENT")
         presenter.assert_not_called()
 
