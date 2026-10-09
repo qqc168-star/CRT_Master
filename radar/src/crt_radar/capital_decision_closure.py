@@ -19,6 +19,7 @@ REQUEST_VERSION = "CRT_CAPITAL_RECOMMENDATION_REQUEST_V0.1"
 FULL_REQUEST_VERSION = "CRT_CAPITAL_FULL_DECISION_OFFLINE_V0.1"
 EVIDENCE_REFERENCE_CONTRACT_VERSION = "CRT_CAPITAL_EVIDENCE_REFERENCES_V0.1"
 DECISION_SEMANTICS_CONTRACT_VERSION = "CRT_CAPITAL_DECISION_SEMANTICS_V0.1"
+TWO_LAYER_ANALYSIS_CONTRACT_VERSION = "CRT_TWO_LAYER_ANALYSIS_INSTRUCTIONS_V0.1"
 LOCKS = {"production": "NOT_APPROVED", "external_action_authority": "NONE",
          "capital_decision_authority": "USER_ONLY", "machine_execution": "FORBIDDEN"}
 ACTIONS = ("BUY", "SELL", "HOLD", "WAIT", "ROTATE")
@@ -594,10 +595,49 @@ INSTRUCTIONS = REFERENCE_INSTRUCTIONS + (
 )
 
 
-def request_instructions(source, semantic_catalog=None):
+TWO_LAYER_INSTRUCTIONS = (
+    "\nTwo-layer analysis, using only the supplied evidence and existing JSON fields: "
+    "First analyze BTC as the upper strategic cycle driver and long-term acquisition goal; "
+    "MSTR, ASST, STRC and SATA are the four lower-layer US security tools, not five peer assets. "
+    "For this cycle do not propose a direct BTC trade or turn BTC into a US security leg. "
+    "Distinguish the supplied formal season, research hypotheses/candidates and unknown season. "
+    "A research result cannot promote or replace a formal season. Review the supplied L0 through L6 "
+    "definitions, indicator values, sources, clocks, strengths, contradictions and missing evidence; "
+    "L0 is observational only, with no unauthorized weighted vote. Preserve existing L1-L6 weights "
+    "and light thresholds; do not recalculate a new season, score or weighting scheme. "
+    "Use the existing macro liquidity, market structure, BTC demand and derivatives evidence. "
+    "Develop conditional bullish and bearish BTC paths with time horizon, supplied USD price levels, "
+    "breakout/breakdown confirmation and invalidation. If legal price/source evidence is missing, "
+    "say which path or level cannot be quantified; never invent a price, confirmation or clock. "
+    "State strategic direction, confidence basis, principal counterevidence and capital-risk posture. "
+    "Then explain how that conditional BTC strategy affects EACH requested security decision scope. "
+    "MSTR/ASST require their own formal mNAV, per-share BTC accretion/dilution, financing, health, "
+    "valuation, price and holding-risk evidence; BTC bullishness alone is not a stock BUY reason. "
+    "Keep formal Diluted Equity mNAV separate from research valuation and historical percentiles. "
+    "STRC/SATA require their own yield/distribution, price, ex-dividend eligibility, issuer, liquidity "
+    "and capital-preservation evidence; compare rotation net proceeds after fees and return-leg risk. "
+    "Do not apply MSTR/ASST mNAV requirements to STRC/SATA. Preserve upper/lower-layer conflicts "
+    "and company-specific counterevidence; never manufacture an internally consistent conclusion. "
+    "Finally integrate actual holdings, available cash, reserved capital, no-leverage constraint, "
+    "open orders and explicitly confirmed current seasonal rail. No source or rail means no inferred "
+    "season, advancement, harvest approval or deployable capital. Cover every requested scope using "
+    "BUY/SELL/HOLD/WAIT/ROTATE and existing legs for quantities, prices and capital effects; state "
+    "which missing facts prevent sizing. Non-trading decisions need a specific source-based reason "
+    "and next observable trigger, not perpetual generic watchfulness. "
+    "Put the concise BTC strategy and its asset-specific transmission in reason and applicability, "
+    "opposing evidence in contradictions, future failure conditions in invalidation, next conditions "
+    "in next_trigger and current gaps in blockers. Bind factual inputs with reasoning_support. "
+    "Do not add output fields, prose outside JSON, or Commander observation/trading authority. "
+    "A verified factual binding is not proof of model comprehension or investment causal reasoning. "
+)
+
+
+def request_instructions(source, semantic_catalog=None, *, two_layer=False):
     instructions = REFERENCE_INSTRUCTIONS if semantic_catalog is None else INSTRUCTIONS + (
         "\nBound factual claim catalog (JSON pointers into this supplied projection):\n" + json.dumps(
             semantic_catalog, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    if two_layer:
+        instructions += TWO_LAYER_INSTRUCTIONS
     return instructions + "\nAllowed supporting_evidence reference catalog (code: meanings):\n" + json.dumps(
         evidence_reference_catalog(source), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
@@ -897,12 +937,13 @@ def build_envelope(payload, source, *, at_ms, full_decision=False):
 
 
 def _build_envelope(payload, source, *, at_ms, full_decision=False, legacy_references=False,
-                    legacy_semantics=False):
+                    legacy_semantics=False, legacy_two_layer=False):
     from .openai_responses_adapter_contract import (SMOKE_MODEL, MAX_INPUT_UTF8_BYTES,
         MAX_OUTPUT_TOKENS, API_KEY_ENV_VAR, RESPONSES_PATH)
     projection = build_projection(payload, source, at_ms=at_ms)
     semantic_catalog = (semantic_evidence_catalog(projection)
                         if full_decision and not legacy_references and not legacy_semantics else None)
+    two_layer = semantic_catalog is not None and not legacy_two_layer
     serialized = json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     if not full_decision:
         require(len(serialized.encode("utf-8")) <= MAX_INPUT_UTF8_BYTES, "CAPITAL_INPUT_CAPACITY_EXCEEDED")
@@ -911,7 +952,7 @@ def _build_envelope(payload, source, *, at_ms, full_decision=False, legacy_refer
         "capital_source": _canonical_source(source), "request_at_ms": at_ms,
         "transport": {"method": "POST", "path": RESPONSES_PATH, "auth_env_var": API_KEY_ENV_VAR, "secret_value_included": False},
         "request_body": {"model": SMOKE_MODEL,
-            "instructions": LEGACY_INSTRUCTIONS if legacy_references else request_instructions(source, semantic_catalog), "input": serialized,
+            "instructions": LEGACY_INSTRUCTIONS if legacy_references else request_instructions(source, semantic_catalog, two_layer=two_layer), "input": serialized,
             "store": False, "background": False, "max_output_tokens": MAX_OUTPUT_TOKENS,
             "text": {"format": response_format() if legacy_references else response_format(source, semantic_catalog)}},
         "tools_allowed": False, "network_performed": False,
@@ -928,6 +969,8 @@ def _build_envelope(payload, source, *, at_ms, full_decision=False, legacy_refer
         result["evidence_reference_contract"] = EVIDENCE_REFERENCE_CONTRACT_VERSION
     if semantic_catalog is not None:
         result["decision_semantics_contract"] = DECISION_SEMANTICS_CONTRACT_VERSION
+    if two_layer:
+        result["two_layer_analysis_contract"] = TWO_LAYER_ANALYSIS_CONTRACT_VERSION
     result["request_hash"] = digest(result)
     return result
 
@@ -938,7 +981,8 @@ def validate_envelope(envelope):
     expected = _build_envelope(envelope["capital_bridge_payload"], envelope["capital_source"], at_ms=envelope["request_at_ms"],
         full_decision=envelope.get("contract_version") == FULL_REQUEST_VERSION,
         legacy_references="evidence_reference_contract" not in envelope,
-        legacy_semantics="decision_semantics_contract" not in envelope)
+        legacy_semantics="decision_semantics_contract" not in envelope,
+        legacy_two_layer="two_layer_analysis_contract" not in envelope)
     require(envelope == expected, "CAPITAL_ENVELOPE_MISMATCH")
     return envelope
 
