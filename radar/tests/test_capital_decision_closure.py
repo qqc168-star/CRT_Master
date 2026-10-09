@@ -45,6 +45,21 @@ def source_fixture(payload=None, at=NOW):
         "governance": dict(c.LOCKS)}
 
 
+def current_capital_pack(source, *, at=NOW):
+    """Sealed current synthetic observation, separate from an event source."""
+    from crt_radar.broker_capital_observation import reconcile_capital
+    from crt_radar.private_profile import apply_broker_capital_state
+    intent = source.get("user_intent") or {}
+    legacy = {"source": "USER_CONFIRMED", "confirmed_at_ms": intent.get("confirmed_at_ms", at),
+              "reserved_usd": intent.get("reserved_usd", 0), "plan_policy": "CANCEL_ALL_NO_REPLACEMENT"}
+    pack = {"generated_at_ms": at,
+            "private_context": apply_broker_capital_state(None,
+                reconcile_capital(source.get("broker_observation"), legacy, at_ms=at))}
+    pack["private_context"]["profile"]["full_decision_intent"] = deepcopy(source.get("user_intent"))
+    pack["evidence_pack_hash"] = c.digest(pack)
+    return pack
+
+
 def leg(action="BUY", asset="MSTR", quantity=3, leg_id="leg1", **changes):
     return {"leg_id": leg_id, "asset": asset, "action": action, "quantity": quantity,
         "price_condition": "僅在限價內成交，條件失效則重新判斷", "order_type": "LIMIT",
@@ -80,6 +95,31 @@ def set_orders(source, orders):
 def provider_response(rec):
     return {"id": "resp_synthetic", "model": SMOKE_MODEL, "status": "completed", "output": [
         {"type": "message", "status": "completed", "content": [{"type": "output_text", "text": json.dumps(rec, ensure_ascii=False)}]}]}
+
+
+def full_provider_response(rec, envelope):
+    """Bind disposable mocks to supplied facts, never repair saved model output."""
+    rec = deepcopy(rec)
+    if "decision_semantics_contract" not in envelope:
+        rec.pop("reasoning_contract", None)
+        for row in rec["items"]:
+            row.pop("reasoning_support", None)
+        return provider_response(rec)
+    catalog = c.semantic_evidence_catalog(json.loads(envelope["request_body"]["input"]))
+    rec["reasoning_contract"] = c.DECISION_SEMANTICS_CONTRACT_VERSION
+    for row in rec["items"]:
+        choices = [(path, fact) for path, fact in catalog.items()
+                   if fact["source_ref"] in row["supporting_evidence"]]
+        # A held position proves only that position; it does not prove returns.
+        choices.sort(key=lambda pair: (pair[1]["subject_asset"] != row["asset"],
+                                      "holdings" not in pair[0], pair[0]))
+        path, fact = choices[0]
+        row["reasoning_support"] = {"claim_bindings": [{"source_path": path,
+            **{key: fact[key] for key in ("subject_asset", "metric_basis", "value_json")}}],
+            "cash_comparison": {"state": "INSUFFICIENT_EVIDENCE", "evidence_paths": [],
+                "missing_evidence": ["合成來源未提供完整收益、價格、風險與現金機會成本比較"],
+                "rationale": "僅驗證合成契約流程，不將持倉或合法代號冒充投資理由"}}
+    return provider_response(rec)
 
 
 def complete_capacity_diagnostic(root):
@@ -341,7 +381,7 @@ class TransportClosureTests(unittest.TestCase):
         self.assertEqual(envelope["measurement"]["request_body_utf8_bytes"],
                          len(json.dumps(envelope["request_body"], ensure_ascii=False).encode()))
         self.assertEqual(json.loads(envelope["request_body"]["input"])["market_context"], payload["market_context"])
-        transport = Mock(return_value=provider_response(recommendation(item("WAIT"))))
+        transport = Mock(side_effect=lambda request: full_provider_response(recommendation(item("WAIT")), request))
         enqueue_bridge_payload(self.root / "diagnostic-outbox", payload)
         path = self.root / "diagnostic-outbox" / (payload["event"]["event_id"] + ".json")
         kw = dict(capital_source=source, current_main_sha=MAIN, now_ms=NOW, transport=transport,
@@ -352,15 +392,17 @@ class TransportClosureTests(unittest.TestCase):
         notice = next((self.root / "full-notices").glob("*.json"))
         presenter = Mock(return_value=1)
         self.assertTrue(present_from_transport(notice, self.root / "states", presenter, now_ms=NOW,
-                                              current_capital_source=source)["presentation_performed"])
-        present_from_transport(notice, self.root / "states", presenter, now_ms=NOW, current_capital_source=source)
+                                              current_capital_source=source,
+                                              current_capital_state=current_capital_pack(source))["presentation_performed"])
+        present_from_transport(notice, self.root / "states", presenter, now_ms=NOW, current_capital_source=source,
+                               current_capital_state=current_capital_pack(source))
         presenter.assert_called_once()
 
     def test_unqualified_valuation_cannot_support_capital_increase(self):
         with self.assertRaisesRegex(ValueError, "VALUATION_EVIDENCE_UNQUALIFIED"):
             c.validated_receipt(provider_response(recommendation()), self.envelope, at_ms=NOW)
         enqueue_bridge_payload(self.root / "valuation-outbox", self.payload)
-        transport = Mock(return_value=provider_response(recommendation()))
+        transport = Mock(side_effect=lambda request: full_provider_response(recommendation(), request))
         path = self.root / "valuation-outbox" / (self.payload["event"]["event_id"] + ".json")
         kw = dict(capital_source=self.source, current_main_sha=MAIN, now_ms=NOW, transport=transport,
                   notification_state_dir=self.root / "valuation-notices")
@@ -376,6 +418,7 @@ class TransportClosureTests(unittest.TestCase):
             with self.subTest(order=order):
                 root = self.root / order[0]
                 transports = {mode: Mock(return_value=provider_response(self.rec)) for mode in order}
+                transports["capital"].side_effect = lambda request: full_provider_response(self.rec, request)
                 for replay in (False, True):
                     for mode in order:
                         kw = dict(transport=transports[mode], now_ms=NOW,
@@ -395,14 +438,15 @@ class TransportClosureTests(unittest.TestCase):
                 for replay in (False, True):
                     for notice in notices:
                         result = present_from_transport(notice, root / "states", presenter, now_ms=NOW,
-                                                        current_capital_source=self.source)
+                                                        current_capital_source=self.source,
+                                                        current_capital_state=current_capital_pack(self.source))
                         self.assertEqual(result["presentation_performed"], not replay)
                 self.assertEqual(presenter.call_count, 2)
 
     def test_evidence_blocked_wait_is_presented_as_verified_non_trade(self):
         enqueue_bridge_payload(self.root / "blocked-outbox", self.payload)
         rec = recommendation(item("WAIT", wait_kind="EVIDENCE_BLOCKED", blockers=["缺少資格"] ))
-        transport = Mock(return_value=provider_response(rec))
+        transport = Mock(side_effect=lambda request: full_provider_response(rec, request))
         result = deliver_event(self.root / "blocked-outbox" / (self.payload["event"]["event_id"] + ".json"),
             self.root / "blocked-states", capital_source=self.source, current_main_sha=MAIN, now_ms=NOW,
             transport=transport, notification_state_dir=self.root / "blocked-notices")
@@ -418,7 +462,8 @@ class TransportClosureTests(unittest.TestCase):
         presenter = Mock(return_value=1)
         for replay in (False, True):
             result = present_from_transport(notice, self.root / "blocked-states", presenter, now_ms=NOW,
-                                            current_capital_source=self.source)
+                                            current_capital_source=self.source,
+                                            current_capital_state=current_capital_pack(self.source))
             self.assertEqual(result["presentation_performed"], not replay)
         presenter.assert_called_once()
         transport.assert_called_once()
@@ -458,7 +503,7 @@ class TransportClosureTests(unittest.TestCase):
                 match_scopes(source, rec)
                 result = deliver_event(self.root / "trade-outbox" / (self.payload["event"]["event_id"] + ".json"),
                     self.root / action / "states", capital_source=source, current_main_sha=MAIN, now_ms=NOW,
-                    transport=Mock(return_value=provider_response(rec)), notification_state_dir=self.root / action / "notices")
+                    transport=Mock(side_effect=lambda request: full_provider_response(rec, request)), notification_state_dir=self.root / action / "notices")
                 self.assertEqual(result["state"], "RECONCILIATION_REQUIRED")
                 self.assertFalse(list((self.root / action / "notices").glob("*.json")))
 
@@ -527,7 +572,7 @@ class TransportClosureTests(unittest.TestCase):
     def test_16_worker_persist_render_notification_and_dedupe(self):
         enqueue_bridge_payload(self.root / "outbox", self.payload)
         path = self.root / "outbox" / (self.payload["event"]["event_id"] + ".json")
-        transport = Mock(return_value=provider_response(self.rec))
+        transport = Mock(side_effect=lambda request: full_provider_response(self.rec, request))
         kw = {"capital_source": self.source, "transport": transport, "now_ms": NOW,
               "current_main_sha": MAIN,
               "notification_state_dir": self.root / "notifications"}
@@ -540,11 +585,11 @@ class TransportClosureTests(unittest.TestCase):
         blocked = present(notice, presenter, now_ms=NOW)
         self.assertFalse(blocked["presentation_performed"])
         shown = present_from_transport(notice, self.root / "states", presenter, now_ms=NOW,
-                                       current_capital_source=self.source)
+                                       current_capital_source=self.source, current_capital_state=current_capital_pack(self.source))
         self.assertTrue(shown["presentation_performed"])
         stored = json.loads(notice.read_text(encoding="utf-8"))
         self.assertEqual(presenter.call_args.args[0], c.render(stored["capital_validation"]))
-        self.assertNotEqual(presenter.call_args.args[0], transport.return_value["output"][0]["content"][0]["text"])
+        self.assertNotEqual(presenter.call_args.args[0], provider_response(self.rec)["output"][0]["content"][0]["text"])
 
     def test_stale_notification_is_not_displayed(self):
         from crt_radar.gpt_notification_boundary import ensure_pending
@@ -553,7 +598,8 @@ class TransportClosureTests(unittest.TestCase):
         path = self.root / (next(r.name for r in self.root.glob("*.json") if r.name != "handoff.jsonl"))
         presenter = Mock(return_value=1)
         self.source["user_intent"]["version"] = "new-intent"
-        result = present(path, presenter, now_ms=NOW, current_capital_source=self.source)
+        result = present(path, presenter, now_ms=NOW, current_capital_source=self.source,
+                         current_capital_state=current_capital_pack(self.source))
         self.assertEqual(result["state"], "CAPITAL_RECOMMENDATION_NOT_CURRENT")
         presenter.assert_not_called()
 

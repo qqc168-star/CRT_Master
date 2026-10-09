@@ -14,6 +14,7 @@ from crt_radar.gpt_transport_worker import validate_transport_payload
 from crt_radar.gpt_handoff import (
     _compact_field_names, _compact_tranche_fields, _inherit_equal_authority,
     build_minimized_bridge_payload,
+    build_full_decision_bridge_payload,
     expand_bridge_field_names, run_gpt_handoff_gate,
 )
 from crt_radar.mstr_asst_market_health import compact_issuer_ratio_observation
@@ -475,13 +476,23 @@ class FullBridgeBudgetTests(unittest.TestCase):
             pack["mstr_asst_market_health"] = market_health()
             synthetic = bridge_pack(handoff_pack(evidence_hash="b" * 64, requested=True))
             pack["premarket_market_data"] = synthetic["premarket_market_data"]
-            # The capacity oracle permits inspection only inside this test;
-            # ordinary production construction must still enforce its ceiling.
             handoff = handoff_for(pack, Path(td))
             original = deepcopy(pack)
-            with patch("crt_radar.gpt_handoff.BRIDGE_CEILING_BYTES", 10 ** 9):
-                inspected = build_minimized_bridge_payload(pack, handoff)
+            full_handoff = run_gpt_handoff_gate(pack, build_plain_language_notice(pack),
+                ledger_path=Path(td) / "handoff.jsonl", full_decision=True)
+            inspected = build_full_decision_bridge_payload(pack, full_handoff)
             self.assertGreaterEqual(len(canonical_bytes(inspected)), 16 * 1024)
+            validate_transport_payload(inspected)
+            self.assertEqual(semantic_payload(inspected)["analysis_contract"]["delivery_scope"],
+                             "FULL_DECISION_OFFLINE")
+            full_market = semantic_payload(inspected)["market_context"]
+            self.assertEqual(full_market["changes"], pack["changes"])
+            self.assertEqual(full_market["mstr_asst_market_health"], pack["mstr_asst_market_health"])
+            for layer, context in pack["layers"].items():
+                for name, row in context["metrics"].items():
+                    self.assertEqual(full_market["layers"][layer]["metrics"][name]["value"], row["value"])
+            with self.assertRaisesRegex(ValueError, "byte ceiling"):
+                build_request_envelope(inspected, model=SMOKE_MODEL)
             with self.assertRaisesRegex(ValueError, "16 KiB"):
                 build_minimized_bridge_payload(pack, handoff)
             self.assertEqual(pack, original)

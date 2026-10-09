@@ -77,6 +77,27 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(second["notification_eligible"])
         self.transport.assert_called_once()
 
+    def test_capital_wake_or_full_payload_cannot_fall_back_to_smoke(self):
+        for full in (False, True):
+            with self.subTest(full=full):
+                payload = copy.deepcopy(self.payload)
+                payload["event"]["event_id"] = _canonical_hash({"capital-contract-required": full})
+                if full:
+                    payload["analysis_contract"]["delivery_scope"] = "FULL_DECISION_OFFLINE"
+                else:
+                    payload["event"]["wake"]["wake_sources"] = ["BROKER_CAPITAL_STATE"]
+                payload.pop("bridge_payload_hash")
+                payload["bridge_payload_hash"] = _canonical_hash(payload)
+                enqueue_bridge_payload(self.outbox, payload)
+                path = self.outbox / (payload["event"]["event_id"] + ".json")
+                with self.assertRaisesRegex(ValueError, "cannot be downgraded"):
+                    worker.deliver_event(path, self.states, transport=self.transport)
+                self.transport.assert_not_called()
+                with patch.object(worker.urlrequest, "build_opener") as opener:
+                    with self.assertRaisesRegex(ValueError, "cannot be downgraded"):
+                        worker.send_response(build_request_envelope(payload, model=SMOKE_MODEL))
+                    opener.assert_not_called()
+
     def test_lease_blocks_second_worker_and_expired_presend_recovers(self):
         self.claim()
         self.assertEqual(self.run_event(now_ms=199)["state"], "CLAIMED")

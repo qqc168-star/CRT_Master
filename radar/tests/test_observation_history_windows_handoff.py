@@ -105,6 +105,23 @@ class ObservationHistoryWindowsHandoffTests(
             lowered,
         )
 
+    def test_one_current_broker_capture_is_bound_to_explicit_private_decision_inputs(self):
+        self.assertEqual(self.text.count('"--observe-broker-capital"'), 1)
+        self.assertIn('"--user-capital-intent", $CapitalIntent', self.text)
+        self.assertIn('"--capital-decision-inputs", $CapitalDecisionInputs', self.text)
+        self.assertIn('"--capital-source-output", $CapitalSourceOutput', self.text)
+        self.assertIn('"--source-main-sha", $EngineeringSourceSha', self.text)
+        self.assertNotIn("crt_radar.broker_capital_observation", self.text)
+
+    def test_full_decision_readiness_does_not_enable_daily_provider_delivery(self):
+        self.assertIn('$env:CRT_GPT_TRANSPORT_ENABLED -eq "1" -and -not $FullCapitalDecisionRequested', self.text)
+        self.assertIn('-and -not $CapitalWakeRequested', self.text)
+        self.assertIn('$CapitalWakeRequested = @($CurrentHandoff.semantic_descriptor.wake_sources) -contains "BROKER_CAPITAL_STATE"', self.text)
+        self.assertNotIn("OFFLINE_ONLY", self.text)
+
+    def test_notification_checks_current_daily_capital_state(self):
+        self.assertIn("--capital-state $EvidenceOutput", self.text)
+
 
 if __name__ == "__main__":
     unittest.main()

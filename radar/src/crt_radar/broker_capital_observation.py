@@ -140,6 +140,38 @@ def validate_broker_observation(observation: Any, *, at_ms: int) -> dict[str, An
         return {"state": "BLOCKED", "reason": str(exc) if str(exc) in BLOCKED_BROKER_REASONS else "BROKER_OBSERVATION_INVALID"}
 
 
+def adapt_capital_intent(intent: Any, decision_intent: Any = None) -> dict[str, Any]:
+    """Separate legacy plan policy from explicit full-decision permissions.
+
+    A legacy reserve/cancel-plan confirmation is not a no-leverage confirmation.
+    Combined inputs may carry both formats, but shared facts must be identical.
+    Missing full-decision facts remain unknown, never supplied as defaults.
+    """
+    legacy_keys = {"source", "confirmed_at_ms", "reserved_usd", "plan_policy", "asset_roles"}
+    full_keys = {"version", "source", "confirmed_at_ms", "reserved_usd", "no_leverage"}
+    legacy = ({key: deepcopy(intent[key]) for key in legacy_keys if key in intent}
+              if isinstance(intent, dict) else None)
+    supplied = decision_intent if decision_intent is not None else intent
+    full = None
+    blockers = []
+    if isinstance(supplied, dict) and full_keys <= supplied.keys():
+        full = {key: deepcopy(supplied[key]) for key in full_keys}
+        if not isinstance(full["version"], str) or not full["version"].strip():
+            blockers.append("FULL_DECISION_INTENT_VERSION_UNCONFIRMED")
+        if full["source"] != "USER_CONFIRMED" or full["no_leverage"] is not True:
+            blockers.append("FULL_DECISION_INTENT_PERMISSION_UNCONFIRMED")
+        if isinstance(intent, dict):
+            for key in ("source", "confirmed_at_ms", "reserved_usd"):
+                if key not in intent or intent[key] != full[key]:
+                    blockers.append("CAPITAL_INTENT_IDENTITY_MISMATCH")
+                    full = None
+                    break
+    else:
+        blockers.append("FULL_DECISION_INTENT_UNCONFIRMED")
+    return {"reconciliation_intent": legacy, "full_decision_intent": full,
+            "state": "AVAILABLE" if not blockers else "BLOCKED", "blockers": blockers}
+
+
 def reconcile_capital(observation: Any, intent: Any, *, at_ms: int) -> dict[str, Any]:
     checked = validate_broker_observation(observation, at_ms=at_ms)
     clean = checked.get("observation")
