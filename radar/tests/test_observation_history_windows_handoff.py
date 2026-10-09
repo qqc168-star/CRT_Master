@@ -119,6 +119,15 @@ class ObservationHistoryWindowsHandoffTests(
         self.assertIn('$CapitalWakeRequested = @($CurrentHandoff.semantic_descriptor.wake_sources) -contains "BROKER_CAPITAL_STATE"', self.text)
         self.assertNotIn("OFFLINE_ONLY", self.text)
 
+    def test_company_archive_or_direct_inputs_and_allocation_are_read_only_optional_inputs(self):
+        self.assertIn('"--issuer-ct-archive", $IssuerCtArchive', self.text)
+        self.assertIn('elseif (Test-Path -LiteralPath $TreasuryCompanyCtInputs)', self.text)
+        self.assertIn('"--treasury-company-ct-inputs", $TreasuryCompanyCtInputs', self.text)
+        self.assertIn('if (Test-Path -LiteralPath $PortfolioAllocationInputs)', self.text)
+        self.assertIn('"--portfolio-allocation-inputs", $PortfolioAllocationInputs', self.text)
+        self.assertIn('"sec-disclosures\\manifest.json"', self.text)
+        self.assertIn('"--treasury-valuation-inputs", $TreasuryValuationInputs', self.text)
+
     def test_notification_checks_current_daily_capital_state(self):
         self.assertIn("--capital-state $EvidenceOutput", self.text)
         self.assertIn("--capital-source-dir $CapitalSourceDir", self.text)
