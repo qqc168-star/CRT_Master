@@ -9,3 +9,4 @@ radar/CONFIG/BTC_SEASON_SEMANTIC_MAPPING_HASH_APPROVAL_SEAL_V0.1.json text eol=l
 radar/registry/SOURCE_RESPONSIBILITY_MATRIX.md text eol=lf
 radar/tests/fixtures/issuer_disclosures_20261005/strategy.html -text
 radar/tests/fixtures/issuer_disclosures_20261005/strive.html -text
+radar/tests/fixtures/capital_second_real_output.json -text

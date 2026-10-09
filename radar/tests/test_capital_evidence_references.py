@@ -46,7 +46,7 @@ class CapitalEvidenceReferenceTests(unittest.TestCase):
         self.assertEqual(envelope["evidence_reference_contract"], capital.EVIDENCE_REFERENCE_CONTRACT_VERSION)
         catalog = capital.evidence_reference_catalog(self.source)
         instructions = envelope["request_body"]["instructions"]
-        self.assertEqual(json.loads(instructions.split("(code: meanings):\n", 1)[1]), catalog)
+        self.assertEqual(json.JSONDecoder().raw_decode(instructions.split("(code: meanings):\n", 1)[1])[0], catalog)
         self.assertIn("formal valuation", " ".join(catalog["bridge"]))
         self.assertIn("execution facts, not an investment rationale", " ".join(catalog["synthetic:fee-bound"]))
         self.assertIn("execution facts, not an investment rationale", " ".join(catalog["synthetic:qualified-account-facts"]))
@@ -76,7 +76,7 @@ class CapitalEvidenceReferenceTests(unittest.TestCase):
     def test_legal_references_pass_independent_source_check(self):
         rec = self.rec()
         rec["items"][0]["supporting_evidence"] = evidence_enum(self.envelope)
-        validated = capital.validate_recommendation(rec, self.source, at_ms=NOW)
+        validated = capital.validate_recommendation(capital._base_recommendation(rec), self.source, at_ms=NOW)
         self.assertEqual(validated["items"][0]["validation_state"], "VALIDATED_NON_TRADING_WAIT")
         receipt = capital.validated_receipt(provider_response(rec), self.envelope, at_ms=NOW)
         self.assertIn("capital_validation", receipt)
@@ -96,17 +96,19 @@ class CapitalEvidenceReferenceTests(unittest.TestCase):
                 "market_context.distillation.note：資料為合成市場與合成資本"]))
         response = provider_response(rec)
         before = deepcopy(response)
+        historical = capital._build_envelope(self.case["payload"], self.source,
+            at_ms=NOW, full_decision=True, legacy_semantics=True)
         with self.assertRaisesRegex(ValueError, "RESPONSE_ENUM_MISMATCH"):
-            capital._check_shape(rec, self.envelope["request_body"]["text"]["format"]["schema"])
+            capital._check_shape(rec, historical["request_body"]["text"]["format"]["schema"])
         with self.assertRaisesRegex(ValueError, "EVIDENCE_REFERENCE_UNKNOWN"):
-            capital.validated_receipt(response, self.envelope, at_ms=NOW)
+            capital.validated_receipt(response, historical, at_ms=NOW)
         self.assertEqual(response, before)
         for entry in rec["items"]:
             isolated = self.rec()
             target = next(row for row in isolated["items"] if row["decision_scope"] == entry["decision_scope"])
             target["supporting_evidence"] = entry["supporting_evidence"]
             with self.subTest(scope=entry["decision_scope"]), self.assertRaisesRegex(ValueError, "EVIDENCE_REFERENCE_UNKNOWN"):
-                capital.validate_recommendation(isolated, self.source, at_ms=NOW)
+                capital.validate_recommendation(capital._base_recommendation(isolated), self.source, at_ms=NOW)
 
     def test_legal_reference_does_not_qualify_invalid_transaction(self):
         for defect in ("missing_cash_qualification", "missing_fee", "blocked_valuation", "quantity_step"):
@@ -114,6 +116,7 @@ class CapitalEvidenceReferenceTests(unittest.TestCase):
                 source = deepcopy(self.source)
                 rec = self.rec()
                 target = next(row for row in rec["items"] if row["asset"] == "STRC")
+                target.update(action="BUY", wait_kind=None, blockers=[], legs=[leg(asset="STRC")])
                 if defect == "missing_cash_qualification":
                     source["qualification"] = None
                 elif defect == "missing_fee":
@@ -132,7 +135,7 @@ class CapitalEvidenceReferenceTests(unittest.TestCase):
                 rec = self.rec()
                 rec["items"][1]["supporting_evidence"] = [self.source["fees"][0]["source_ref"]]
                 with self.assertRaisesRegex(ValueError, "INVESTMENT_EVIDENCE_REQUIRED"):
-                    capital.validate_recommendation(rec, self.source, at_ms=NOW)
+                    capital.validate_recommendation(capital._base_recommendation(rec), self.source, at_ms=NOW)
 
     def test_strict_saved_legacy_envelope_replay_preserves_failure_and_hash(self):
         legacy = capital._build_envelope(self.case["payload"], self.source,
@@ -142,7 +145,7 @@ class CapitalEvidenceReferenceTests(unittest.TestCase):
         self.assertEqual(legacy["request_body"]["text"]["format"], capital.response_format())
         before = deepcopy(legacy)
         self.assertEqual(validate_request_envelope(legacy), legacy)
-        rec = self.rec()
+        rec = capital._base_recommendation(self.rec())
         rec["items"][0]["supporting_evidence"] = ["capital.spending_cap.amount_usd=700.00"]
         with self.assertRaisesRegex(ValueError, "EVIDENCE_REFERENCE_UNKNOWN"):
             capital.validated_receipt(provider_response(rec), legacy, at_ms=NOW)

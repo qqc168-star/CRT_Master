@@ -18,6 +18,7 @@ VERSION = "CRT_CAPITAL_RECOMMENDATION_V0.1"
 REQUEST_VERSION = "CRT_CAPITAL_RECOMMENDATION_REQUEST_V0.1"
 FULL_REQUEST_VERSION = "CRT_CAPITAL_FULL_DECISION_OFFLINE_V0.1"
 EVIDENCE_REFERENCE_CONTRACT_VERSION = "CRT_CAPITAL_EVIDENCE_REFERENCES_V0.1"
+DECISION_SEMANTICS_CONTRACT_VERSION = "CRT_CAPITAL_DECISION_SEMANTICS_V0.1"
 LOCKS = {"production": "NOT_APPROVED", "external_action_authority": "NONE",
          "capital_decision_authority": "USER_ONLY", "machine_execution": "FORBIDDEN"}
 ACTIONS = ("BUY", "SELL", "HOLD", "WAIT", "ROTATE")
@@ -376,7 +377,132 @@ def evidence_reference_catalog(source):
     return {ref: sorted(set(descriptions)) for ref, descriptions in sorted(catalog.items())}
 
 
-def response_format(source=None):
+def semantic_evidence_catalog(projection):
+    """Bind a bounded set of supplied facts, never infer an asset from a wake.
+
+    A catalog entry proves its value and attribution, not an investment thesis.
+    A parent pack clock is not silently promoted to a metric observation clock.
+    Administrative identities, fee bounds and positions are not investment data.
+    """
+    result = {}
+    known_assets = {r["asset"] for r in projection["task"]["scopes"]}
+    known_assets.update(r["asset"] for r in projection["instruments"])
+    known_assets.update({"BTC", "MSTR", "ASST", "STRC", "SATA"})
+
+    def pointer(parts):
+        return "/" + "/".join(str(p).replace("~", "~0").replace("/", "~1") for p in parts)
+
+    def clock(row):
+        if not isinstance(row, dict):
+            return None
+        for key in ("as_of_ms", "observed_at_ms", "mnav_as_of", "as_of"):
+            if type(row.get(key)) is int and row[key] > 0:
+                return row[key]
+        return None
+
+    def add(parts, value, *, asset="UNATTRIBUTED", basis="UNCLASSIFIED", role="OBSERVATION",
+            ref="bridge", row=None):
+        result[pointer(parts)] = {"subject_asset": asset, "metric_basis": basis,
+            "value_json": json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False),
+            "evidence_role": role, "source_ref": ref, "source_time_ms": clock(row),
+            "qualification_state": (row.get("formal_action_critical_state", row.get("quality_state",
+                row.get("history_state", row.get("state")))) if isinstance(row, dict) else None)}
+
+    capital = projection.get("capital")
+    if isinstance(capital, dict):
+        funds = capital.get("funds", {})
+        for key, value in sorted(funds.items()):
+            add(("capital", "funds", key), value, basis="CAPITAL_FACT", role="CASH_BASIS", row=capital)
+        for index, row in enumerate(capital.get("holdings", [])):
+            add(("capital", "holdings", index, "quantity"), row["quantity"], asset=row["asset"],
+                basis="CAPITAL_FACT", role="HOLDING", row=capital)
+        for index, row in enumerate(capital.get("open_orders", [])):
+            add(("capital", "open_orders", index), row, asset=row["asset"], basis="CAPITAL_FACT", role="ORDER", row=capital)
+    add(("spending_cap",), projection["spending_cap"], basis="CAPITAL_FACT", role="CASH_BASIS")
+    for key, value in sorted(projection["spending_cap"].items()):
+        add(("spending_cap", key), value, basis="CAPITAL_FACT", role="CASH_BASIS")
+    for key in ("reserved_usd", "no_leverage"):
+        if isinstance(projection.get("user_intent"), dict) and key in projection["user_intent"]:
+            add(("user_intent", key), projection["user_intent"][key], basis="CAPITAL_FACT", role="USER_CONSTRAINT")
+    for section, basis, role in (("instruments", "INSTRUMENT_FACT", "EXECUTION_SPEC"), ("fees", "FEE_FACT", "EXECUTION_FEE")):
+        for index, row in enumerate(projection[section]):
+            for key in ("quantity_step", "upper_bound_usd", "quantity_max"):
+                if key in row:
+                    add((section, index, key), row[key], asset=row["asset"], basis=basis,
+                        role=role, ref=row["source_ref"], row=row)
+
+    market = projection.get("market_context", {})
+    # Section names below are existing explicit semantic mappings. Generic
+    # synthetic directions, layer names and event wake sources grant no asset.
+    btc_sections = {"btc_bull_validation", "btc_entry_gate", "btc_long_horizon_context", "btc_etf_evidence"}
+    skipped = {"schema_version", "contract_version", "context_hash", "source_hash", "source_id", "source_ref",
+               "source_main_sha", "generated_at_ms", "observed_at_ms", "as_of_ms", "as_of", "valid_until_ms",
+               "mnav_as_of", "btc_share_as_of", "action_output", "external_action_authority",
+               "capital_decision_authority", "machine_execution", "machine_may_execute_trade",
+               "external_action_performed", "production", "key_encoding", "minimization"}
+
+    def walk(value, parts, *, asset="UNATTRIBUTED", basis="MARKET_OBSERVATION", ref="bridge", row=None,
+             investment=True):
+        if isinstance(value, dict):
+            explicit = value.get("asset", value.get("asset_id"))
+            if explicit in known_assets:
+                asset = explicit
+            semantic = value.get("source_semantic")
+            semantic = semantic.get("identity") if isinstance(semantic, dict) else semantic
+            if value.get("research_only") is True or semantic in {
+                    "STRATEGYTRACKER_DILUTED_MNAV_RESEARCH", "SAYLORTRACKER_DILUTED_MNAV_RESEARCH"}:
+                basis = "RESEARCH_SECONDARY"
+            elif (semantic == "CRT_FORMAL_DILUTED_EQUITY_MNAV"
+                  and basis not in {"RESEARCH_SECONDARY", "POSTURE_RESEARCH"}):
+                basis = "FORMAL_DILUTED_EQUITY_MNAV"
+            context = value if clock(value) is not None or any(k in value for k in (
+                "formal_action_critical_state", "quality_state", "history_state", "state")) else row
+            for key, child in sorted(value.items()):
+                if key in skipped:
+                    continue
+                mapped = key if key in known_assets else asset
+                # The existing side-job field names explicitly name the issuer.
+                if key == "strc_dividend_per_share":
+                    mapped = "STRC"
+                elif key == "sata_daily_distribution":
+                    mapped = "SATA"
+                walk(child, (*parts, key), asset=mapped, basis=basis, ref=ref, row=context,
+                     investment=investment)
+        elif isinstance(value, list):
+            if all(not isinstance(v, (dict, list)) for v in value):
+                add(parts, value, asset=asset, basis=basis, role="EVIDENCE_QUALIFICATION", ref=ref, row=row)
+            else:
+                for index, child in enumerate(value):
+                    walk(child, (*parts, index), asset=asset, basis=basis, ref=ref, row=row, investment=investment)
+        else:
+            role = "INVESTMENT_METRIC" if investment else "RESEARCH_CONTEXT"
+            # State/reason/blocker strings are honest qualifications but cannot
+            # alone establish an asset's comparative return or risk.
+            metric_names = {"value", "percent_change", "price_usd", "price", "close", "yield_pct", "yield",
+                "annual_yield_pct", "distribution_rate", "annual_distribution_rate", "cash_return_pct", "cash_yield_pct",
+                "dividend_per_share", "strc_dividend_per_share", "sata_daily_distribution", "diluted_mnav",
+                "current_btc_per_diluted_share", "btc_per_diluted_share_change_pct", "five_week_mnav_change_pct",
+                "own_history_empirical_cdf_pct", "benchmark_empirical_cdf_pct", "regime_empirical_cdf_pct"}
+            if (not isinstance(value, (int, float)) or isinstance(value, bool)
+                    or str(parts[-1]) not in metric_names):
+                role = "EVIDENCE_QUALIFICATION"
+            add(parts, value, asset=asset, basis=basis, role=role, ref=ref, row=row)
+
+    for section, value in sorted(market.items()):
+        if section in skipped or section in {"pack_state", "data_health", "model_status", "distillation"}:
+            continue
+        walk(value, ("market_context", section), asset="BTC" if section in btc_sections else "UNATTRIBUTED",
+             investment=section not in {"asset_strategy_delta", "premarket_market_data", "portfolio_allocation_context"})
+    posture = projection.get("posture")
+    if isinstance(posture, dict):
+        for section in ("research_state", "rail", "contradictions", "blockers", "health"):
+            if section in posture:
+                walk(posture[section], ("posture", section), basis="POSTURE_RESEARCH", ref="posture", row=posture,
+                     investment=section == "health")
+    return dict(sorted(result.items()))
+
+
+def response_format(source=None, semantic_catalog=None):
     string = {"type": "string"}
     strings = {"type": "array", "items": string}
     nullable_number = {"type": ["number", "null"]}
@@ -392,9 +518,24 @@ def response_format(source=None):
         "invalidation": string, "next_trigger": string, "blockers": strings,
         "wait_kind": {"type": ["string", "null"], "enum": [None, *WAIT_KINDS]},
         "legs": {"type": "array", "items": leg}})
+    properties = {"contract_version": {"type": "string", "enum": [VERSION]},
+                  "task_id": string, "items": {"type": "array", "items": item}}
+    if semantic_catalog is not None:
+        require(bool(semantic_catalog), "SEMANTIC_EVIDENCE_CATALOG_REQUIRED")
+        path = {"type": "string", "enum": list(semantic_catalog)}
+        binding = _object({"source_path": path,
+            "subject_asset": {"type": "string", "enum": sorted({r["subject_asset"] for r in semantic_catalog.values()})},
+            "metric_basis": {"type": "string", "enum": sorted({r["metric_basis"] for r in semantic_catalog.values()})},
+            "value_json": string})
+        support = _object({"claim_bindings": {"type": "array", "items": binding},
+            "cash_comparison": _object({"state": {"type": "string", "enum": ["SOURCE_SUPPORTED", "INSUFFICIENT_EVIDENCE"]},
+                "evidence_paths": {"type": "array", "items": path},
+                "missing_evidence": strings, "rationale": string})})
+        item["properties"]["reasoning_support"] = support
+        item["required"].append("reasoning_support")
+        properties["reasoning_contract"] = {"type": "string", "enum": [DECISION_SEMANTICS_CONTRACT_VERSION]}
     return {"type": "json_schema", "name": "crt_capital_recommendation_v01", "strict": True,
-        "schema": _object({"contract_version": {"type": "string", "enum": [VERSION]},
-            "task_id": string, "items": {"type": "array", "items": item}})}
+        "schema": _object(properties)}
 
 
 LEGACY_INSTRUCTIONS = (
@@ -418,7 +559,7 @@ LEGACY_INSTRUCTIONS = (
     "authority USER_ONLY, machine execution FORBIDDEN. Synthetic fixtures are never live advice."
 )
 
-INSTRUCTIONS = LEGACY_INSTRUCTIONS.replace(
+REFERENCE_INSTRUCTIONS = LEGACY_INSTRUCTIONS.replace(
     "Use supporting_evidence references bridge or posture, and supplied source_ref values. ",
     "Use only the exact supporting_evidence codes enumerated in the response schema and "
     "the request-specific reference catalog below. Use at least bridge or an actually supplied "
@@ -427,8 +568,37 @@ INSTRUCTIONS = LEGACY_INSTRUCTIONS.replace(
     "metadata source_ref values as supporting_evidence. ")
 
 
-def request_instructions(source):
-    return INSTRUCTIONS + "\nAllowed supporting_evidence reference catalog (code: meanings):\n" + json.dumps(
+INSTRUCTIONS = REFERENCE_INSTRUCTIONS + (
+    " blockers are current missing or failed prerequisites that prevent THIS scope's chosen conclusion; "
+    "contradictions are opposing evidence and unresolved causal tensions, not automatically a blocker; "
+    "invalidation describes future conditions that would invalidate the conclusion. "
+    "Machine execution FORBIDDEN and user decision authority are permanent governance limits, "
+    "not a HOLD blocker. Never hide actual missing valuation or strategy conditions to qualify HOLD. "
+    "If an existing holding lacks evidence for qualified HOLD, preserve HOLD with explicit blockers; "
+    "do not turn an EXISTING scope into WAIT for an addition. Missing facts do not authorize selling. "
+    "Supporting-evidence codes only identify sources; legal codes do not prove the contents support "
+    "your claim. Bind factual assertions to the supplied claim catalog by exact source_path, "
+    "subject_asset, metric_basis and value_json. UNATTRIBUTED market changes must remain "
+    "unattributed: a BTC wake, other BTC signal, or generic layer cannot make them BTC returns. "
+    "Do not invent an asset, observation clock, return, risk, price or source. "
+    "CRT_FORMAL_DILUTED_EQUITY_MNAV is formal Diluted Equity mNAV; research trackers, "
+    "research-only preferred funding and gross BTC research ratios are not that formal metric. "
+    "Preserve BLOCKED qualifications and research semantics. STRC/SATA are not subject to the "
+    "MSTR/ASST formal mNAV requirement. "
+    "Cash substitution, opportunity cost and relative investment advantages require supplied "
+    "asset return/risk/price evidence plus a supplied cash comparison basis; balances, holdings, "
+    "instrument specifications and fees alone do not establish investment superiority. "
+    "Use cash_comparison INSUFFICIENT_EVIDENCE with specific missing_evidence when this cannot "
+    "be supported. SOURCE_SUPPORTED means the bound factual inputs exist, not that free-text "
+    "causal reasoning has been automatically proved. Separate observations, inferences and unknowns. "
+)
+
+
+def request_instructions(source, semantic_catalog=None):
+    instructions = REFERENCE_INSTRUCTIONS if semantic_catalog is None else INSTRUCTIONS + (
+        "\nBound factual claim catalog (JSON pointers into this supplied projection):\n" + json.dumps(
+            semantic_catalog, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+    return instructions + "\nAllowed supporting_evidence reference catalog (code: meanings):\n" + json.dumps(
         evidence_reference_catalog(source), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
@@ -450,6 +620,69 @@ def _check_shape(value, schema):
             _check_shape(v, schema["items"])
     elif actual == "string":
         text(value)
+
+
+def _base_recommendation(recommendation):
+    """Remove only the versioned typed annotations before the original validator."""
+    if "reasoning_contract" not in recommendation:
+        return deepcopy(recommendation)
+    fields(recommendation, {"contract_version", "task_id", "items", "reasoning_contract"})
+    require(recommendation["reasoning_contract"] == DECISION_SEMANTICS_CONTRACT_VERSION,
+            "DECISION_SEMANTICS_CONTRACT_MISMATCH")
+    result = deepcopy(recommendation)
+    result.pop("reasoning_contract")
+    for item in result["items"]:
+        require("reasoning_support" in item, "REASONING_SUPPORT_REQUIRED")
+        item.pop("reasoning_support")
+    return result
+
+
+def _reasoning_review(recommendation, catalog, source, *, at_ms):
+    """Verify typed source bindings independently of the model's prose judgment."""
+    reviewed = []
+    for item in recommendation["items"]:
+        support = item["reasoning_support"]
+        bindings = support["claim_bindings"]
+        require(bool(bindings), "FACTUAL_CLAIM_BINDINGS_REQUIRED")
+        paths = set()
+        for binding in bindings:
+            path = binding["source_path"]
+            require(path in catalog, "CLAIM_SOURCE_PATH_UNKNOWN")
+            require(path not in paths, "DUPLICATE_CLAIM_BINDING")
+            paths.add(path)
+            fact = catalog[path]
+            require(binding["subject_asset"] == fact["subject_asset"], "CLAIM_ASSET_ATTRIBUTION_MISMATCH")
+            require(binding["metric_basis"] == fact["metric_basis"], "CLAIM_METRIC_BASIS_MISMATCH")
+            require(binding["value_json"] == fact["value_json"], "CLAIM_VALUE_MISMATCH")
+            require(fact["source_ref"] in item["supporting_evidence"], "CLAIM_REFERENCE_NOT_CITED")
+        comparison = support["cash_comparison"]
+        comparison_paths = comparison["evidence_paths"]
+        require(len(comparison_paths) == len(set(comparison_paths))
+                and set(comparison_paths) <= paths, "CASH_COMPARISON_UNBOUND_SOURCE")
+        if comparison["state"] == "SOURCE_SUPPORTED":
+            require(not comparison["missing_evidence"], "SOURCE_SUPPORTED_HAS_MISSING_EVIDENCE")
+            facts = [catalog[path] for path in comparison_paths]
+            # Scope belongs to the judged issuer; a different issuer's data,
+            # a position, fee or quantity step cannot establish its advantage.
+            comparison_assets = ({leg["asset"] for leg in item["legs"] if leg["action"] == "BUY"}
+                                 if item["action"] == "ROTATE" else {item["asset"]})
+            for asset in comparison_assets:
+                asset_facts = [fact for fact in facts if fact["subject_asset"] == asset
+                    and fact["evidence_role"] == "INVESTMENT_METRIC"
+                    and fact["qualification_state"] in {"AVAILABLE", "VALID", "VALID_FRESH"}
+                    and type(fact["source_time_ms"]) is int and 0 < fact["source_time_ms"] <= at_ms]
+                require(bool(asset_facts), "CASH_COMPARISON_ASSET_EVIDENCE_REQUIRED")
+            require(any(fact["evidence_role"] == "CASH_BASIS" for fact in facts)
+                    and normalize_spending_cap(source, at_ms=at_ms)["state"] == "AVAILABLE",
+                    "CASH_COMPARISON_QUALIFIED_CASH_REQUIRED")
+        else:
+            require(bool(comparison["missing_evidence"]), "CASH_COMPARISON_MISSING_EVIDENCE_REQUIRED")
+        reviewed.append({"decision_scope": item["decision_scope"], "asset": item["asset"],
+            "source_bindings": "BOUND_TO_SUPPLIED_FACTS", "reasoning_support": deepcopy(support),
+            "investment_reasoning": "NOT_YET_PROVEN"})
+    return {"contract_version": DECISION_SEMANTICS_CONTRACT_VERSION,
+        "assurance_scope": "FACT_VALUES_ASSET_ATTRIBUTION_AND_METRIC_BASIS_ONLY",
+        "free_prose_reasoning": "NOT_YET_PROVEN", "items": reviewed}
 
 
 def _instrument(source, asset, at_ms):
@@ -641,6 +874,8 @@ def render(validated):
         lines.append("NO-TRADE（本次無已驗證立即交易腿；既有委託仍可能改變曝險）")
     for item in validated["items"]:
         lines.append(f"{item['decision_scope']} | {item['asset']} | {item['action']}（{labels[item['action']]}） | {item['validation_state']}（驗證狀態）")
+        if item["action"] == "HOLD" and item["validation_state"] == "BLOCKED":
+            lines.append("既有持倉的續抱判斷受阻，尚未取得合格續抱建議；沒有改寫為新增部位等待，也沒有賣出指令。")
         if item["validation_state"] == "VALIDATED_NON_TRADING_WAIT":
             lines.append("此決策範圍不得交易；等待補證據後重新驗證。")
         for key, label in (("reason", "理由"), ("supporting_evidence", "支持證據"), ("contradictions", "反證"),
@@ -649,6 +884,11 @@ def render(validated):
             lines.append(label + ": " + json.dumps(item[key], ensure_ascii=False, sort_keys=True))
         for leg in item["validated_legs"]:
             lines.append("交易腿（價格／數量／資本效果／資金來源／相依／主張阻塞）: " + json.dumps(leg, ensure_ascii=False, sort_keys=True))
+    if "reasoning_review" in validated:
+        lines.append("來源內容核驗範圍：原值、明確資產歸屬及指標語義；投資因果推理仍為 NOT_YET_PROVEN（尚未證實）。")
+        for row in validated["reasoning_review"]["items"]:
+            lines.append("來源比較與缺口: " + json.dumps({"decision_scope": row["decision_scope"],
+                **row["reasoning_support"]["cash_comparison"]}, ensure_ascii=False, sort_keys=True))
     return "\n".join(lines)
 
 
@@ -656,10 +896,13 @@ def build_envelope(payload, source, *, at_ms, full_decision=False):
     return _build_envelope(payload, source, at_ms=at_ms, full_decision=full_decision)
 
 
-def _build_envelope(payload, source, *, at_ms, full_decision=False, legacy_references=False):
+def _build_envelope(payload, source, *, at_ms, full_decision=False, legacy_references=False,
+                    legacy_semantics=False):
     from .openai_responses_adapter_contract import (SMOKE_MODEL, MAX_INPUT_UTF8_BYTES,
         MAX_OUTPUT_TOKENS, API_KEY_ENV_VAR, RESPONSES_PATH)
     projection = build_projection(payload, source, at_ms=at_ms)
+    semantic_catalog = (semantic_evidence_catalog(projection)
+                        if full_decision and not legacy_references and not legacy_semantics else None)
     serialized = json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
     if not full_decision:
         require(len(serialized.encode("utf-8")) <= MAX_INPUT_UTF8_BYTES, "CAPITAL_INPUT_CAPACITY_EXCEEDED")
@@ -668,9 +911,9 @@ def _build_envelope(payload, source, *, at_ms, full_decision=False, legacy_refer
         "capital_source": _canonical_source(source), "request_at_ms": at_ms,
         "transport": {"method": "POST", "path": RESPONSES_PATH, "auth_env_var": API_KEY_ENV_VAR, "secret_value_included": False},
         "request_body": {"model": SMOKE_MODEL,
-            "instructions": LEGACY_INSTRUCTIONS if legacy_references else request_instructions(source), "input": serialized,
+            "instructions": LEGACY_INSTRUCTIONS if legacy_references else request_instructions(source, semantic_catalog), "input": serialized,
             "store": False, "background": False, "max_output_tokens": MAX_OUTPUT_TOKENS,
-            "text": {"format": response_format() if legacy_references else response_format(source)}},
+            "text": {"format": response_format() if legacy_references else response_format(source, semantic_catalog)}},
         "tools_allowed": False, "network_performed": False,
         "production": "NOT_APPROVED", "external_action_authority": "NONE", "action_output": "NONE"}
     if full_decision:
@@ -683,6 +926,8 @@ def _build_envelope(payload, source, *, at_ms, full_decision=False, legacy_refer
             "model_comprehension": "NOT_YET_PROVEN"}
     if not legacy_references:
         result["evidence_reference_contract"] = EVIDENCE_REFERENCE_CONTRACT_VERSION
+    if semantic_catalog is not None:
+        result["decision_semantics_contract"] = DECISION_SEMANTICS_CONTRACT_VERSION
     result["request_hash"] = digest(result)
     return result
 
@@ -692,12 +937,13 @@ def validate_envelope(envelope):
     # only validates that saved shape; every new build uses the bound enum.
     expected = _build_envelope(envelope["capital_bridge_payload"], envelope["capital_source"], at_ms=envelope["request_at_ms"],
         full_decision=envelope.get("contract_version") == FULL_REQUEST_VERSION,
-        legacy_references="evidence_reference_contract" not in envelope)
+        legacy_references="evidence_reference_contract" not in envelope,
+        legacy_semantics="decision_semantics_contract" not in envelope)
     require(envelope == expected, "CAPITAL_ENVELOPE_MISMATCH")
     return envelope
 
 
-def validated_receipt(response, envelope, *, at_ms):
+def _response_recommendation(response, envelope):
     from .openai_responses_adapter_contract import build_delivery_receipt
     validate_envelope(envelope)
     receipt = build_delivery_receipt(response, event_id=envelope["event_id"],
@@ -715,7 +961,38 @@ def validated_receipt(response, envelope, *, at_ms):
         return obj
     recommendation = json.loads(receipt["output_text"], object_pairs_hook=unique,
                                 parse_constant=lambda _: require(False, "NONFINITE_JSON"))
-    validation = validate_recommendation(recommendation, envelope["capital_source"], at_ms=at_ms)
+    return receipt, recommendation
+
+
+def assess_response(response, envelope, *, at_ms):
+    """Inspect a response without granting a successful receipt or notification.
+
+    BLOCKED HOLD remains HOLD and retains its actual gaps. New typed bindings
+    are verified independently; their match never proves unrestricted prose.
+    Saved requests use their exact historical contract and base validation.
+    """
+    _, recommendation = _response_recommendation(response, envelope)
+    if "decision_semantics_contract" not in envelope:
+        return validate_recommendation(recommendation, envelope["capital_source"], at_ms=at_ms)
+    _check_shape(recommendation, envelope["request_body"]["text"]["format"]["schema"])
+    base = _base_recommendation(recommendation)
+    validation = validate_recommendation(base, envelope["capital_source"], at_ms=at_ms)
+    catalog = semantic_evidence_catalog(json.loads(envelope["request_body"]["input"]))
+    validation["reasoning_review"] = _reasoning_review(recommendation, catalog,
+        envelope["capital_source"], at_ms=at_ms)
+    validation.pop("validation_hash")
+    validation["validation_hash"] = digest(validation)
+    return validation
+
+
+def validated_receipt(response, envelope, *, at_ms):
+    receipt, recommendation = _response_recommendation(response, envelope)
+    validation = assess_response(response, envelope, at_ms=at_ms)
+    if "decision_semantics_contract" in envelope:
+        for item in recommendation["items"]:
+            if item["action"] in {"BUY", "ROTATE"}:
+                require(item["reasoning_support"]["cash_comparison"]["state"] == "SOURCE_SUPPORTED",
+                        "INVESTMENT_COMPARISON_NOT_SOURCE_SUPPORTED:" + item["decision_scope"])
     # Qualification belongs to the affected asset, not the model's choice of
     # reference label. Execution facts cannot bypass an investment evidence gate.
     from .gpt_handoff import expand_bridge_field_names

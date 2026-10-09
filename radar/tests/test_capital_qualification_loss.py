@@ -14,7 +14,7 @@ from crt_radar.plain_language_notice import build_plain_language_notice
 from crt_radar.private_profile import apply_broker_capital_state
 from crt_radar.reanalysis_wake import apply_capital_reanalysis_wake
 from tests.test_capital_decision_closure import (
-    NOW, current_capital_pack, item, match_scopes, provider_response, recommendation, source_fixture,
+    NOW, current_capital_pack, item, match_scopes, full_provider_response, recommendation, source_fixture,
 )
 from tests.test_full_bridge_budget import captured_pack, handoff_for
 
@@ -30,7 +30,7 @@ class CapitalQualificationLossTests(unittest.TestCase):
         self.rec = recommendation(item("HOLD"))
         match_scopes(self.source, self.rec)
         self.envelope = c.build_envelope(self.payload, self.source, at_ms=NOW, full_decision=True)
-        self.receipt = c.validated_receipt(provider_response(self.rec), self.envelope, at_ms=NOW)
+        self.receipt = c.validated_receipt(full_provider_response(self.rec, self.envelope), self.envelope, at_ms=NOW)
         self.valid_pack = current_capital_pack(self.source)
         self.previous = self.valid_pack["private_context"]["profile"]["capital_reconciliation"]
 
@@ -159,7 +159,7 @@ class CapitalQualificationLossTests(unittest.TestCase):
         self.payload["bridge_payload_hash"] = c.digest({k: v for k, v in self.payload.items() if k != "bridge_payload_hash"})
         self.source.update(evidence_lineage=partial["evidence_pack_hash"], bridge_payload_hash=self.payload["bridge_payload_hash"])
         envelope = c.build_envelope(self.payload, self.source, at_ms=NOW, full_decision=True)
-        receipt = c.validated_receipt(provider_response(self.rec), envelope, at_ms=NOW)
+        receipt = c.validated_receipt(full_provider_response(self.rec, envelope), envelope, at_ms=NOW)
         ensure_pending(self.root / "new-partial", receipt)
         path = next((self.root / "new-partial").glob("*.json"))
         presenter = Mock(return_value=1)

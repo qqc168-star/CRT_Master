@@ -1,5 +1,6 @@
 """Claim-scoped formal valuation receipt gates; synthetic scenarios only."""
 from copy import deepcopy
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -8,7 +9,7 @@ from crt_radar import capital_decision_closure as c
 from crt_radar.gpt_handoff import build_minimized_bridge_payload, expand_bridge_field_names
 from tests.test_full_bridge_budget import captured_pack, handoff_for
 from tests.test_capital_decision_closure import (
-    NOW, source_fixture, item, leg, recommendation, match_scopes, provider_response,
+    NOW, source_fixture, item, leg, recommendation, match_scopes, full_provider_response,
 )
 
 
@@ -26,13 +27,37 @@ class FormalValuationReceiptTests(unittest.TestCase):
             payload["market_context"].pop("treasury_valuation_context", None)
         else:
             payload["market_context"]["treasury_valuation_context"] = section
+        # Independent, explicitly attributed synthetic price facts let this
+        # suite exercise the formal-valuation gate rather than fail the new
+        # comparison schema first. They grant no formal mNAV qualification.
+        buy_assets = {trade["asset"] for row in rec["items"] for trade in row["legs"]
+                      if trade["action"] == "BUY"}
+        payload["market_context"].setdefault("changes", {})["synthetic_investment_inputs"] = {
+            asset: {"asset": asset, "price_usd": 100, "history_state": "AVAILABLE", "as_of_ms": NOW}
+            for asset in sorted(buy_assets)}
         # New unpublished synthetic case, never rewrite an existing outbox event.
         payload["event"]["event_id"] = c.digest({"case": section, "recommendation": rec})
         payload["bridge_payload_hash"] = c.digest({k: v for k, v in payload.items() if k != "bridge_payload_hash"})
         source = source_fixture(payload)
         match_scopes(source, rec)
         envelope = c.build_envelope(payload, source, at_ms=NOW, full_decision=True)
-        return c.validated_receipt(provider_response(rec), envelope, at_ms=NOW)
+        response = full_provider_response(rec, envelope)
+        supplied = json.loads(response["output"][0]["content"][0]["text"])
+        catalog = c.semantic_evidence_catalog(json.loads(envelope["request_body"]["input"]))
+        for row in supplied["items"]:
+            assets = {trade["asset"] for trade in row["legs"] if trade["action"] == "BUY"}
+            if not assets:
+                continue
+            paths = ["/market_context/changes/synthetic_investment_inputs/" + asset + "/price_usd"
+                     for asset in sorted(assets)] + ["/spending_cap"]
+            row["reasoning_support"]["claim_bindings"] = [{"source_path": path,
+                **{key: catalog[path][key] for key in ("subject_asset", "metric_basis", "value_json")}}
+                for path in paths]
+            row["reasoning_support"]["cash_comparison"] = {"state": "SOURCE_SUPPORTED",
+                "evidence_paths": paths, "missing_evidence": [],
+                "rationale": "僅核對已提供的合成價格與資金；不證明投資因果推理。"}
+        response["output"][0]["content"][0]["text"] = json.dumps(supplied, ensure_ascii=False)
+        return c.validated_receipt(response, envelope, at_ms=NOW)
 
     def test_mstr_asst_buy_missing_section_row_or_blocked_is_rejected(self):
         for asset in ("MSTR", "ASST"):

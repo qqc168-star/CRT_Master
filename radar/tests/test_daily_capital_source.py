@@ -17,7 +17,7 @@ from crt_radar.gpt_handoff import run_gpt_handoff_gate
 from crt_radar.plain_language_notice import build_plain_language_notice
 from tests import test_daily_evidence_runner as fixture
 from tests.test_broker_capital_observation import synthetic_intent, synthetic_observation
-from tests.test_capital_decision_closure import item, provider_response, recommendation, source_fixture
+from tests.test_capital_decision_closure import item, full_provider_response, recommendation, source_fixture
 
 
 NOW = fixture.NOW_MS
@@ -228,7 +228,7 @@ class DailyCapitalSourceTests(unittest.TestCase):
             self.assertEqual(source["broker_observation"], pack["private_context"]["profile"]["capital_reconciliation"]["broker_observed"])
             self.assertEqual(source["broker_observation"], self.broker)
             rec = recommendation(item("WAIT", wait_kind="EVIDENCE_BLOCKED", blockers=["等待正式估值補證據"]))
-            transport = Mock(return_value=provider_response(rec))
+            transport = Mock(side_effect=lambda request: full_provider_response(rec, request))
             event_path = outbox / f'{bound["event_id"]}.json'
             delivered = deliver_event(event_path, self.root / "transport", transport=transport,
                 notification_state_dir=self.root / "notifications", now_ms=NOW,

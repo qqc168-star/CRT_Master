@@ -10,6 +10,8 @@ from crt_radar import gpt_transport_worker as worker
 from crt_radar.gpt_bridge_outbox import enqueue_bridge_payload
 from crt_radar.gpt_transport_boundary import _seal_state, _write_no_clobber, build_pending_state
 from scripts import run_controlled_capital_acceptance as controlled
+from tests.test_capital_decision_closure import full_provider_response
+import json
 
 MAIN = "4bee34d0d674da785516809cb103ccef9645eee7"
 NOW = 1790930000000
@@ -27,7 +29,10 @@ class CapitalRequestReplayTests(unittest.TestCase):
         self.path = self.root / "outbox" / (self.event + ".json")
         self.legacy = capital._build_envelope(self.payload, self.source, at_ms=NOW,
                                              full_decision=True, legacy_references=True)
-        self.sender = Mock(return_value=controlled.simulated_response(self.case))
+        simulated = controlled.simulated_response(self.case)
+        rec = json.loads(simulated["output"][0]["content"][0]["text"])
+        self.sender = Mock(side_effect=lambda envelope: full_provider_response(rec, envelope))
+        self.sender.return_value = simulated
         no_http = patch.object(worker.urlrequest, "build_opener", side_effect=AssertionError("Offline replay only"))
         no_http.start()
         self.addCleanup(no_http.stop)
@@ -54,6 +59,17 @@ class CapitalRequestReplayTests(unittest.TestCase):
         self.assertEqual(result["state"], "RECONCILIATION_REQUIRED")
         self.assertEqual(result["reason"], "LEGACY_CAPITAL_STATE_REQUIRES_RECONCILIATION")
         self.sender.assert_not_called()
+
+    def test_saved_enum_only_success_replays_without_rewriting_or_resending(self):
+        historical = capital._build_envelope(self.payload, self.source, at_ms=NOW,
+            full_decision=True, legacy_semantics=True)
+        with patch.object(capital, "build_envelope", return_value=historical):
+            self.assertEqual(self.deliver()["state"], "DELIVERED")
+        preserved = {path: path.read_bytes() for path in (self.root / "states").rglob("*.json")}
+        self.assertNotEqual(historical["request_hash"], self.case["envelope"]["request_hash"])
+        self.assertEqual(self.deliver()["state"], "ALREADY_DELIVERED")
+        self.sender.assert_called_once()
+        self.assertEqual({path: path.read_bytes() for path in preserved}, preserved)
 
     def test_valid_but_different_saved_source_is_not_rebound(self):
         changed = deepcopy(self.source)

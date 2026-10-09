@@ -33,7 +33,7 @@ from crt_radar.openai_responses_adapter_contract import API_KEY_ENV_VAR, SMOKE_M
 from crt_radar.plain_language_notice import build_plain_language_notice
 from crt_radar.treasury_company_ct import build_treasury_valuation_context
 
-CASE_VERSION = "CRT_CONTROLLED_SYNTHETIC_CAPITAL_CASE_V0.2"
+CASE_VERSION = "CRT_CONTROLLED_SYNTHETIC_CAPITAL_CASE_V0.3"
 APPROVAL_VERSION = "CRT_CONTROLLED_CAPITAL_APPROVAL_V0.1"
 INPUT_USD_PER_MILLION = Decimal("0.20")
 INPUT_PLANNING_USD_PER_MILLION = INPUT_USD_PER_MILLION * Decimal("1.25")
@@ -160,13 +160,34 @@ def validate_approval(approval: dict, case: dict, *, now_ms: int) -> None:
 
 
 def simulated_response(case: dict) -> dict:
-    from tests.test_capital_decision_closure import item, leg, provider_response, recommendation
-    response = provider_response(recommendation(
+    from tests.test_capital_decision_closure import item, provider_response, recommendation
+    result = recommendation(
         item("WAIT", wait_kind="EVIDENCE_BLOCKED", blockers=["valuation:MSTR:FORMAL_INPUTS_MISSING"],
              reason="合成情境：正式估值缺失，不得買入，等待補證據。"),
-        item("BUY", asset="STRC", scope="STRC-addition", legs=[leg(asset="STRC")]),
-        item("HOLD", scope="MSTR-existing")))
-    return response
+        item("WAIT", asset="STRC", scope="STRC-addition", wait_kind="EVIDENCE_BLOCKED",
+             blockers=["STRC 現金替代所需的收益、風險及機會成本資料未提供。"],
+             reason="合成情境：未提供 STRC 投資比較證據，保留現金並等待補證據。"),
+        item("HOLD", scope="MSTR-existing",
+             reason="合成契約測試：已確認既有持倉，不據此宣稱續抱投資推理已獲證明。"))
+    projection = capital.build_projection(case["payload"], case["source"], at_ms=case["snapshot_at_ms"])
+    catalog = capital.semantic_evidence_catalog(projection)
+    for proposed in result["items"]:
+        paths = [path for path, fact in catalog.items()
+                 if fact["subject_asset"] == proposed["asset"]
+                 and ((proposed["action"] == "HOLD" and path.startswith("/capital/holdings/")
+                       and path.endswith("/quantity"))
+                      or (proposed["action"] == "WAIT" and proposed["asset"] == "MSTR"
+                          and path.endswith("/formal_action_critical_state")))]
+        if not paths:
+            paths = [path for path in catalog if path == "/spending_cap/state"]
+        proposed["reasoning_support"] = {
+            "claim_bindings": [{"source_path": path, **{key: catalog[path][key] for key in (
+                "subject_asset", "metric_basis", "value_json")}} for path in sorted(paths)],
+            "cash_comparison": {"state": "INSUFFICIENT_EVIDENCE", "evidence_paths": [],
+                "missing_evidence": ["STRC 配息及風險條件、現金收益率、資產預期報酬及機會成本資料未提供。"],
+                "rationale": "現有來源不足以證明該資產優於現金；本模擬不補造投資比較。"}}
+    result["reasoning_contract"] = "CRT_CAPITAL_DECISION_SEMANTICS_V0.1"
+    return provider_response(result)
 
 
 def execute(root: Path, *, mode: str, approval: dict | None = None,
@@ -221,6 +242,8 @@ def execute(root: Path, *, mode: str, approval: dict | None = None,
         "model_tokens": "NOT_MEASURED", "model_cost": "NOT_MEASURED",
         "model_comprehension": "NOT_YET_PROVEN", "real_model_acceptance": "NOT_MEASURED",
         "production": "NOT_APPROVED", "external_action_authority": "NONE"}
+    if "capital_blocked_review" in result:
+        report["capital_blocked_review"] = deepcopy(result["capital_blocked_review"])
     if mode == "CONTROLLED_REAL_REQUEST":
         evidence_path = destination / "transport" / capital.FULL_REQUEST_VERSION / "responses" / f"{event_id}.json"
         provenance_path = destination / "controlled-http-result.json"

@@ -149,6 +149,48 @@ def _receipt(response: dict[str, Any], envelope: dict[str, Any]) -> dict[str, An
     )
 
 
+def _capital_blocked_review(response: dict[str, Any], envelope: dict[str, Any], *,
+                            at_ms: int, failure: Exception) -> dict[str, Any]:
+    """Disclose a bound rejected assessment without issuing an advice receipt.
+
+    Provider text is rendered only after independent shape/source validation.
+    Exception text, provider metadata and unauthenticated response fields never
+    enter the visible result. This does not change delivery or notification state.
+    """
+    from .capital_decision_closure import assess_response, render
+
+    reason = str(failure)
+    if reason != "CAPITAL_RECOMMENDATION_NOT_VALIDATED" and not re.fullmatch(
+            r"VALUATION_EVIDENCE_UNQUALIFIED:(?:MSTR|ASST)", reason):
+        reason = "CAPITAL_RESPONSE_REJECTED"
+    result = {"qualified": False, "capital_decision_state": "BLOCKED",
+              "reason": reason, "assessment_available": False,
+              "message": "資本模型回應未通過驗證；沒有合格資本建議，不得依此交易。"}
+    try:
+        validation = assess_response(response, envelope, at_ms=at_ms)
+        items = [{"qualified": False, "capital_decision_state": "BLOCKED",
+                  **{key: deepcopy(item[key]) for key in (
+            "decision_scope", "asset", "action", "validation_state", "blockers",
+            "contradictions", "invalidation")}}
+            for item in validation["items"]]
+        # Recover only an exact known failure code matched to a source-bound
+        # scope. Never disclose general exception text or unauthenticated data.
+        comparison_failures = [item for item in validation.get("reasoning_review", {}).get("items", [])
+            if str(failure) == "INVESTMENT_COMPARISON_NOT_SOURCE_SUPPORTED:" + item["decision_scope"]
+            and item["reasoning_support"]["cash_comparison"]["state"] == "INSUFFICIENT_EVIDENCE"]
+        trusted_reason = ("INVESTMENT_COMPARISON_NOT_SOURCE_SUPPORTED:" + comparison_failures[0]["decision_scope"]
+                          if comparison_failures else reason)
+        message = "此為未合格評估揭露，並非合格資本建議；本次完整決策為 BLOCKED，不得依此交易。\n"
+        if any(item["validation_state"] == "VALIDATED" for item in validation["items"]):
+            message += "以下 VALIDATED 僅表示原財務／來源檢查狀態，不代表本次完整決策或投資推理合格。\n"
+        message += render(validation).replace("美股範圍投資組合資本建議；", "美股範圍資本評估紀錄；", 1)
+        if _SENSITIVE_TEXT.search(message) or _SENSITIVE_TEXT.search(json.dumps(items, ensure_ascii=False)):
+            return result
+    except Exception:
+        return result
+    return {**result, "reason": trusted_reason, "assessment_available": True, "items": items, "message": message}
+
+
 def deliver_event(
     outbox_path: Path, state_dir: Path, *,
     notification_state_dir: Path | None = None,
@@ -209,6 +251,9 @@ def deliver_event(
             legacy_hashes.add(_build_envelope(payload, capital_source,
                 at_ms=capital_source["task"]["as_of_ms"], full_decision=True,
                 legacy_references=True)["request_hash"])
+            legacy_hashes.add(_build_envelope(payload, capital_source,
+                at_ms=capital_source["task"]["as_of_ms"], full_decision=True,
+                legacy_semantics=True)["request_hash"])
         if ((legacy_state.exists() and _read_json(legacy_state).get("request_hash") in legacy_hashes)
                 or (legacy_response.exists() and "capital_source" in _read_json(legacy_response).get("request", {}))):
             # Never turn an old unnamespaced send into a fresh delivery.
@@ -312,8 +357,12 @@ def deliver_event(
                 raise ValueError("Persisted request mismatch")
             try:
                 receipt = validated_receipt(evidence["response"])
-            except Exception:
-                return {**result, "state": "RECONCILIATION_REQUIRED"}
+            except Exception as exc:
+                review = ({"capital_blocked_review": _capital_blocked_review(
+                    evidence["response"], envelope,
+                    at_ms=int(time.time() * 1000) if now_ms is None else now_ms, failure=exc)}
+                    if capital_source is not None else {})
+                return {**result, "state": "RECONCILIATION_REQUIRED", **review}
         else:
             if evidence_path.exists():
                 raise ValueError("Unbound provider evidence")
@@ -331,6 +380,7 @@ def deliver_event(
             state = _seal_state({**state, "request_hash": envelope["request_hash"],
                                  "reason": "PROVIDER_SEND_STARTED"})
             persist_boundary_state(state_dir, state)
+            response = None
             try:
                 response = transport(envelope)
                 result["transport_performed"] = True
@@ -338,12 +388,16 @@ def deliver_event(
                 # including refusals, malformed judgment text and incomplete output.
                 _write_no_clobber(evidence_path, {"request": envelope, "response": response})
                 receipt = validated_receipt(response)
-            except Exception:
+            except Exception as exc:
                 # Never persist exception text, headers, URLs, or credentials.
                 state = mark_retryable(state, claim_token=token,
                                        reason="PROVIDER_RESULT_REQUIRES_RECONCILIATION")
                 persist_boundary_state(state_dir, state)
-                return {**result, "state": "RECONCILIATION_REQUIRED"}
+                review = ({"capital_blocked_review": _capital_blocked_review(
+                    response, envelope,
+                    at_ms=int(time.time() * 1000) if now_ms is None else now_ms, failure=exc)}
+                    if capital_source is not None and isinstance(response, dict) else {})
+                return {**result, "state": "RECONCILIATION_REQUIRED", **review}
         delivered = mark_delivered(
             state,
             claim_token=token,
