@@ -41,7 +41,7 @@ class DailyCapitalSourceTests(unittest.TestCase):
         self.inputs["user_intent"]["reserved_usd"] = self.intent["reserved_usd"]
         self.inputs["qualification"]["observation_hash"] = self.broker["observation_hash"]
 
-    def prepare(self):
+    def prepare(self, **context_inputs):
         self.pack = run_daily_evidence(self.market.registry, observation_db=self.root / "observations.sqlite",
             fetch_overrides=self.market.overrides, liquidation_aggregate_payload=self.market.aggregate(),
             now_ms=NOW, generated_at_ms=NOW, broker_capital_observation=self.broker,
@@ -49,7 +49,7 @@ class DailyCapitalSourceTests(unittest.TestCase):
                 "dvol_30d_low": 40, "rebound_from_30d_low_pct": 25, "level_percentile_1y": 80,
                 "baseline_count": 30, "action_output": "NONE", "external_action_authority": "NONE",
                 "external_action_performed": False},
-            user_capital_intent=self.intent, full_decision_intent=self.inputs.get("user_intent"))
+            user_capital_intent=self.intent, full_decision_intent=self.inputs.get("user_intent"), **context_inputs)
         self.handoff = run_gpt_handoff_gate(self.pack, build_plain_language_notice(self.pack),
             ledger_path=self.root / "handoff.jsonl", bridge_outbox_dir=self.root / "outbox", full_decision=True)
         self.payload = json.loads((self.root / "outbox" / f'{self.handoff["event_id"]}.json').read_text(encoding="utf-8"))
@@ -58,6 +58,114 @@ class DailyCapitalSourceTests(unittest.TestCase):
         return build_daily_capital_source(self.pack, self.payload, broker_observation=self.broker,
             handoff=self.handoff,
             user_capital_intent=self.intent, decision_inputs=self.inputs, source_main_sha=MAIN, at_ms=NOW)
+
+    def test_company_health_allocation_and_posture_share_one_daily_pack(self):
+        from tests.test_company_health import scenario
+        from tests.test_portfolio_allocation_context import inputs as allocation_inputs
+        self.prepare(treasury_company_ct_inputs={"MSTR": scenario(), "ASST": scenario(True)},
+                     portfolio_allocation_inputs=allocation_inputs())
+        self.assertIn("portfolio_allocation_context", self.pack)
+        for asset, direction in (("MSTR", "DETERIORATING"), ("ASST", "IMPROVING")):
+            self.assertEqual(self.pack["common_equity_health"]["assets"][asset]["company_health"]
+                ["dimensions"]["per_share_asset_engine"]["direction"], direction)
+        self.inputs["posture_inputs"] = self.posture_inputs()
+        result = self.bind()
+        self.assertEqual(result["state"], "SOURCE_BOUND", result)
+        self.assertEqual(result["posture_binding"]["parent_evidence_pack_hash"], self.pack["evidence_pack_hash"])
+        self.assertIsNotNone(result["source"]["posture"])
+        self.assertEqual(result["source"]["evidence_lineage"], self.pack["evidence_pack_hash"])
+
+    def posture_inputs(self):
+        from tests.test_gold_research_context import record
+        return {"as_of_ms": NOW, "cycle_id": "synthetic-current-cycle",
+            "current_rail": record("CURRENT_CAPITAL_RAIL", NOW, entity="CAPITAL",
+                cycle_id="synthetic-current-cycle", valid_until_ms=NOW + 240_000,
+                recorded_by="USER", rail="SPRING", step=0,
+                parent_evidence_pack_hash=self.pack["evidence_pack_hash"])}
+
+    def test_current_raw_posture_reaches_existing_source_without_changing_pack(self):
+        self.prepare()
+        original = deepcopy(self.pack)
+        self.inputs["posture_inputs"] = self.posture_inputs()
+        self.inputs["posture_inputs"]["current_rail"]["valid_until_ms"] = NOW + 120_000
+        before_inputs = deepcopy(self.inputs)
+        result = self.bind()
+        self.assertEqual(result["state"], "SOURCE_BOUND", result)
+        self.assertEqual(result["posture_binding"]["state"], "READY_FOR_ANALYST", result)
+        self.assertEqual(result["posture_binding"]["parent_evidence_pack_hash"], self.pack["evidence_pack_hash"])
+        self.assertEqual(result["source"]["posture"]["as_of_ms"], NOW)
+        self.assertIn('SPRING', result["source"]["posture"]["rail"])
+        self.assertEqual(result["binding"]["valid_until_ms"], NOW + 120_000)
+        self.assertEqual((self.pack, self.inputs), (original, before_inputs))
+
+    def test_bad_rail_is_isolated_from_valid_capital_and_market_evidence(self):
+        self.prepare()
+        original = deepcopy(self.pack)
+        for field, value in (("parent_evidence_pack_hash", "a" * 64),
+                ("cycle_id", "old-cycle"), ("valid_until_ms", NOW-1),
+                ("recorded_by", "MACHINE"), ("verification_state", "SOURCE_CLAIM")):
+            with self.subTest(field=field):
+                raw = self.posture_inputs()
+                raw["current_rail"][field] = value
+                self.inputs["posture_inputs"] = raw
+                result = self.bind()
+                self.assertEqual(result["state"], "SOURCE_BOUND", result)
+                self.assertEqual(result["posture_binding"]["state"], "BLOCKED")
+                self.assertIsNone(result["source"]["posture"])
+                self.assertEqual(result["claim_states"]["spending_cap"]["state"], "AVAILABLE")
+                self.assertEqual(self.pack, original)
+
+    def test_old_context_and_missing_or_misclocked_inputs_are_not_rebound(self):
+        from crt_radar.capital_posture_context import build_capital_posture_context
+        self.prepare()
+        old_pack = deepcopy(self.pack)
+        old_pack["generated_at_ms"] -= 1
+        old_pack["evidence_pack_hash"] = c.digest({k: v for k, v in old_pack.items() if k != "evidence_pack_hash"})
+        raw = self.posture_inputs()
+        raw["current_rail"]["parent_evidence_pack_hash"] = old_pack["evidence_pack_hash"]
+        old = build_capital_posture_context(raw, old_pack)
+        self.inputs["posture_context"] = old
+        before = deepcopy(old)
+        result = self.bind()
+        self.assertEqual(result["state"], "SOURCE_BOUND", result)
+        self.assertIsNone(result["source"]["posture"])
+        self.assertEqual(old, before)
+        self.inputs.pop("posture_context")
+        for raw in ({"as_of_ms": NOW, "cycle_id": "synthetic-current-cycle"},
+                    {**self.posture_inputs(), "as_of_ms": NOW-1}):
+            self.inputs["posture_inputs"] = raw
+            result = self.bind()
+            self.assertEqual(result["state"], "SOURCE_BOUND", result)
+            self.assertEqual(result["posture_binding"]["state"], "BLOCKED")
+            self.assertIsNone(result["source"]["posture"])
+
+    def test_prebuilt_posture_cannot_lend_wrong_health_or_authority(self):
+        from crt_radar.capital_posture_context import build_capital_posture_context
+        self.prepare()
+        valid = build_capital_posture_context(self.posture_inputs(), self.pack)
+        for field in ("production", "health"):
+            with self.subTest(field=field):
+                bad = deepcopy(valid)
+                if field == "production":
+                    bad["production"] = "APPROVED"
+                else:
+                    bad["supporting_evidence"]["company_health"] = {"state": "AVAILABLE"}
+                bad["context_hash"] = c.digest({k: v for k, v in bad.items() if k != "context_hash"})
+                self.inputs["posture_context"] = bad
+                result = self.bind()
+                self.assertEqual(result["state"], "SOURCE_BOUND", result)
+                self.assertEqual(result["posture_binding"]["state"], "BLOCKED")
+                self.assertIsNone(result["source"]["posture"])
+
+    def test_posture_authority_override_is_blocked_without_losing_base_source(self):
+        self.prepare()
+        raw = self.posture_inputs()
+        raw["action_output"] = "BUY"
+        self.inputs["posture_inputs"] = raw
+        result = self.bind()
+        self.assertEqual(result["state"], "SOURCE_BOUND", result)
+        self.assertEqual(result["posture_binding"]["state"], "BLOCKED")
+        self.assertIsNone(result["source"]["posture"])
 
     def test_one_capture_hash_and_validity_are_bound_without_clock_refresh(self):
         self.prepare()

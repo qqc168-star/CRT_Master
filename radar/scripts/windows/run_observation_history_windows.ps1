@@ -51,6 +51,9 @@ $IssuerAnnouncementLedger = Join-Path $RuntimeRoot "issuer_announcements\events.
 $IssuerAnnouncementOutput = Join-Path $RuntimeRoot "issuer_announcements\latest.json"
 $MstrAsstMarketHealth = Join-Path $RuntimeRoot "market-health\latest.json"
 $TreasuryValuationInputs = Join-Path $RuntimeRoot "treasury\valuation-inputs.json"
+$IssuerCtArchive = Join-Path $RuntimeRoot "issuer_ct\archive"
+$TreasuryCompanyCtInputs = Join-Path $RuntimeRoot "treasury\company-ct-inputs.json"
+$PortfolioAllocationInputs = Join-Path $RuntimeRoot "private\portfolio-allocation-inputs.json"
 
 if (-not (Test-Path $RadarRoot)) {
     throw "CRT Radar repo not found: $RadarRoot"
@@ -194,6 +197,17 @@ else {
 
 if (Test-Path -LiteralPath $TreasuryValuationInputs) {
     $RunnerArgs += @("--treasury-valuation-inputs", $TreasuryValuationInputs)
+}
+
+# Read existing inputs only. Archive and direct company inputs are mutually exclusive.
+if (Test-Path -LiteralPath (Join-Path $IssuerCtArchive "sec-disclosures\manifest.json")) {
+    $RunnerArgs += @("--issuer-ct-archive", $IssuerCtArchive)
+}
+elseif (Test-Path -LiteralPath $TreasuryCompanyCtInputs) {
+    $RunnerArgs += @("--treasury-company-ct-inputs", $TreasuryCompanyCtInputs)
+}
+if (Test-Path -LiteralPath $PortfolioAllocationInputs) {
+    $RunnerArgs += @("--portfolio-allocation-inputs", $PortfolioAllocationInputs)
 }
 
 & $Python @RunnerArgs

@@ -389,6 +389,54 @@ def _load_previous_evidence_pack(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def _daily_capital_posture(pack, inputs, *, at_ms):
+    """Compose from original records; never rebind an old context or user rail."""
+    from . import capital_decision_closure as c
+    from .capital_posture_context import build_capital_posture_context, seasonal_capital_rail
+    from .commander_plan_adapter import CommanderPlanBlocked
+    context = None
+    try:
+        c.require(not ("posture_inputs" in inputs and "posture_context" in inputs),
+                  "DAILY_POSTURE_INPUTS_AMBIGUOUS")
+        if "posture_inputs" in inputs:
+            raw = inputs["posture_inputs"]
+            c.require(isinstance(raw, dict) and raw.get("as_of_ms") == at_ms,
+                      "DAILY_POSTURE_CLOCK_MISMATCH")
+            context = build_capital_posture_context(raw, pack)
+        else:
+            context = inputs.get("posture_context")
+        if context is None:
+            return None, {"state": "BLOCKED", "reason": "DAILY_POSTURE_INPUTS_NOT_SUPPLIED"}
+        c.require(isinstance(context, dict)
+                  and context.get("parent_evidence_pack_hash") == pack["evidence_pack_hash"]
+                  and context.get("as_of_ms") == at_ms
+                  and context.get("context_hash") == c.digest({k: v for k, v in context.items() if k != "context_hash"}),
+                  "DAILY_POSTURE_LINEAGE_OR_CLOCK_INVALID")
+        c.require(context.get("schema_version") == "CRT_CAPITAL_POSTURE_CONTEXT_V0.1"
+                  and context.get("storage") == "LOCAL_ONLY"
+                  and all(context.get(key) == value for key, value in c.LOCKS.items()),
+                  "DAILY_POSTURE_AUTHORITY_INVALID")
+        supporting = context.get("supporting_evidence", {})
+        c.require(supporting.get("company_health") == pack.get("common_equity_health", {})
+                  and supporting.get("portfolio_allocation_source_hash") == c.digest(pack.get("portfolio_allocation_context", {})),
+                  "DAILY_POSTURE_SUPPORTING_EVIDENCE_MISMATCH")
+        rail = context.get("current_strategic_capital_posture", {})
+        proof = rail.get("provenance", {})
+        c.require(rail.get("state") == "READY_FOR_ANALYST"
+                  and proof.get("recorded_by") == "USER"
+                  and proof.get("parent_evidence_pack_hash") == pack["evidence_pack_hash"]
+                  and proof.get("cycle_id") == context.get("cycle_id"),
+                  "DAILY_POSTURE_CONFIRMED_CURRENT_RAIL_REQUIRED")
+        c.require(rail == seasonal_capital_rail(proof, as_of=at_ms, parent_hash=pack["evidence_pack_hash"]),
+                  "DAILY_POSTURE_RAIL_PROOF_INVALID")
+        c.require(type(proof.get("valid_until_ms")) is int and at_ms < proof["valid_until_ms"],
+                  "DAILY_POSTURE_EXPIRED")
+        return context, {"state": "READY_FOR_ANALYST", "context_hash": context["context_hash"],
+                         "parent_evidence_pack_hash": pack["evidence_pack_hash"]}
+    except (ValueError, KeyError, TypeError, AttributeError, CommanderPlanBlocked) as exc:
+        return None, {"state": "BLOCKED", "reason": str(exc), "context": context}
+
+
 def build_daily_capital_source(
     pack: dict[str, Any], payload: dict[str, Any], *,
     handoff: dict[str, Any],
@@ -423,7 +471,7 @@ def build_daily_capital_source(
         c.require(payload == build_full_decision_bridge_payload(pack, handoff), "DAILY_BRIDGE_PROJECTION_MISMATCH")
         c.require(isinstance(decision_inputs, dict), "FULL_DECISION_INPUTS_REQUIRED")
         c.require(set(decision_inputs) <= {"user_intent", "qualification", "instruments", "fees", "task",
-                                         "evidence_validity", "posture_context"}, "FULL_DECISION_INPUTS_FIELDS_INVALID")
+                                         "evidence_validity", "posture_context", "posture_inputs"}, "FULL_DECISION_INPUTS_FIELDS_INVALID")
         c.require("task" in decision_inputs and "evidence_validity" in decision_inputs, "FULL_DECISION_TASK_AND_VALIDITY_REQUIRED")
         adapter = adapt_capital_intent(user_capital_intent, decision_inputs.get("user_intent"))
         c.require("CAPITAL_INTENT_IDENTITY_MISMATCH" not in adapter["blockers"], "CAPITAL_INTENT_IDENTITY_MISMATCH")
@@ -432,13 +480,17 @@ def build_daily_capital_source(
             c.require(q.get("observation_hash") == (expected.get("broker_observed") or {}).get("observation_hash"),
                       "QUALIFICATION_SNAPSHOT_MISMATCH")
         c.fresh(decision_inputs["evidence_validity"], at_ms)
+        posture, posture_binding = _daily_capital_posture(pack, decision_inputs, at_ms=at_ms)
+        result["posture_binding"] = posture_binding
         source = c.build_source(payload=payload, source_main_sha=source_main_sha,
             broker_observation=expected.get("broker_observed"), user_intent=adapter["full_decision_intent"],
             qualification=q, instruments=decision_inputs.get("instruments", []), fees=decision_inputs.get("fees", []),
             task=decision_inputs["task"], evidence_validity=decision_inputs["evidence_validity"],
-            posture_context=decision_inputs.get("posture_context"), at_ms=at_ms)
+            posture_context=posture, at_ms=at_ms)
         projection = c.build_projection(payload, source, at_ms=at_ms)
         clocks = [source["task"]["valid_until_ms"], source["evidence_validity"]["valid_until_ms"]]
+        if posture is not None:
+            clocks.append(posture["current_strategic_capital_posture"]["provenance"]["valid_until_ms"])
         broker = source["broker_observation"]
         if broker is not None:
             clocks.append(broker["observed_at_ms"] + MAX_AGE_MS)
@@ -449,6 +501,8 @@ def build_daily_capital_source(
                      "broker_observation_hash": (broker or {}).get("observation_hash"),
                      "reconciliation_hash": c.digest(expected), "as_of_ms": at_ms, "valid_until_ms": min(clocks)},
             claim_states={"spending_cap": projection["spending_cap"]}, blockers=adapter["blockers"])
+        if posture_binding["state"] == "BLOCKED":
+            result["blockers"].append(posture_binding["reason"])
         if projection["spending_cap"]["state"] == "BLOCKED":
             result["blockers"].append(projection["spending_cap"]["reason"])
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
