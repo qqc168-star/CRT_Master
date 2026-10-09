@@ -32,6 +32,7 @@ $PrivateProfile = Join-Path $RuntimeRoot "private\portfolio.json"
 $CapitalIntent = Join-Path $RuntimeRoot "private\capital-intent.json"
 $CapitalDecisionInputs = Join-Path $RuntimeRoot "private\capital-decision-inputs.json"
 $CapitalSourceOutput = Join-Path $RuntimeRoot "private\capital-decision-source.json"
+$CapitalSourceDir = Join-Path (Split-Path $CapitalSourceOutput -Parent) "sources"
 $WakeOutput = Join-Path $RuntimeRoot "wake\latest.json"
 $NoticeOutput = Join-Path $RuntimeRoot "notifications\latest.json"
 $HandoffOutput = Join-Path $RuntimeRoot "gpt_handoff\latest.json"
@@ -233,6 +234,7 @@ if ($env:CRT_GPT_TRANSPORT_ENABLED -eq "1" -and -not $FullCapitalDecisionRequest
     deliver-pending `
     --transport-state-dir $TransportBoundary `
     --notification-state-dir $PostGptNotifications `
+    --capital-source-dir $CapitalSourceDir `
     --capital-state $EvidenceOutput
 
 if ($LASTEXITCODE -ne 0) {
