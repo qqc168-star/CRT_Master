@@ -111,6 +111,18 @@ Rerun only tests sufficient to verify the identified risk; rerun full regression
 
 Saving quota must remove duplication, not verification. Never skip targeted tests, full regression, or diff checks to save Work quota, and never substitute N.S. architecture review for construction tests. Do not make Work testing -> unjustified Central retesting -> next Work retesting a fixed repetitive process.
 
+#### N.S. Work Allocation & Model Budget Discipline（總工程師工作分配與模型額度紀律）
+
+**Core Principle（核心原則）：總工程師先做滿、施工隊精準施工、參謀長只處理高價值挑戰。**
+
+1. **N.S. Central（總工程師）最大化前置作業。** 在交辦之前，優先自行完成主分支核對、資料查證、計算、分析、問題定位、架構決策、反證設計、修改邊界與驗收條件。能自行解決的工作，不應轉交高額度模型重複探索。
+2. **CRT MASTER Work（施工隊）僅承接必要工程。** 主要負責本機程式及文件修改、隔離工作樹、測試、提交、推送與 PR（合併請求）。施工隊不得無故重做 N.S. 已完成的架構選擇；若發現規格錯誤或重大風險，停止並交回 N.S. 裁決。
+3. **模型強度依工作難度決定。** N.S. 每次交辦都必須明確指定強度與理由。簡單文件或局部修改優先 Medium（中等強度）；一般跨模組整合使用 High（高強度）；重大架構衝突、複雜高風險工程才使用 Ultra（最高強度）。模型名稱及實際檔位依當時可用能力選擇。
+4. **參謀長按需召喚，召喚時使用最高可用強度。** 專責重要研究、競爭假說、因果反證、策略挑戰及必要的獨立架構審視。參謀長無正式架構修改、工程寫入或資本執行權限；研究成果交 N.S. 裁決。
+5. **節省模型額度不等於削減驗證。** 施工隊仍須完成必要的針對性測試、完整回歸、靜態檢查與 Git 差異檢查。N.S. 優先複用可驗證測試成果，沒有具體風險不得要求無意義重測。
+6. **跨聊天室接力必須繼承分工。** 新任總工程師首先讀取當時 current main（目前主分支），核對最新工程及待辦事項，再依本準則決定由自己、施工隊或參謀長處理。不得以聊天記憶取代主分支事實。
+7. **治理邊界維持。** 不變更正式六層權重、燈號閾值、mNAV（資產淨值倍數）語義、正式季節、生產批准、外部行動權限及使用者最終資本決策權。本準則不新增官僚式工程程序。
+
 ### Project Operating Rooms Lock
 
 第一顆比特幣｜CRT has exactly three permanent main rooms:
