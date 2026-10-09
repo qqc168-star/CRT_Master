@@ -699,6 +699,7 @@ def present_from_transport(
     now_ms: int | None = None,
     current_capital_source: dict | None = None,
     current_capital_state: dict | None = None,
+    capital_source_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     path = Path(path)
 
@@ -719,6 +720,27 @@ def present_from_transport(
         receipt,
     )
 
+    if "capital_validation" in notification and capital_source_dir is not None:
+        # Resolve only after the transport receipt authenticates the event ID.
+        # Directory mode never falls back to the latest wrapper or single source.
+        source_path = Path(capital_source_dir) / f'{notification["event_id"]}.json'
+        try:
+            current_capital_source = json.loads(source_path.read_text(encoding="utf-8"))
+            if not isinstance(current_capital_source, dict):
+                raise ValueError("Event capital source must be an object")
+        except (OSError, ValueError):
+            with notification_lock(path.parent, notification["notification_id"]) as acquired:
+                if not acquired:
+                    return {"state": "BUSY", "presentation_performed": False}
+                current = _validate_state(json.loads(path.read_text(encoding="utf-8")))
+                qualification = _current_capital_qualification(current_capital_state,
+                    at_ms=int(time.time() * 1000) if now_ms is None else now_ms)
+                qualification = {**qualification, "reason": "EVENT_CAPITAL_SOURCE_UNAVAILABLE"}
+                _record_capital_qualification(path, current, qualification,
+                    current_recommendation=False, invalidated=True)
+            return {"state": "CAPITAL_RECOMMENDATION_NOT_CURRENT",
+                    "reason": "EVENT_CAPITAL_SOURCE_UNAVAILABLE", "presentation_performed": False}
+
     return present(
         path,
         presenter,
@@ -735,6 +757,7 @@ def deliver_pending(
     *,
     current_capital_source: dict | None = None,
     current_capital_state: dict | None = None,
+    capital_source_dir: str | Path | None = None,
 ) -> dict[str, Any]:
     root = Path(notification_state_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -742,13 +765,18 @@ def deliver_pending(
     results = []
 
     for path in sorted(root.glob("*.json")):
-        result = present_from_transport(
-            path,
-            transport_state_dir,
-            presenter,
-            current_capital_source=current_capital_source,
-            current_capital_state=current_capital_state,
-        )
+        try:
+            result = present_from_transport(
+                path,
+                transport_state_dir,
+                presenter,
+                current_capital_source=current_capital_source,
+                current_capital_state=current_capital_state,
+                capital_source_dir=capital_source_dir,
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            # A corrupt event cannot stop independent validated notifications.
+            result = {"state": "NOTIFICATION_VALIDATION_FAILED", "presentation_performed": False}
         results.append(result)
 
     return {
@@ -791,7 +819,10 @@ def main(argv: list[str] | None = None) -> int:
         required=True,
         type=Path,
     )
-    sweep.add_argument("--capital-source", type=Path)
+    sources = sweep.add_mutually_exclusive_group()
+    sources.add_argument("--capital-source", type=Path)
+    sources.add_argument("--capital-source-dir", type=Path,
+                         help="Immutable per-event capital sources; never the latest source wrapper.")
     sweep.add_argument("--capital-state", type=Path,
                        help="The current sealed daily Evidence Pack, never a historical event source.")
 
@@ -802,6 +833,7 @@ def main(argv: list[str] | None = None) -> int:
         args.notification_state_dir,
         current_capital_source=json.loads(args.capital_source.read_text(encoding="utf-8")) if args.capital_source else None,
         current_capital_state=json.loads(args.capital_state.read_text(encoding="utf-8")) if args.capital_state else None,
+        capital_source_dir=args.capital_source_dir,
     )
 
     print(

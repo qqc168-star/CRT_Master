@@ -11,7 +11,7 @@ from unittest.mock import Mock, patch
 from crt_radar import capital_decision_closure as c
 from crt_radar.broker_capital_observation import MAX_AGE_MS, adapt_capital_intent, seal_broker_observation
 from crt_radar.daily_evidence_runner import build_daily_capital_source, main, run_daily_evidence
-from crt_radar.gpt_notification_boundary import present_from_transport
+from crt_radar.gpt_notification_boundary import deliver_pending, present_from_transport
 from crt_radar.gpt_transport_worker import deliver_event
 from crt_radar.gpt_handoff import run_gpt_handoff_gate
 from crt_radar.plain_language_notice import build_plain_language_notice
@@ -260,6 +260,18 @@ class DailyCapitalSourceTests(unittest.TestCase):
             latest = json.loads(source_output.read_text(encoding="utf-8"))
             self.assertIsNone(latest["source"])
             self.assertIn("NO_NEW_FULL_DECISION_EVENT_SOURCE_NOT_REBOUND", latest["blockers"])
+            # No new event leaves the immutable historical source usable by the
+            # daily sweep; the empty latest wrapper must never replace it.
+            with patch("crt_radar.gpt_notification_boundary.time.time", return_value=clock[0] / 1000):
+                sweep = deliver_pending(self.root / "transport", self.root / "notifications",
+                    presenter=presenter, capital_source_dir=source_path.parent,
+                    current_capital_state=json.loads(evidence.read_text(encoding="utf-8")))
+            self.assertEqual(sweep["results"][0]["state"], "ALREADY_DELIVERED", sweep)
+            self.assertEqual(sweep["presentation_count"], 0)
+            self.assertEqual(source_path.read_bytes(), original_source)
+            self.assertEqual(len(list(source_path.parent.glob("*.json"))), 1)
+            presenter.assert_called_once()
+
 
 
 if __name__ == "__main__":

@@ -121,6 +121,8 @@ class ObservationHistoryWindowsHandoffTests(
 
     def test_notification_checks_current_daily_capital_state(self):
         self.assertIn("--capital-state $EvidenceOutput", self.text)
+        self.assertIn("--capital-source-dir $CapitalSourceDir", self.text)
+        self.assertIn('Join-Path (Split-Path $CapitalSourceOutput -Parent) "sources"', self.text)
 
 
 if __name__ == "__main__":
