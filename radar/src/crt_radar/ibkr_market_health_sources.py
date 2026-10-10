@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import threading
 import time
 from copy import deepcopy
@@ -10,10 +11,14 @@ from pathlib import Path
 from typing import Any
 
 from .daily_evidence_runner import write_json_atomic
-from .mstr_asst_market_health_runtime import seal_runtime_source
+from .mstr_asst_market_health_runtime import AUTHORITY, canonical_hash, seal_runtime_source
 
 
 ASSETS = ("MSTR", "ASST")
+FOUR_ASSETS = ("MSTR", "ASST", "STRC", "SATA")
+FOUR_DAILY_SCHEMA = "CRT_FOUR_ASSET_IBKR_DAILY_V0.1"
+FOUR_DAILY_SOURCE_ID = "CRT-CONN-FOUR-ASSET-IBKR-EQUITY-DAILY-001"
+PRICE_BASIS = "IBKR_TRADES_SPLIT_ADJUSTED_DIVIDEND_UNADJUSTED"
 INFORMATIONAL_ERROR_CODES = {1102, 2104, 2106, 2107, 2108, 2158, 10167}
 
 
@@ -25,7 +30,7 @@ def _positive(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise IbkrMarketHealthSourceError(f"{label} must be numeric")
     number = float(value)
-    if number <= 0:
+    if not math.isfinite(number) or number <= 0:
         raise IbkrMarketHealthSourceError(f"{label} must be positive")
     return number
 
@@ -34,13 +39,14 @@ def _nonnegative(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise IbkrMarketHealthSourceError(f"{label} must be numeric")
     number = float(value)
-    if number < 0:
+    if not math.isfinite(number) or number < 0:
         raise IbkrMarketHealthSourceError(f"{label} must be nonnegative")
     return number
 
 
 def _session_date(raw: Any) -> str:
-    text = str(raw).strip().split()[0]
+    parts = str(raw).strip().split()
+    text = parts[0] if parts else ""
     for pattern in ("%Y%m%d", "%Y-%m-%d"):
         try:
             return datetime.strptime(text, pattern).date().isoformat()
@@ -49,11 +55,21 @@ def _session_date(raw: Any) -> str:
     raise IbkrMarketHealthSourceError(f"invalid IBKR daily bar date: {raw!r}")
 
 
-def normalize_ibkr_daily_capture(capture: Any) -> dict[str, list[dict[str, Any]]]:
-    if not isinstance(capture, dict) or set(capture) != set(ASSETS):
-        raise IbkrMarketHealthSourceError("capture must contain exactly MSTR and ASST")
+def normalize_ibkr_daily_capture(
+    capture: Any,
+    *,
+    assets: tuple[str, ...] = ASSETS,
+    minimum_bars: int = 22,
+) -> dict[str, list[dict[str, Any]]]:
+    if not assets or len(set(assets)) != len(assets):
+        raise IbkrMarketHealthSourceError("assets must be nonempty and unique")
+    if type(minimum_bars) is not int or minimum_bars <= 0:
+        raise IbkrMarketHealthSourceError("minimum_bars must be a positive integer")
+    if not isinstance(capture, dict) or set(capture) != set(assets):
+        scope = "MSTR and ASST" if assets == ASSETS else ", ".join(assets)
+        raise IbkrMarketHealthSourceError(f"capture must contain exactly {scope}")
     result: dict[str, list[dict[str, Any]]] = {}
-    for asset in ASSETS:
+    for asset in assets:
         rows = capture[asset]
         if not isinstance(rows, list) or not rows:
             raise IbkrMarketHealthSourceError(f"{asset} daily history is empty")
@@ -86,15 +102,18 @@ def normalize_ibkr_daily_capture(capture: Any) -> dict[str, list[dict[str, Any]]
                 }
             )
         normalized.sort(key=lambda row: row["session_date"])
-        if len(normalized) < 22:
+        if len(normalized) < minimum_bars:
             raise IbkrMarketHealthSourceError(
-                f"{asset} requires at least 22 daily bars for RVOL20"
+                f"{asset} requires at least {minimum_bars} daily bars"
+                + (" for RVOL20" if minimum_bars == 22 else "")
             )
         result[asset] = normalized
     return result
 
 
-def _native_history_app() -> tuple[type[Any], type[Any]]:
+def _native_history_app(
+    *, assets: tuple[str, ...] = ASSETS,
+) -> tuple[type[Any], type[Any]]:
     try:
         from ibapi.client import EClient
         from ibapi.contract import Contract
@@ -109,11 +128,11 @@ def _native_history_app() -> tuple[type[Any], type[Any]]:
             EWrapper.__init__(self)
             EClient.__init__(self, self)
             self.ready = threading.Event()
-            self.done = {1000 + index: threading.Event() for index in range(len(ASSETS))}
+            self.done = {1000 + index: threading.Event() for index in range(len(assets))}
             self.request_asset = {
-                1000 + index: asset for index, asset in enumerate(ASSETS)
+                1000 + index: asset for index, asset in enumerate(assets)
             }
-            self.rows = {asset: [] for asset in ASSETS}
+            self.rows = {asset: [] for asset in assets}
             self.failures: list[dict[str, Any]] = []
             self.lock = threading.Lock()
 
@@ -122,16 +141,20 @@ def _native_history_app() -> tuple[type[Any], type[Any]]:
             self.ready.set()
 
         def error(self, reqId: int, *args: Any) -> None:
-            if len(args) >= 4:
-                code, message = args[1], args[2]
-            elif len(args) >= 2:
+            error_time = None
+            if (len(args) in {2, 3} and type(args[0]) is int
+                    and all(type(value) is str for value in args[1:])):
                 code, message = args[0], args[1]
+            elif (len(args) in {3, 4} and type(args[0]) is int and type(args[1]) is int
+                    and all(type(value) is str for value in args[2:])):
+                error_time, code, message = args[:3]
             else:
                 code, message = -1, "UNPARSEABLE_IBKR_ERROR"
-            try:
-                number = int(code)
-            except (TypeError, ValueError):
-                number = -1
+            number = code
+            if (type(reqId) is not int or not -(2 ** 31) <= reqId < 2 ** 31
+                    or not 0 <= code < 2 ** 31
+                    or (error_time is not None and not 0 <= error_time < 2 ** 63)):
+                number, message = -1, "UNPARSEABLE_IBKR_ERROR"
             if number in INFORMATIONAL_ERROR_CODES:
                 return
             with self.lock:
@@ -165,6 +188,76 @@ def _native_history_app() -> tuple[type[Any], type[Any]]:
     return HistoryApp, Contract
 
 
+def _four_asset_market_calendar() -> dict[str, Any]:
+    path = (Path(__file__).resolve().parents[2] / "research"
+            / "CRT_ETP_PROSPECTIVE_CAPTURE_CONTRACT_V0.1.json")
+    calendar = json.loads(path.read_text(encoding="utf-8")).get("market_calendar")
+    if not isinstance(calendar, dict) or not calendar.get("calendar_id"):
+        raise IbkrMarketHealthSourceError("tracked US market calendar missing")
+    return calendar
+
+
+def build_four_asset_daily_proof(
+    capture: Any,
+    *,
+    observed_at_ms: int,
+    request_started_at_ms: int,
+    failures: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Bind captured vendor bars and request semantics without qualifying closes."""
+    if not isinstance(capture, dict) or set(capture) - set(FOUR_ASSETS):
+        raise IbkrMarketHealthSourceError("four-asset capture scope invalid")
+    if (type(request_started_at_ms) is not int
+            or type(observed_at_ms) is not int
+            or not 0 < request_started_at_ms <= observed_at_ms):
+        raise IbkrMarketHealthSourceError("daily proof capture clocks invalid")
+    failures = [] if failures is None else failures
+    request_ids = {1000 + index for index in range(len(FOUR_ASSETS))}
+    if (not isinstance(failures, list)
+            or any(not isinstance(row, dict) or row.get("req_id") not in request_ids
+                   or type(row.get("code")) is not int for row in failures)):
+        raise IbkrMarketHealthSourceError("daily proof failure scope invalid")
+    assets: dict[str, Any] = {}
+    for index, asset in enumerate(FOUR_ASSETS):
+        bars = capture.get(asset, [])
+        if not isinstance(bars, list):
+            raise IbkrMarketHealthSourceError(f"{asset} raw daily bars must be a list")
+        assets[asset] = {
+            "symbol": asset,
+            "currency": "USD",
+            "bars": deepcopy(bars),
+            "failure_codes": [row["code"] for row in failures
+                              if row["req_id"] == 1000 + index],
+            "raw_data_hash": canonical_hash(bars),
+        }
+    calendar = _four_asset_market_calendar()
+    proof = {
+        "schema_version": FOUR_DAILY_SCHEMA,
+        "source_id": FOUR_DAILY_SOURCE_ID,
+        "request_started_at_ms": request_started_at_ms,
+        "observed_at_ms": observed_at_ms,
+        "timezone": "America/New_York",
+        "calendar_id": calendar["calendar_id"],
+        "calendar_hash": canonical_hash(calendar),
+        "request_contract": {
+            "assets": list(FOUR_ASSETS),
+            "api_method": "reqHistoricalData",
+            "duration": "2 M",
+            "bar_size": "1 day",
+            "what_to_show": "TRADES",
+            "use_rth": True,
+            "keep_up_to_date": False,
+            "price_adjustment_basis": PRICE_BASIS,
+            "account_surface": "ABSENT",
+            "order_surface": "ABSENT",
+        },
+        "assets": assets,
+        **AUTHORITY,
+    }
+    proof["proof_hash"] = canonical_hash(proof)
+    return proof
+
+
 def collect_ibkr_equity_daily_proof(
     *,
     host: str = "127.0.0.1",
@@ -172,14 +265,18 @@ def collect_ibkr_equity_daily_proof(
     client_id: int = 761,
     timeout_seconds: float = 30.0,
     observed_at_ms: int | None = None,
+    four_asset_prices: bool = False,
 ) -> dict[str, Any]:
     if host not in {"127.0.0.1", "localhost", "::1"}:
         raise IbkrMarketHealthSourceError("IBKR host must remain loopback")
     if port <= 0 or client_id < 0 or timeout_seconds <= 0:
         raise IbkrMarketHealthSourceError("IBKR connection parameters invalid")
-    App, Contract = _native_history_app()
+    assets = FOUR_ASSETS if four_asset_prices else ASSETS
+    App, Contract = (_native_history_app(assets=assets)
+                     if four_asset_prices else _native_history_app())
     app = App()
     thread: threading.Thread | None = None
+    request_started_at_ms: int | None = None
     try:
         app.connect(host, port, client_id)
         thread = threading.Thread(
@@ -190,32 +287,46 @@ def collect_ibkr_equity_daily_proof(
         thread.start()
         if not app.ready.wait(timeout_seconds):
             raise IbkrMarketHealthSourceError("IBKR API handshake timed out")
-        for index, asset in enumerate(ASSETS):
+        request_started_at_ms = int(time.time() * 1000)
+        for index, asset in enumerate(assets):
             request_id = 1000 + index
             contract = Contract()
             contract.symbol = asset
             contract.secType = "STK"
             contract.exchange = "SMART"
             contract.currency = "USD"
-            app.reqHistoricalData(
-                request_id,
-                contract,
-                "",
-                "2 M",
-                "1 day",
-                "TRADES",
-                1,
-                1,
-                False,
-                [],
-            )
+            try:
+                app.reqHistoricalData(
+                    request_id,
+                    contract,
+                    "",
+                    "2 M",
+                    "1 day",
+                    "TRADES",
+                    1,
+                    1,
+                    False,
+                    [],
+                )
+            except Exception as exc:
+                if not four_asset_prices:
+                    raise
+                with app.lock:
+                    app.failures.append({"req_id": request_id, "code": -1,
+                                         "message": str(exc)})
+                app.done[request_id].set()
         deadline = time.monotonic() + timeout_seconds
         for request_id, event in app.done.items():
+            if four_asset_prices and event.is_set():
+                continue
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not event.wait(remaining):
-                raise IbkrMarketHealthSourceError(
-                    f"IBKR daily history request {request_id} timed out"
-                )
+                message = f"IBKR daily history request {request_id} timed out"
+                if not four_asset_prices:
+                    raise IbkrMarketHealthSourceError(message)
+                with app.lock:
+                    app.failures.append({"req_id": request_id, "code": -1,
+                                         "message": message})
     finally:
         try:
             app.disconnect()
@@ -226,13 +337,24 @@ def collect_ibkr_equity_daily_proof(
     with app.lock:
         failures = deepcopy(app.failures)
         capture = deepcopy(app.rows)
-    if failures:
+    if failures and (not four_asset_prices
+                     or any(row.get("req_id") not in app.done for row in failures)):
         raise IbkrMarketHealthSourceError(
             "IBKR daily history failed: "
-            + json.dumps(failures, ensure_ascii=False, sort_keys=True)
+            + json.dumps([{"code": row["code"]} for row in failures]
+                         if four_asset_prices else failures,
+                         ensure_ascii=False, sort_keys=True)
+        )
+    observed = (int(time.time() * 1000)
+                if four_asset_prices or observed_at_ms is None else observed_at_ms)
+    if four_asset_prices:
+        return build_four_asset_daily_proof(
+            capture,
+            observed_at_ms=observed,
+            request_started_at_ms=request_started_at_ms,
+            failures=failures,
         )
     data = normalize_ibkr_daily_capture(capture)
-    observed = int(time.time() * 1000) if observed_at_ms is None else observed_at_ms
     proof = seal_runtime_source(
         source_key="equity_daily",
         data=data,
@@ -252,6 +374,150 @@ def collect_ibkr_equity_daily_proof(
         "order_surface": "ABSENT",
     }
     return proof
+
+
+def validate_four_asset_daily_proof(raw: Any, *, at_ms: int) -> dict[str, Any]:
+    """Qualify each retained close without completing bars on a replay clock.
+
+    Hashes prove local content integrity, not an external attestation of IBKR.
+    The bounded, already retained US calendar determines which close is due.
+    """
+    from datetime import timedelta
+    from .mstr_asst_full_day_market_intake import NEW_YORK, _session_close_ms
+
+    result: dict[str, Any] = {
+        "state": "BLOCKED", "scope": "LAST_COMPLETED_RTH_CLOSE_NOT_LIVE_QUOTE",
+        "source_id": FOUR_DAILY_SOURCE_ID, "source_hash": None,
+        "source_trust": "LOCAL_CAPTURE_CONTRACT_NOT_EXTERNAL_ATTESTATION",
+        "raw_hash_basis": "CANONICAL_CAPTURED_VENDOR_BARS_NOT_WIRE_BYTES",
+        "currency": "USD", "timezone": "America/New_York",
+        "price_adjustment_basis": PRICE_BASIS,
+        "assets": {}, **AUTHORITY,
+    }
+
+    def blocked(asset: str, reason: str, state: str = "BLOCKED") -> dict[str, Any]:
+        return {"asset": asset, "currency": "USD", "state": state,
+                "price_usd": None, "reason": reason}
+
+    def require(condition: bool, reason: str) -> None:
+        if not condition:
+            raise ValueError(reason)
+
+    try:
+        require(isinstance(raw, dict), "DAILY_SOURCE_MISSING")
+        require(raw.get("schema_version") == FOUR_DAILY_SCHEMA
+                and raw.get("source_id") == FOUR_DAILY_SOURCE_ID, "DAILY_SOURCE_ID_MISMATCH")
+        require(all(raw.get(k) == v for k, v in AUTHORITY.items()), "DAILY_SOURCE_AUTHORITY_INVALID")
+        require(raw.get("proof_hash") == canonical_hash({
+            k: v for k, v in raw.items() if k != "proof_hash"}), "DAILY_PROOF_HASH_MISMATCH")
+        observed, cutoff = raw.get("observed_at_ms"), raw.get("request_started_at_ms")
+        require(type(at_ms) is int and type(observed) is int and type(cutoff) is int
+                and 0 < cutoff <= observed <= at_ms, "DAILY_CAPTURE_CLOCK_INVALID")
+        contract = raw.get("request_contract")
+        require(isinstance(contract, dict), "DAILY_REQUEST_CONTRACT_MISSING")
+        require(contract.get("price_adjustment_basis") == PRICE_BASIS, "PRICE_ADJUSTMENT_BASIS_UNQUALIFIED")
+        expected = {"assets": list(FOUR_ASSETS), "api_method": "reqHistoricalData",
+                    "duration": "2 M", "bar_size": "1 day", "what_to_show": "TRADES",
+                    "use_rth": True, "keep_up_to_date": False,
+                    "account_surface": "ABSENT", "order_surface": "ABSENT"}
+        require(all(type(contract.get(k)) is type(v) and contract[k] == v
+                    for k, v in expected.items()), "DAILY_REQUEST_CONTRACT_MISMATCH")
+        calendar = _four_asset_market_calendar()
+        require(raw.get("calendar_id") == calendar["calendar_id"]
+                and raw.get("calendar_hash") == canonical_hash(calendar)
+                and raw.get("timezone") == calendar["timezone"] == "America/New_York",
+                "DAILY_CALENDAR_BINDING_MISMATCH")
+        start, end = date.fromisoformat(calendar["valid_from"]), date.fromisoformat(calendar["valid_through"])
+        closed, early = set(calendar["full_close_dates"]), frozenset(calendar["early_close_dates"])
+        weekdays = set(calendar["weekday_sessions"])
+
+        def local_day(clock: int) -> date:
+            return datetime.fromtimestamp(clock / 1000, NEW_YORK).date()
+
+        def is_session(day: date) -> bool:
+            return day.weekday() in weekdays and day.isoformat() not in closed
+
+        def latest_completed(clock: int) -> str:
+            day = local_day(clock)
+            require(start <= day <= end, "MARKET_CALENDAR_OUT_OF_RANGE")
+            while day >= start:
+                text = day.isoformat()
+                if is_session(day) and _session_close_ms(text, early_close_dates=early) <= clock:
+                    return text
+                day -= timedelta(days=1)
+            raise ValueError("NO_COMPLETED_SESSION_IN_CALENDAR")
+
+        required_day = latest_completed(at_ms)
+        captured_day = latest_completed(cutoff)
+        rows = raw.get("assets")
+        require(isinstance(rows, dict) and not set(rows) - set(FOUR_ASSETS), "DAILY_ASSET_SCOPE_INVALID")
+        result.update(source_hash=raw["proof_hash"], observed_at_ms=observed,
+                      request_started_at_ms=cutoff, retrieved_at_ms=observed,
+                      retrieval_timezone="UTC", evaluated_at_ms=at_ms,
+                      required_session_date=required_day,
+                      calendar_id=calendar["calendar_id"], calendar_hash=raw["calendar_hash"])
+    except (ValueError, IbkrMarketHealthSourceError, KeyError, TypeError, OSError, OverflowError) as exc:
+        # Do not expose arbitrary provider messages or private input strings.
+        known = str(exc) if isinstance(exc, ValueError) else "DAILY_SOURCE_INVALID"
+        allowed = {"DAILY_SOURCE_MISSING", "DAILY_SOURCE_ID_MISMATCH", "DAILY_SOURCE_AUTHORITY_INVALID",
+                   "DAILY_PROOF_HASH_MISMATCH", "DAILY_CAPTURE_CLOCK_INVALID", "DAILY_REQUEST_CONTRACT_MISSING",
+                   "PRICE_ADJUSTMENT_BASIS_UNQUALIFIED", "DAILY_REQUEST_CONTRACT_MISMATCH",
+                   "DAILY_CALENDAR_BINDING_MISMATCH", "MARKET_CALENDAR_OUT_OF_RANGE",
+                   "NO_COMPLETED_SESSION_IN_CALENDAR", "DAILY_ASSET_SCOPE_INVALID"}
+        reason = known if known in allowed else "DAILY_SOURCE_INVALID"
+        result["assets"] = {a: blocked(a, reason) for a in FOUR_ASSETS}
+        return result
+
+    for asset in FOUR_ASSETS:
+        try:
+            row = rows.get(asset)
+            require(isinstance(row, dict), "ASSET_DAILY_SOURCE_MISSING")
+            require(row.get("symbol") == asset and row.get("currency") == "USD", "ASSET_SOURCE_BINDING_MISMATCH")
+            bars = row.get("bars")
+            require(isinstance(bars, list) and bool(bars), "ASSET_DAILY_BARS_MISSING")
+            require(row.get("raw_data_hash") == canonical_hash(bars), "ASSET_RAW_HASH_MISMATCH")
+            require(row.get("failure_codes") == [], "ASSET_HISTORY_REQUEST_FAILED")
+            # Dates must be daily labels, never intraday/premarket timestamps.
+            require(all(isinstance(b, dict) and isinstance(b.get("date"), str)
+                        and b["date"] in {_session_date(b["date"]), _session_date(b["date"]).replace("-", "")}
+                        for b in bars), "ASSET_DAILY_DATE_INVALID")
+            normalized = normalize_ibkr_daily_capture({asset: bars}, assets=(asset,), minimum_bars=1)[asset]
+            complete = []
+            for bar in normalized:
+                day = date.fromisoformat(bar["session_date"])
+                require(day <= local_day(cutoff), "ASSET_FUTURE_BAR")
+                if day < start:
+                    continue  # Older 2 M history is outside this close-only claim.
+                require(day <= end and is_session(day), "ASSET_NONTRADING_SESSION")
+                close_ms = _session_close_ms(bar["session_date"], early_close_dates=early)
+                if close_ms <= cutoff:
+                    complete.append((bar, close_ms))
+            require(bool(complete), "NO_COMPLETE_EQUITY_SESSION")
+            bar, close_ms = complete[-1]
+            if bar["session_date"] != captured_day or captured_day != required_day:
+                result["assets"][asset] = blocked(asset, "LATEST_COMPLETED_SESSION_MISSING", "STALE")
+                continue
+            result["assets"][asset] = {
+                "asset": asset, "currency": "USD", "state": "VALID", "reason": "LATEST_COMPLETED_SESSION_VERIFIED",
+                "price_usd": bar["close"], "price_type": "RTH_SESSION_CLOSE",
+                "as_of_ms": close_ms, "session_date": bar["session_date"], "session_state": "COMPLETE",
+                "session_clock": "SCHEDULED_RTH_END_NOT_TRADE_TIMESTAMP",
+                "source_state": bar["source_state"], "source_id": FOUR_DAILY_SOURCE_ID,
+                "raw_data_hash": row["raw_data_hash"], "price_adjustment_basis": PRICE_BASIS,
+                "observed_at_ms": observed, "request_started_at_ms": cutoff,
+                "calendar_id": calendar["calendar_id"],
+                "source_ref": {"source_id": FOUR_DAILY_SOURCE_ID, "evidence_hash": raw["proof_hash"],
+                               "source_as_of_ms": close_ms},
+            }
+        except (ValueError, IbkrMarketHealthSourceError, KeyError, TypeError, OverflowError) as exc:
+            reason = str(exc)
+            allowed = {"ASSET_DAILY_SOURCE_MISSING", "ASSET_SOURCE_BINDING_MISMATCH", "ASSET_DAILY_BARS_MISSING",
+                       "ASSET_RAW_HASH_MISMATCH", "ASSET_HISTORY_REQUEST_FAILED", "ASSET_DAILY_DATE_INVALID",
+                       "ASSET_FUTURE_BAR", "ASSET_NONTRADING_SESSION", "NO_COMPLETE_EQUITY_SESSION"}
+            result["assets"][asset] = blocked(asset, reason if reason in allowed else "ASSET_DAILY_BAR_INVALID")
+    count = sum(row["state"] == "VALID" for row in result["assets"].values())
+    result["state"] = "VALID" if count == len(FOUR_ASSETS) else "PARTIAL" if count else "BLOCKED"
+    return result
 
 
 def _native_options_app() -> tuple[type[Any], type[Any]]:
@@ -769,11 +1035,16 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--options-output")
     parser.add_argument("--equity-proof-input")
     parser.add_argument("--strike-count", type=int, default=3)
+    parser.add_argument("--four-asset-prices", action="store_true")
     return parser
 
 
 def main() -> int:
     args = _parser().parse_args()
+    if args.four_asset_prices and (not args.equity_output or args.options_output):
+        raise IbkrMarketHealthSourceError(
+            "--four-asset-prices requires --equity-output and cannot use --options-output"
+        )
     if not args.equity_output and not args.options_output:
         raise IbkrMarketHealthSourceError(
             "at least one of --equity-output or --options-output is required"
@@ -784,6 +1055,7 @@ def main() -> int:
             port=args.port,
             client_id=args.client_id,
             timeout_seconds=args.timeout_seconds,
+            four_asset_prices=args.four_asset_prices,
         )
         write_json_atomic(Path(args.equity_output), proof)
     if args.options_output:

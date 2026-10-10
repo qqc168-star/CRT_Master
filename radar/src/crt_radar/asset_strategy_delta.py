@@ -346,6 +346,7 @@ def build_asset_strategy_delta(
     portfolio_allocation_context: dict[str, Any] | None = None,
     issuer_announcement_wake: dict[str, Any] | None = None,
     fixed_income_inputs: dict[str, Any] | None = None,
+    qualified_equity_prices: dict[str, Any] | None = None,
     at_ms: int = 0,
 ) -> dict[str, Any]:
     gate = btc_entry_gate if isinstance(btc_entry_gate, dict) else {}
@@ -455,6 +456,14 @@ def build_asset_strategy_delta(
         "capital_decision_authority": "USER_ONLY",
         "analyst_judgment_required": True,
     }
+
+    if qualified_equity_prices is not None:
+        # Sourced price facts supplement review; they grant no role, budget or
+        # trade eligibility and cannot replace formal treasury valuation.
+        for asset in ("MSTR", "ASST", "STRC", "SATA"):
+            result["assets"][asset]["price_evidence"] = deepcopy(
+                qualified_equity_prices["assets"][asset]
+            )
 
     if allocation is None:
         return result

@@ -509,6 +509,7 @@ def semantic_evidence_catalog(projection):
         if section in skipped or section in {"pack_state", "data_health", "model_status", "distillation"}:
             continue
         walk(value, ("market_context", section), asset="BTC" if section in btc_sections else "UNATTRIBUTED",
+             basis="COMPLETED_RTH_CLOSE" if section == "qualified_equity_prices" else "MARKET_OBSERVATION",
              investment=section not in {"asset_strategy_delta", "premarket_market_data", "portfolio_allocation_context"})
     posture = projection.get("posture")
     if isinstance(posture, dict):
@@ -596,6 +597,10 @@ REFERENCE_INSTRUCTIONS = LEGACY_INSTRUCTIONS.replace(
 
 
 INSTRUCTIONS = REFERENCE_INSTRUCTIONS + (
+    "qualified_equity_prices are last completed regular-session daily closes, "
+    "with their original session clock and split/dividend adjustment basis. "
+    "They are not premarket, live or executable quotes and do not establish "
+    "formal mNAV eligibility, a buy price, dividend entitlement or a cash budget. "
     " blockers are current missing or failed prerequisites that prevent THIS scope's chosen conclusion; "
     "contradictions are opposing evidence and unresolved causal tensions, not automatically a blocker; "
     "invalidation describes future conditions that would invalidate the conclusion. "
