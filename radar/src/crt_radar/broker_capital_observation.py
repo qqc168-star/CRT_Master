@@ -286,9 +286,35 @@ def capture_ibkr_capital(*, timeout_seconds: float = 25, client_id: int = 13124)
                 return False
             return True
 
-        def error(self, reqId, errorTime, errorCode, errorString, advancedOrderRejectJson=""):
+        def error(self, *args, **kwargs):
+            # Legacy: (id, code, text[, reject_json]); current adds an integer
+            # errorTime before code. Four arguments must be distinguished by
+            # types, never coerced or classified by arity alone.
+            if kwargs:
+                if (set(kwargs) != {"advancedOrderRejectJson"}
+                        or type(kwargs["advancedOrderRejectJson"]) is not str
+                        or len(args) not in {3, 4}):
+                    self.conflict = True
+                    return
+                args = (*args, kwargs["advancedOrderRejectJson"])
+            if (len(args) in {3, 4} and all(type(value) is int for value in args[:2])
+                    and all(type(value) is str for value in args[2:])):
+                errorCode = args[1]
+                errorTime = None
+            elif (len(args) in {4, 5} and all(type(value) is int for value in args[:3])
+                    and all(type(value) is str for value in args[3:])):
+                errorCode = args[2]
+                errorTime = args[1]
+            else:
+                self.conflict = True
+                return
+            if (not -(2 ** 31) <= args[0] < 2 ** 31 or not 0 <= errorCode < 2 ** 31
+                    or (errorTime is not None and not 0 <= errorTime < 2 ** 63)):
+                self.conflict = True
+                return
+            # Keep only the code: messages/reject JSON can contain private IDs.
             if errorCode not in {2104, 2106, 2107, 2108, 2158, 2119, 1102}:
-                self.errors.append(int(errorCode))
+                self.errors.append(errorCode)
 
         def funds(self, tag, value, currency):
             key = tag.removeprefix("$LEDGER-")

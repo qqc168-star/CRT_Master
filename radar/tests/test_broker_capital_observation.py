@@ -1,17 +1,19 @@
 """Synthetic offline cases only; live acceptance never uses these observations."""
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import types
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
 from crt_radar.broker_capital_observation import (
     CONNECTED_SOURCE, MAX_AGE_MS, SOCKET_SOURCE, capture_ibkr_capital,
-    reconcile_capital, seal_broker_observation, validate_broker_observation,
+    main as broker_main, reconcile_capital, seal_broker_observation, validate_broker_observation,
 )
 from crt_radar.daily_evidence_runner import run_daily_evidence
 from crt_radar.gpt_bridge_outbox import enqueue_bridge_payload
@@ -333,16 +335,27 @@ class BrokerCapitalTests(unittest.TestCase):
 
 
 class SocketCaptureTests(unittest.TestCase):
-    def fake_sdk(self, *, multiple=False, conflict=False):
+    def fake_sdk(self, *, multiple=False, conflict=False, error_calls=(),
+                 ready=True, connect_timeout=False, error_stage="connect"):
         calls = []
+        instances = []
         class Wrapper:
             pass
         class Client:
             def __init__(self, wrapper):
                 self.wrapper = wrapper; self.connected = False
+                instances.append(wrapper)
+            def emit_errors(self):
+                for args, kwargs in error_calls:
+                    self.wrapper.error(*args, **kwargs)
             def connect(self, host, port, clientId):
                 calls.append(("connect", host, port, clientId)); self.connected = True
-                self.wrapper.nextValidId(1)
+                if connect_timeout:
+                    raise TimeoutError("SYNTHETIC_CONNECTION_TIMEOUT")
+                if error_stage == "connect":
+                    self.emit_errors()
+                if ready:
+                    self.wrapper.nextValidId(1)
             def run(self):
                 pass
             def reqManagedAccts(self):
@@ -364,6 +377,8 @@ class SocketCaptureTests(unittest.TestCase):
                     self.wrapper.updateAccountValue("$LEDGER-CashBalance", "600", "BASE", acct)
                     self.wrapper.updateAccountValue("$LEDGER-CashBalance", "600", "USD", acct)
                     self.wrapper.updatePortfolio(contract, 26 if conflict else 25, 100, 2500, 95, 0, 0, acct)
+                    if error_stage == "updates":
+                        self.emit_errors()
                     self.wrapper.accountDownloadEnd(acct)
             def isConnected(self):
                 return self.connected
@@ -377,7 +392,107 @@ class SocketCaptureTests(unittest.TestCase):
         modules = {"ibapi": types.ModuleType("ibapi"), "ibapi.client": types.ModuleType("ibapi.client"),
                    "ibapi.wrapper": types.ModuleType("ibapi.wrapper")}
         modules["ibapi.client"].EClient = Client; modules["ibapi.wrapper"].EWrapper = Wrapper
+        modules["ibapi.client"].instances = instances
         return modules, calls
+
+    def assert_fatal_callback(self, args, kwargs=None, *, stage="connect"):
+        modules, calls = self.fake_sdk(error_calls=[(args, kwargs or {})], error_stage=stage)
+        output = io.StringIO()
+        with patch.dict("sys.modules", modules), redirect_stdout(output), redirect_stderr(output):
+            with self.assertRaisesRegex(RuntimeError, "^BROKER_CAPTURE_SOURCE_CONFLICT$") as caught:
+                capture_ibkr_capital()
+        self.assertEqual(calls[-1], ("disconnect",))
+        self.assertNotIn("PRIVATE_SENTINEL", output.getvalue() + str(caught.exception))
+        return modules["ibapi.client"].instances[0], calls
+
+    def test_legacy_three_argument_error_preserves_502(self):
+        app, _ = self.assert_fatal_callback((-1, 502, "PRIVATE_SENTINEL"))
+        self.assertEqual(app.errors, [502])
+
+    def test_legacy_four_argument_error_preserves_code_and_discards_reject_json(self):
+        app, _ = self.assert_fatal_callback((-1, 502, "PRIVATE_SENTINEL", '{"account":"PRIVATE_SENTINEL"}'))
+        self.assertEqual(app.errors, [502])
+
+    def test_new_four_argument_error_uses_code_not_error_time(self):
+        app, _ = self.assert_fatal_callback((-1, 2104, 502, "PRIVATE_SENTINEL"))
+        self.assertEqual(app.errors, [502])
+
+    def test_new_five_argument_error_preserves_code_and_discards_reject_json(self):
+        app, _ = self.assert_fatal_callback((-1, NOW, 502, "PRIVATE_SENTINEL", '{"order":"PRIVATE_SENTINEL"}'))
+        self.assertEqual(app.errors, [502])
+
+    def test_nonfatal_codes_remain_nonfatal_for_all_callback_versions(self):
+        for code in (2104, 2106, 2107, 2108, 2158, 2119, 1102):
+            for args in ((-1, code, "PRIVATE_SENTINEL"),
+                         (-1, code, "PRIVATE_SENTINEL", "PRIVATE_SENTINEL"),
+                         (-1, 502, code, "PRIVATE_SENTINEL"),
+                         (-1, NOW, code, "PRIVATE_SENTINEL", "PRIVATE_SENTINEL")):
+                with self.subTest(args=args):
+                    modules, calls = self.fake_sdk(error_calls=[(args, {})])
+                    with patch.dict("sys.modules", modules):
+                        observation = capture_ibkr_capital()
+                    self.assertEqual(validate_broker_observation(observation, at_ms=observation["observed_at_ms"])["state"], "AVAILABLE")
+                    self.assertEqual(modules["ibapi.client"].instances[0].errors, [])
+                    self.assertNotIn("PRIVATE_SENTINEL", json.dumps(observation))
+                    self.assertIn(("reqAccountUpdates", False), calls)
+
+    def test_optional_reject_json_keyword_preserves_both_versions(self):
+        for args in ((-1, 502, "PRIVATE_SENTINEL"), (-1, NOW, 502, "PRIVATE_SENTINEL")):
+            with self.subTest(args=args):
+                app, _ = self.assert_fatal_callback(args, {"advancedOrderRejectJson": "PRIVATE_SENTINEL"})
+                self.assertEqual(app.errors, [502])
+
+    def test_unknown_and_ambiguous_formats_block_even_nonfatal_looking_codes(self):
+        malformed = [(), (-1,), (-1, 2104), (-1, 2104, 502, 2158),
+                     (-1, 2104, "PRIVATE_SENTINEL", 502),
+                     (-1, "2104", "PRIVATE_SENTINEL"),
+                     (-1, NOW, "2104", "PRIVATE_SENTINEL"),
+                     (-1, "timestamp", 2104, "PRIVATE_SENTINEL"),
+                     (True, 2104, "PRIVATE_SENTINEL"), (-1, True, "PRIVATE_SENTINEL"),
+                     (-1, False, 2104, "PRIVATE_SENTINEL"),
+                     (-1, NOW, True, "PRIVATE_SENTINEL"),
+                     (-1, 2104, None), (-1, NOW, 2104, None),
+                     (-1, 2104, "PRIVATE_SENTINEL", {"account": "PRIVATE_SENTINEL"}),
+                     (-1, NOW, 2104, "PRIVATE_SENTINEL", None),
+                     (2 ** 31, 2104, "PRIVATE_SENTINEL"),
+                     (-1, 2 ** 31, "PRIVATE_SENTINEL"), (-1, -1, "PRIVATE_SENTINEL"),
+                     (-1, -1, 2104, "PRIVATE_SENTINEL"),
+                     (-1, 2 ** 63, 2104, "PRIVATE_SENTINEL"),
+                     (-1, NOW, 2104, "PRIVATE_SENTINEL", "", "extra")]
+        for args in malformed:
+            with self.subTest(args=args):
+                app, _ = self.assert_fatal_callback(args)
+                self.assertTrue(app.conflict)
+                self.assertEqual(app.errors, [])
+
+    def test_unknown_or_duplicate_keywords_block_without_private_diagnostics(self):
+        for args, kwargs in [((-1, 2104, "PRIVATE_SENTINEL"), {"unknown": "PRIVATE_SENTINEL"}),
+                             ((-1, 2104, "PRIVATE_SENTINEL"), {"advancedOrderRejectJson": None}),
+                             ((-1, 2104, "PRIVATE_SENTINEL", ""), {"advancedOrderRejectJson": "PRIVATE_SENTINEL"})]:
+            with self.subTest(args=args, kwargs=kwargs):
+                app, _ = self.assert_fatal_callback(args, kwargs)
+                self.assertTrue(app.conflict)
+
+    def test_fatal_callback_after_subscription_still_unsubscribes_and_disconnects(self):
+        app, calls = self.assert_fatal_callback((-1, 502, "PRIVATE_SENTINEL"), stage="updates")
+        self.assertEqual(app.errors, [502])
+        self.assertIn(("reqAccountUpdates", False), calls)
+        self.assertIn(("cancelPositions",), calls)
+        self.assertIn(("cancelAccountSummary",), calls)
+
+    def test_connection_and_handshake_timeouts_do_not_write_capital_observation(self):
+        for changes, exception in [({"connect_timeout": True}, TimeoutError), ({"ready": False}, RuntimeError)]:
+            with self.subTest(changes=changes), tempfile.TemporaryDirectory() as td:
+                modules, calls = self.fake_sdk(**changes)
+                target = Path(td) / "observation.json"
+                original_capture = capture_ibkr_capital
+                with patch.dict("sys.modules", modules), patch("sys.argv", ["broker", "--output", str(target)]), \
+                     patch("crt_radar.broker_capital_observation.capture_ibkr_capital", side_effect=lambda: original_capture(timeout_seconds=0.001)):
+                    with self.assertRaises(exception):
+                        broker_main()
+                self.assertFalse(target.exists())
+                self.assertEqual(calls[-1], ("disconnect",))
+                self.assertEqual(validate_broker_observation(None, at_ms=NOW)["state"], "BLOCKED")
 
     def test_collector_explicit_tags_completed_scope_prefix_and_only_read_requests(self):
         modules, calls = self.fake_sdk()
