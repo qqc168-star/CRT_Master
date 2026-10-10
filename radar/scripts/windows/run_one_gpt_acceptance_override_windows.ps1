@@ -76,6 +76,7 @@ try {
         Start-Sleep -Milliseconds 100
     }
     & $ObservationRunner `
+        -RunMode OBSERVATION `
         -RepoRoot $RepoRoot `
         -RuntimeRoot $RuntimeRoot `
         -AcceptanceWakePercentile $AcceptanceWakePercentile `
