@@ -26,7 +26,8 @@ class AssetStrategyDeltaTests(unittest.TestCase):
         )
         income = result["income_engine"]
         self.assertIsNone(income["coverage_ratio"])
-        self.assertEqual(income["legacy_strc_derived"]["six_month_cash_usd"], 1643.4)
+        self.assertNotIn("legacy_strc_derived", income)
+        self.assertEqual(self.private_context["profile"]["derived"]["six_month_cash_usd"], 1643.4)
         self.assertEqual(result["assets"]["STRC"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
         self.assertEqual(result["assets"]["SATA"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
 

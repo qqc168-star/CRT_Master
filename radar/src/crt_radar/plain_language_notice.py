@@ -6,6 +6,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 
+from .broker_capital_observation import validate_broker_observation
 
 SCHEMA_VERSION = "CRT_CODEX_NOTICE_V1"
 
@@ -186,6 +187,11 @@ def _position_line(private_context: dict[str, Any] | None, income: dict[str, Any
                      f"其中仍可用 {value(row['credited'].get('available_cash_usd'))}；"
                      f"已宣告應收毛／估計稅後 {value(row['receivable']['gross_usd'])}／{value(row['receivable']['net_usd'])}；"
                      f"未宣告未來毛／估計稅後 {value(row['future_undeclared']['gross_usd'])}／{value(row['future_undeclared']['net_usd'])}（假設成立才適用，非確定現金）。")
+        for part in ("credited", "receivable"):
+            if row[part]["state"] == "SOURCE_UNVERIFIED":
+                lines.append(f"{asset} {part} 僅為未經原始帳務驗證的來源主張："
+                             f"毛 {value(row[part].get('claimed_gross_usd'))}／淨 {value(row[part].get('claimed_net_usd'))}；"
+                             "內容雜湊不等於來源可信，不能計入合格收入或可部署資本。")
         for part in ("credited", "receivable", "future_undeclared"):
             if row[part]["state"] == "BLOCKED":
                 lines.append(f"{asset} {part} 受阻：{row[part]['reason']}。")
@@ -195,6 +201,14 @@ def _position_line(private_context: dict[str, Any] | None, income: dict[str, Any
     lines.append(f"半年目標（{goal.get('basis', '尚未確認毛／淨基準')}）{value(goal['target_usd'])}；條件式差額 {value(goal['gap_usd'])}；首次匯回日 "
                  f"{remittance}。"
                  "應收與估算不等於可動用資金；無交易授權。")
+    reconciliation = profile.get("capital_reconciliation") or {}
+    broker = reconciliation.get("broker_observed") or {}
+    current_broker = validate_broker_observation(broker, at_ms=income["as_of_ms"])
+    # Current capital is displayed only through the existing qualified
+    # reconciliation, never augmented by historic dividend receipts.
+    if reconciliation.get("state") == "AVAILABLE" and current_broker["state"] == "AVAILABLE":
+        lines.append(f"當前券商現金 {value((broker.get('funds') or {}).get('cash_usd'))}；"
+                     f"當前資本分析預算 {value(reconciliation.get('analysis_cash_budget_usd'))}；配息不另加預算。")
     return " ".join(lines)
 
 
