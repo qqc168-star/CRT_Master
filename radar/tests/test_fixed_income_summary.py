@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from crt_radar.asset_strategy_delta import INCOME_INPUT_SCHEMA, build_fixed_income_summary, build_asset_strategy_delta
 from crt_radar.broker_capital_observation import _hash, seal_broker_observation
@@ -97,18 +98,20 @@ class FixedIncomeTests(unittest.TestCase):
     def build(self, at=NOW):
         return build_fixed_income_summary(private_context=self.private, inputs=self.inputs, at_ms=at)
 
-    def test_dual_complete_current_facts_and_conditional_goal_gap(self):
+    def test_dual_current_terms_and_estimates_do_not_qualify_self_signed_ledger(self):
         result = self.build()
         self.assertEqual(result["assets"]["STRC"]["shares"], 100)
         self.assertEqual(result["assets"]["SATA"]["shares"], 50)
-        self.assertEqual(result["totals"]["receivable"]["gross_usd"], 150)
-        self.assertEqual(result["totals"]["receivable"]["net_usd"], 130)
+        self.assertIsNone(result["totals"]["receivable"]["gross_usd"])
+        self.assertEqual(result["assets"]["STRC"]["receivable"]["claimed_gross_usd"], 100)
+        self.assertEqual(result["assets"]["SATA"]["receivable"]["claimed_gross_usd"], 50)
+        self.assertIsNone(result["totals"]["receivable"]["net_usd"])
         self.assertEqual(result["totals"]["future_undeclared"]["gross_usd"], 700)
-        self.assertEqual(result["totals"]["future_undeclared"]["net_usd"], 610)
-        self.assertEqual(result["income_goal"]["six_month_income_usd"], 740)
-        self.assertEqual(result["income_goal"]["gap_usd"], 760)
-        self.assertEqual(result["income_goal"]["state"], "ESTIMATE")
-        self.assertEqual(result["totals"]["credited"]["available_cash_usd"], 0)
+        self.assertIsNone(result["totals"]["future_undeclared"]["net_usd"])
+        self.assertNotIn("six_month_income_usd", result["income_goal"])
+        self.assertIsNone(result["income_goal"]["gap_usd"])
+        self.assertEqual(result["income_goal"]["state"], "BLOCKED")
+        self.assertIsNone(result["totals"]["credited"]["available_cash_usd"])
         self.assertIsNone(result["six_month_cash_usd"])
 
     def test_confirmed_zero_current_holding_is_not_unknown(self):
@@ -123,7 +126,8 @@ class FixedIncomeTests(unittest.TestCase):
         sata = self.build()["assets"]["SATA"]
         self.assertEqual(sata["shares"], 0)
         self.assertEqual(sata["future_undeclared"]["gross_usd"], 0)
-        self.assertEqual(sata["receivable"]["gross_usd"], 0)
+        self.assertEqual(sata["receivable"]["claimed_gross_usd"], 0)
+        self.assertIsNone(sata["receivable"]["gross_usd"])
 
     def test_unknown_partial_stale_and_tampered_holdings_never_use_history(self):
         original = deepcopy(self.private)
@@ -146,7 +150,8 @@ class FixedIncomeTests(unittest.TestCase):
                 result = self.build()
                 self.assertIsNone(result["assets"]["STRC"]["shares"])
                 self.assertIsNone(result["totals"]["future_undeclared"]["gross_usd"])
-                self.assertEqual(result["legacy_strc_derived"]["six_month_cash_usd"], 49000)
+                self.assertNotIn("legacy_strc_derived", result)
+                self.assertEqual(self.private["profile"]["derived"]["six_month_cash_usd"], 49000)
 
     def test_historical_rate_cannot_become_current(self):
         self.inputs["issuer_announcement_wake"] = wake(official_event("STRC", start="September 1, 2026", end="September 30, 2026"), official_event("SATA"))
@@ -186,25 +191,30 @@ class FixedIncomeTests(unittest.TestCase):
                                       "gross_usd": 100, "net_usd": 90, "available_cash_usd": 40, "credited_at_ms": NOW}]
         seal(statement)
         result = self.build()
-        self.assertEqual(result["assets"]["STRC"]["credited"]["net_usd"], 90)
-        self.assertEqual(result["assets"]["STRC"]["credited"]["available_cash_usd"], 40)
-        self.assertEqual(result["assets"]["STRC"]["receivable"]["gross_usd"], 0)
-        self.assertEqual(result["assets"]["SATA"]["receivable"]["gross_usd"], 50)
+        self.assertEqual(result["assets"]["STRC"]["credited"]["claimed_net_usd"], 90)
+        self.assertIsNone(result["assets"]["STRC"]["credited"]["net_usd"])
+        self.assertIsNone(result["assets"]["STRC"]["credited"]["available_cash_usd"])
+        self.assertEqual(result["assets"]["STRC"]["receivable"]["claimed_gross_usd"], 0)
+        self.assertEqual(result["assets"]["SATA"]["receivable"]["claimed_gross_usd"], 50)
+        self.assertIsNone(result["assets"]["SATA"]["receivable"]["gross_usd"])
         self.assertEqual(result["assets"]["STRC"]["credited"]["credited_at_ms"], [NOW])
-        self.assertEqual(result["income_goal"]["six_month_income_usd"], 740)
+        self.assertNotIn("six_month_income_usd", result["income_goal"])
 
     def test_no_ex_date_eligibility_cannot_recognize_receivable(self):
         self.inputs["broker_statement"]["entitlements"][0]["eligibility_verified"] = False
         seal(self.inputs["broker_statement"])
         result = self.build()
         self.assertIsNone(result["assets"]["STRC"]["receivable"]["gross_usd"])
-        self.assertEqual(result["assets"]["STRC"]["credited"]["gross_usd"], 0)
-        self.assertEqual(result["assets"]["SATA"]["receivable"]["gross_usd"], 50)
+        self.assertEqual(result["assets"]["STRC"]["credited"]["claimed_gross_usd"], 0)
+        self.assertEqual(result["assets"]["SATA"]["receivable"]["claimed_gross_usd"], 50)
+        self.assertIsNone(result["assets"]["SATA"]["receivable"]["gross_usd"])
 
     def test_tax_unknown_blocks_net_and_net_goal_preserving_gross(self):
         self.inputs.pop("tax")
         result = self.build()
-        self.assertEqual(result["totals"]["receivable"]["gross_usd"], 150)
+        self.assertIsNone(result["totals"]["receivable"]["gross_usd"])
+        self.assertEqual(result["assets"]["STRC"]["receivable"]["claimed_gross_usd"], 100)
+        self.assertEqual(result["assets"]["SATA"]["receivable"]["claimed_gross_usd"], 50)
         self.assertIsNone(result["totals"]["receivable"]["net_usd"])
         self.assertIsNone(result["income_goal"]["gap_usd"])
 
@@ -227,7 +237,7 @@ class FixedIncomeTests(unittest.TestCase):
                 result = build_fixed_income_summary(private_context=private, inputs=inputs, at_ms=NOW)
                 self.assertIsNone(result["assets"]["STRC"]["credited"]["gross_usd"])
 
-    def test_missing_entitlements_preserves_verified_dividend_credits(self):
+    def test_missing_entitlements_preserves_separate_credit_claims(self):
         statement = self.inputs["broker_statement"]
         statement.pop("entitlements")
         statement["entitlements_complete"] = False
@@ -235,7 +245,8 @@ class FixedIncomeTests(unittest.TestCase):
                                       "gross_usd": 100, "net_usd": 90, "available_cash_usd": 40, "credited_at_ms": NOW}]
         seal(statement)
         result = self.build()
-        self.assertEqual(result["assets"]["STRC"]["credited"]["gross_usd"], 100)
+        self.assertEqual(result["assets"]["STRC"]["credited"]["claimed_gross_usd"], 100)
+        self.assertIsNone(result["assets"]["STRC"]["credited"]["gross_usd"])
         self.assertIsNone(result["assets"]["STRC"]["receivable"]["gross_usd"])
 
     def test_unsourced_ex_date_position_cannot_be_current_position_substitute(self):
@@ -290,8 +301,9 @@ class FixedIncomeTests(unittest.TestCase):
         self.inputs["broker_statement"]["transactions"] = [{"asset": "STRC", "transaction_type": "SALE", "gross_usd": 10000}]
         seal(self.inputs["broker_statement"])
         result = self.build()
-        self.assertEqual(result["totals"]["credited"]["gross_usd"], 0)
-        self.assertEqual(result["income_goal"]["gap_usd"], 760)
+        self.assertIsNone(result["totals"]["credited"]["gross_usd"])
+        self.assertEqual(result["assets"]["STRC"]["credited"]["claimed_gross_usd"], 0)
+        self.assertIsNone(result["income_goal"]["gap_usd"])
 
     def test_historical_goal_and_remittance_not_current_approval(self):
         self.inputs.pop("income_goal")
@@ -306,8 +318,8 @@ class FixedIncomeTests(unittest.TestCase):
         self.inputs["income_goal"].pop("first_remittance_date_ms")
         seal(self.inputs["income_goal"])
         goal = self.build()["income_goal"]
-        self.assertEqual(goal["six_month_income_usd"], 850)
-        self.assertEqual(goal["gap_usd"], 650)
+        self.assertNotIn("six_month_income_usd", goal)
+        self.assertIsNone(goal["gap_usd"])
         self.assertIsNone(goal["first_remittance_date_ms"])
 
     def test_specified_period_credits_independent_of_six_month_forecast(self):
@@ -317,7 +329,9 @@ class FixedIncomeTests(unittest.TestCase):
             self.inputs[key]["period"] = deepcopy(period)
             seal(self.inputs[key])
         result = self.build()
-        self.assertEqual(result["totals"]["receivable"]["gross_usd"], 150)
+        self.assertIsNone(result["totals"]["receivable"]["gross_usd"])
+        self.assertEqual(result["assets"]["STRC"]["receivable"]["claimed_gross_usd"], 100)
+        self.assertEqual(result["assets"]["SATA"]["receivable"]["claimed_gross_usd"], 50)
         self.assertIsNone(result["income_goal"]["target_usd"])
         self.assertIsNone(result["totals"]["future_undeclared"]["gross_usd"])
 
@@ -349,7 +363,8 @@ class FixedIncomeTests(unittest.TestCase):
     def test_missing_btc_does_not_erase_income_and_locks(self):
         result = build_asset_strategy_delta(btc_entry_gate=None, assumption_watch=None, private_context=self.private,
                                             fixed_income_inputs=self.inputs, at_ms=NOW)
-        self.assertEqual(result["income_engine"]["totals"]["receivable"]["gross_usd"], 150)
+        self.assertEqual(result["income_engine"]["assets"]["STRC"]["current_terms"]["annual_rate"], 0.12)
+        self.assertEqual(result["income_engine"]["totals"]["future_undeclared"]["gross_usd"], 700)
         self.assertEqual(result["assets"]["BTC"]["decision_support"], "WAIT")
         self.assertEqual(result["action_output"], "NONE")
         self.assertEqual(result["external_action_authority"], "NONE")
@@ -361,13 +376,150 @@ class FixedIncomeTests(unittest.TestCase):
         original = deepcopy(self.private)
         result = self.build()
         self.assertEqual(self.private, original)
-        self.assertEqual(result["legacy_strc_derived"], original["profile"]["derived"])
+        self.assertNotIn("legacy_strc_derived", result)
         notice = _position_line(self.private, result)
         self.assertIn("STRC", notice)
         self.assertIn("SATA", notice)
         self.assertIn("未知", _position_line(self.private, build_fixed_income_summary(private_context=self.private, at_ms=NOW)))
         self.assertNotIn("49000", notice)
         self.assertNotIn("至少", notice)
+
+    def test_self_signed_source_and_verified_labels_do_not_establish_real_credits(self):
+        statement = self.inputs["broker_statement"]
+        statement["transactions"] = [{"asset": "STRC", "transaction_type": "DIVIDEND",
+            "distribution_document_id": "synthetic-STRC-october", "credited_at_ms": NOW,
+            "gross_usd": 100, "net_usd": 90, "available_cash_usd": 90}]
+        for labels in ({}, {"source_trust": "VERIFIED", "verification_state": "EVIDENCE_VERIFIED",
+                            "original_evidence_verified": True}):
+            with self.subTest(labels=labels):
+                statement.update(labels)
+                seal(statement)
+                result = self.build()
+                credit = result["assets"]["STRC"]["credited"]
+                self.assertEqual(credit["source"]["content_integrity"], "VALID")
+                self.assertEqual(credit["source"]["source_trust"], "NOT_EXTERNALLY_VERIFIED")
+                self.assertEqual(credit["state"], "SOURCE_UNVERIFIED")
+                self.assertEqual(credit["claimed_gross_usd"], 100)
+                self.assertEqual(credit["claimed_net_usd"], 90)
+                self.assertIsNone(credit["gross_usd"])
+                self.assertIsNone(credit["net_usd"])
+                self.assertIsNone(credit["available_cash_usd"])
+                self.assertIsNone(result["totals"]["credited"]["gross_usd"])
+                self.assertIsNone(result["income_goal"]["gap_usd"])
+                notice = _position_line(self.private, result)
+                self.assertIn("僅為未經原始帳務驗證的來源主張", notice)
+                self.assertIn("其中仍可用 未知", notice)
+
+    def test_unspent_cash_claim_cannot_erase_independent_reported_income(self):
+        statement = self.inputs["broker_statement"]
+        receipt = {"asset": "STRC", "transaction_type": "DIVIDEND",
+                   "distribution_document_id": "synthetic-STRC-october", "credited_at_ms": NOW,
+                   "gross_usd": 100, "net_usd": 90}
+        for cash in (None, 40, 1000000, "invalid-self-claim"):
+            with self.subTest(cash=cash):
+                statement["transactions"] = [{**receipt, "available_cash_usd": cash}]
+                seal(statement)
+                credit = self.build()["assets"]["STRC"]["credited"]
+                self.assertEqual(credit["claimed_gross_usd"], 100)
+                self.assertEqual(credit["claimed_net_usd"], 90)
+                self.assertIsNone(credit["available_cash_usd"])
+
+    def test_all_zero_current_holdings_preserve_independent_zero_forecast(self):
+        broker = self.private["profile"]["capital_reconciliation"]["broker_observed"]
+        broker["holdings"] = []
+        self.private["profile"]["capital_reconciliation"]["broker_observed"] = seal_broker_observation(broker)
+        self.inputs.pop("broker_statement")
+        result = self.build()
+        self.assertEqual(result["totals"]["future_undeclared"]["gross_usd"], 0)
+        self.assertEqual(result["totals"]["future_undeclared"]["net_usd"], 0)
+        self.assertIsNone(result["totals"]["credited"]["gross_usd"])
+
+    def test_sufficient_broker_cash_never_proves_dividend_still_available(self):
+        broker = self.private["profile"]["capital_reconciliation"]["broker_observed"]
+        broker["funds"]["cash_usd"] = broker["funds"]["available_funds_usd"] = 1000000
+        broker = seal_broker_observation(broker)
+        self.private["profile"]["capital_reconciliation"]["broker_observed"] = broker
+        statement = self.inputs["broker_statement"]
+        statement["observation_hash"] = broker["observation_hash"]
+        statement["transactions"] = [{"asset": "STRC", "transaction_type": "DIVIDEND",
+            "distribution_document_id": "synthetic-STRC-october", "credited_at_ms": NOW,
+            "gross_usd": 100, "net_usd": 90, "available_cash_usd": 90}]
+        seal(statement)
+        self.assertIsNone(self.build()["assets"]["STRC"]["credited"]["available_cash_usd"])
+
+    def test_self_signed_tax_cannot_produce_qualified_net_forecast(self):
+        tax = self.inputs["tax"]
+        tax.update(source_trust="VERIFIED", original_evidence_verified=True)
+        seal(tax)
+        result = self.build()
+        self.assertEqual(result["totals"]["future_undeclared"]["gross_usd"], 700)
+        self.assertIsNone(result["totals"]["future_undeclared"]["net_usd"])
+        self.assertEqual(result["assets"]["STRC"]["future_undeclared"]["net_state"], "BLOCKED_TAX_UNKNOWN")
+
+    def test_goal_coverage_and_side_job_cannot_assign_income_roles(self):
+        # Hypothetical qualified coverage isolates the strategy implication;
+        # this fixture does not pretend to authenticate a broker ledger.
+        income = self.build()
+        income["income_goal"].update(state="ESTIMATE", gap_usd=0)
+        for side_state in ("EXECUTE", "EXIT_PENDING", "WAIT"):
+            with self.subTest(side_state=side_state):
+                allocation = {"state": "READY_FOR_ANALYST", "mstr_health": "DETERIORATING",
+                              "asst_health": "STABLE", "valuation_constraint": {"MSTR": "BRAKE", "ASST": "BRAKE"},
+                              "side_job": {"state": side_state, "window_stage": "D", "capital_scope_state": "AVAILABLE"}}
+                original = deepcopy(allocation)
+                with patch("crt_radar.asset_strategy_delta.build_fixed_income_summary", return_value=income):
+                    result = build_asset_strategy_delta(
+                        btc_entry_gate={"transition_state": "BEAR_REJECTION_STRENGTHENED", "decision_eligibility": "WAIT"},
+                        assumption_watch=None, private_context=self.private, portfolio_allocation_context=allocation)
+                for asset in ("STRC", "SATA"):
+                    row = result["assets"][asset]
+                    self.assertEqual(row["role"], "INCOME_ENGINE")
+                    self.assertEqual(row["strategy_delta"], "INCOME_GAP_REVIEW")
+                    self.assertEqual(row["decision_support"], "READY_FOR_ANALYST")
+                    self.assertEqual(row["quantitative"], income["assets"][asset])
+                    self.assertEqual(row["short_cycle_side_job"]["decision_support"], "RESEARCH_ONLY")
+                    self.assertEqual(row["short_cycle_side_job"]["action_output"], "NONE")
+                self.assertEqual(result["assets"]["MSTR"]["strategy_delta"], "WEAKEN")
+                self.assertEqual(result["assets"]["MSTR"]["valuation_constraint"], "BRAKE")
+                self.assertEqual(allocation, original)
+
+    def test_missing_income_keeps_neutral_roles_without_choosing_allocation(self):
+        result = build_asset_strategy_delta(btc_entry_gate=None, assumption_watch=None, private_context=None)
+        for asset in ("STRC", "SATA"):
+            self.assertEqual(result["assets"][asset]["role"], "INCOME_ENGINE")
+            self.assertEqual(result["assets"][asset]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
+        self.assertEqual(result["action_output"], "NONE")
+
+    def test_model_instructions_preserve_source_and_capital_qualification(self):
+        from crt_radar.capital_decision_closure import INSTRUCTIONS, REFERENCE_INSTRUCTIONS
+        for instructions in (INSTRUCTIONS, REFERENCE_INSTRUCTIONS):
+            self.assertIn("not source authenticity", instructions)
+            self.assertIn("not additional capital", instructions)
+            self.assertIn("does not select a core, backup", instructions)
+            self.assertIn("not an approved rotation", instructions)
+
+    def test_notice_separates_current_capital_and_refuses_stale_cash(self):
+        from crt_radar.broker_capital_observation import reconcile_capital
+        profile = self.private["profile"]
+        broker = profile["capital_reconciliation"]["broker_observed"]
+        profile["capital_reconciliation"] = reconcile_capital(
+            broker, {"source": "USER_CONFIRMED", "confirmed_at_ms": NOW, "reserved_usd": 0,
+                     "plan_policy": "CANCEL_ALL_NO_REPLACEMENT", "asset_roles": {}}, at_ms=NOW)
+        capital = profile["capital_reconciliation"]
+        self.assertEqual(capital["state"], "AVAILABLE")
+        budget_before = capital["analysis_cash_budget_usd"]
+        result = self.build()
+        notice = _position_line(self.private, result)
+        self.assertIn(f"當前券商現金 ${broker['funds']['cash_usd']:,.2f}", notice)
+        self.assertIn(f"當前資本分析預算 ${budget_before:,.2f}", notice)
+        self.assertIn("配息不另加預算", notice)
+        self.assertEqual(capital["analysis_cash_budget_usd"], budget_before)
+        stale_broker = deepcopy(broker)
+        stale_broker["observed_at_ms"] -= 400000
+        stale_broker["started_at_ms"] -= 400000
+        capital["broker_observed"] = seal_broker_observation(stale_broker)
+        # Even a saved AVAILABLE reconciliation must not show expired cash.
+        self.assertNotIn("當前券商現金", _position_line(self.private, self.build()))
 
     def test_independent_summary_enters_same_evidence_pack_full_gpt_projection(self):
         from crt_radar.daily_evidence_runner import run_daily_evidence
@@ -386,7 +538,7 @@ class FixedIncomeTests(unittest.TestCase):
                                       now_ms=NOW, generated_at_ms=NOW, private_context=self.private, fixed_income_inputs=shifted,
                                       issuer_announcement_wake=shifted["issuer_announcement_wake"])
             income = pack["asset_strategy_delta"]["income_engine"]
-            self.assertEqual(income["totals"]["receivable"]["gross_usd"], 150)
+            self.assertEqual(income["totals"]["future_undeclared"]["gross_usd"], 700)
             handoff = h.run_gpt_handoff_gate(pack, build_plain_language_notice(pack), ledger_path=Path(td) / "handoff.jsonl", full_decision=True)
             payload = h.build_full_decision_bridge_payload(pack, handoff)
             source = source_fixture(payload, NOW)
@@ -398,6 +550,53 @@ class FixedIncomeTests(unittest.TestCase):
             self.assertEqual(market["asset_strategy_delta"]["income_engine"]["totals"]["future_undeclared"]["state"], "ESTIMATE")
             self.assertEqual(source["governance"], c.LOCKS)
             self.assertNotIn("IBKR_ACCOUNT", json.dumps(projection))
+            encoded = json.dumps(projection)
+            self.assertNotIn("49000", encoded)
+            self.assertNotIn("legacy_strc_derived", encoded)
+            self.assertEqual(market["asset_strategy_delta"]["income_engine"]["assets"]["SATA"]["current_terms"]["annual_rate"], 0.10)
+            self.assertEqual(market["asset_strategy_delta"]["income_engine"]["assets"]["STRC"]["future_undeclared"]["source_ref"], income["assets"]["STRC"]["current_terms"]["source_ref"])
+            # Re-project an older immutable summary; only the model copy loses
+            # history, and the existing capital validator accepts its new hash.
+            old_pack = deepcopy(pack)
+            old_income = old_pack["asset_strategy_delta"]["income_engine"]
+            old_income["legacy_strc_derived"] = deepcopy(self.private["profile"]["derived"])
+            old_income["summary_hash"] = _hash({k: v for k, v in old_income.items() if k != "summary_hash"})
+            original_pack = deepcopy(old_pack)
+            old_payload = h.build_full_decision_bridge_payload(old_pack, handoff)
+            old_source = deepcopy(source)
+            old_source["bridge_payload_hash"] = old_payload["bridge_payload_hash"]
+            old_projection = c.build_projection(old_payload, old_source, at_ms=NOW)
+            self.assertNotIn("49000", json.dumps(old_projection))
+            self.assertEqual(old_pack, original_pack)
+            self.assertEqual(old_projection["capital"], projection["capital"])
+            self.assertEqual(old_projection["spending_cap"], projection["spending_cap"])
+            claim_payload = deepcopy(payload)
+            claim_income = claim_payload["market_context"]["asset_strategy_delta"]["income_engine"]
+            claim_income["assets"]["STRC"]["credited"].update(claimed_gross_usd=100, claimed_net_usd=90)
+            claim_income["summary_hash"] = c.digest({k: v for k, v in claim_income.items() if k != "summary_hash"})
+            claim_payload["bridge_payload_hash"] = c.digest({k: v for k, v in claim_payload.items() if k != "bridge_payload_hash"})
+            claim_source = deepcopy(source)
+            claim_source["bridge_payload_hash"] = claim_payload["bridge_payload_hash"]
+            claim_projection = c.build_projection(claim_payload, claim_source, at_ms=NOW)
+            self.assertEqual(claim_projection["capital"], projection["capital"])
+            self.assertEqual(claim_projection["spending_cap"], projection["spending_cap"])
+            old_income["legacy_strc_derived"]["six_month_cash_usd"] = 99999
+            with self.assertRaisesRegex(ValueError, "INCOME_SUMMARY_HASH_INVALID"):
+                h.build_full_decision_bridge_payload(old_pack, handoff)
+            # A recomputed summary/bridge hash does not authenticate income or
+            # create additional budget; legacy actual-credit claims are refused.
+            bad_payload = deepcopy(payload)
+            bad_income = bad_payload["market_context"]["asset_strategy_delta"]["income_engine"]
+            for component, error in (("credited", "INCOME_ORIGINAL_LEDGER_UNVERIFIED"),
+                                     ("receivable", "INCOME_ORIGINAL_ENTITLEMENT_UNVERIFIED")):
+                bad_income["assets"]["STRC"][component]["gross_usd"] = 100
+                bad_income["summary_hash"] = c.digest({k: v for k, v in bad_income.items() if k != "summary_hash"})
+                bad_payload["bridge_payload_hash"] = c.digest({k: v for k, v in bad_payload.items() if k != "bridge_payload_hash"})
+                bad_source = deepcopy(source)
+                bad_source["bridge_payload_hash"] = bad_payload["bridge_payload_hash"]
+                with self.assertRaisesRegex(ValueError, error):
+                    c.build_projection(bad_payload, bad_source, at_ms=NOW)
+                bad_income["assets"]["STRC"][component]["gross_usd"] = None
             wrong_source = source_fixture(payload, NOW)
             with self.assertRaisesRegex(ValueError, "INCOME_BROKER_LINEAGE_MISMATCH"):
                 c.build_projection(payload, wrong_source, at_ms=NOW)

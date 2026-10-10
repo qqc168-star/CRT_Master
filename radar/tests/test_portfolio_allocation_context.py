@@ -628,11 +628,11 @@ class PortfolioAllocationAcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(
             result["assets"]["STRC"]["strategy_delta"],
-            "SHORT_CYCLE_EDGE_ONLY_CAPITAL_SCOPE_BLOCKED",
+            "BLOCKED_INCOME_PROFILE",
         )
         self.assertEqual(
             result["assets"]["SATA"]["strategy_delta"],
-            "PRIMARY_FIXED_INCOME_CARRIER",
+            "BLOCKED_INCOME_PROFILE",
         )
 
     def test_action_output_and_authority_stay_locked(self):
@@ -671,7 +671,7 @@ class AssetStrategyDeltaPortfolioIntegrationTests(unittest.TestCase):
         self.assertEqual(result["assets"]["SATA"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
         self.assertEqual(result["assets"]["MSTR"]["decision_support"], "BLOCKED")
 
-    def test_d_execute_routes_back_to_sata_not_into_strc(self):
+    def test_d_research_does_not_choose_either_income_role(self):
         from crt_radar.asset_strategy_delta import build_asset_strategy_delta
         private = {
             "state": "AVAILABLE",
@@ -693,10 +693,10 @@ class AssetStrategyDeltaPortfolioIntegrationTests(unittest.TestCase):
             private_context=private,
             portfolio_allocation_context=allocation,
         )
-        self.assertEqual(result["assets"]["STRC"]["strategy_delta"], "SHORT_CYCLE_RETURN_TO_SATA_REVIEW")
-        self.assertEqual(result["assets"]["SATA"]["strategy_delta"], "PRIMARY_FIXED_INCOME_CARRIER_REENTRY_REVIEW")
+        self.assertEqual(result["assets"]["STRC"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
+        self.assertEqual(result["assets"]["SATA"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
 
-    def test_context_routes_fixed_income_and_unlocks_real_health_review(self):
+    def test_research_context_preserves_income_neutrality_and_health_review(self):
         from crt_radar.asset_strategy_delta import build_asset_strategy_delta
         private = {
             "state": "AVAILABLE",
@@ -736,11 +736,11 @@ class AssetStrategyDeltaPortfolioIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(
             result["assets"]["STRC"]["strategy_delta"],
-            "SHORT_CYCLE_SIDE_JOB_ENTRY_REVIEW",
+            "BLOCKED_INCOME_PROFILE",
         )
         self.assertEqual(
             result["assets"]["SATA"]["strategy_delta"],
-            "FIXED_INCOME_CARRIER_ROTATION_OUT_REVIEW",
+            "BLOCKED_INCOME_PROFILE",
         )
         self.assertEqual(result["assets"]["MSTR"]["decision_support"], "READY_FOR_ANALYST")
         self.assertEqual(result["assets"]["ASST"]["decision_support"], "READY_FOR_ANALYST")

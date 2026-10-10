@@ -301,6 +301,13 @@ def build_projection(payload, source, *, at_ms):
                 "INCOME_SUMMARY_HASH_INVALID")
         require(income.get("as_of_ms") == expanded["market_context"].get("generated_at_ms"), "INCOME_CLOCK_MISMATCH")
         for row in income["assets"].values():
+            # V0.1 has no authenticated original ledger/tax verifier. A valid
+            # summary hash must not revive the pre-fix self-signed cash claims.
+            credited = row.get("credited") or {}
+            require(all(credited.get(key) is None for key in ("gross_usd", "net_usd", "available_cash_usd")),
+                    "INCOME_ORIGINAL_LEDGER_UNVERIFIED")
+            require((row.get("receivable") or {}).get("gross_usd") is None,
+                    "INCOME_ORIGINAL_ENTITLEMENT_UNVERIFIED")
             if row.get("holding_state") == "AVAILABLE":
                 require(broker is not None and row.get("observation_hash") == broker["observation_hash"],
                         "INCOME_BROKER_LINEAGE_MISMATCH")
@@ -575,7 +582,17 @@ REFERENCE_INSTRUCTIONS = LEGACY_INSTRUCTIONS.replace(
     "the request-specific reference catalog below. Use at least bridge or an actually supplied "
     "posture for investment evidence. Instrument specifications and fees cannot replace an "
     "investment rationale. Do not cite field paths, asset names, invented aliases, or other "
-    "metadata source_ref values as supporting_evidence. ")
+    "metadata source_ref values as supporting_evidence. ") + (
+    "Income proof_hash and content_integrity verify content consistency, not source authenticity. "
+    "SOURCE_UNVERIFIED and claimed_gross_usd/claimed_net_usd are unverified source claims, "
+    "never confirmed credited income, ex-date entitlement or spendable cash. "
+    "Historical receipts, receivables and conditional future income are not additional capital; "
+    "use only current qualified broker capital and the supplied spending cap for sizing. "
+    "Unknown withholding means unknown qualified net income. "
+    "Combined STRC/SATA income-goal coverage does not select a core, backup, hold, sell or "
+    "new-capital recipient. Review both assets' risks with BTC strategy and other qualified evidence. "
+    "Short-cycle side_job is research context only, not an approved rotation or trade instruction. "
+)
 
 
 INSTRUCTIONS = REFERENCE_INSTRUCTIONS + (

@@ -538,6 +538,20 @@ def _bridge_market_context(
                 result[key] = deepcopy(
                     pack[key]
                 )
+                if key == "asset_strategy_delta":
+                    income = result[key].get("income_engine")
+                    if isinstance(income, dict) and "legacy_strc_derived" in income:
+                        # Project older immutable packs without their historical
+                        # private estimates. Verify first; never repair corruption.
+                        if income.get("summary_hash") != _canonical_hash({
+                            k: v for k, v in income.items() if k != "summary_hash"
+                        }):
+                            raise ValueError("INCOME_SUMMARY_HASH_INVALID")
+                        income.pop("legacy_strc_derived")
+                        income["legacy_policy_state"] = "HISTORICAL_USER_PROFILE_INPUTS_EXCLUDED"
+                        income["summary_hash"] = _canonical_hash({
+                            k: v for k, v in income.items() if k != "summary_hash"
+                        })
 
     btc_etf = compact_btc_etf_evidence(pack)
     if btc_etf:
