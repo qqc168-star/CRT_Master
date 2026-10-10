@@ -386,7 +386,7 @@ def build_asset_strategy_delta(
     strc_delta = "BLOCKED_INCOME_PROFILE"
     sata_delta = "BLOCKED_INCOME_PROFILE"
     if income["income_goal"]["state"] == "ESTIMATE":
-        strc_delta = sata_delta = "INCOME_GAP_REVIEW"
+        strc_delta = sata_delta = "INCOME_COVERAGE_REVIEW"
 
     # Growth engines inherit BTC direction, but asset-specific gates remain fail-closed.
     mstr_direction = "WAIT"

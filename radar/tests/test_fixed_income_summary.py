@@ -460,9 +460,9 @@ class FixedIncomeTests(unittest.TestCase):
         # Hypothetical qualified coverage isolates the strategy implication;
         # this fixture does not pretend to authenticate a broker ledger.
         income = self.build()
-        income["income_goal"].update(state="ESTIMATE", gap_usd=0)
-        for side_state in ("EXECUTE", "EXIT_PENDING", "WAIT"):
-            with self.subTest(side_state=side_state):
+        for gap, side_state in ((gap, state) for gap in (0, 760) for state in ("EXECUTE", "EXIT_PENDING", "WAIT")):
+            income["income_goal"].update(state="ESTIMATE", gap_usd=gap)
+            with self.subTest(gap=gap, side_state=side_state):
                 allocation = {"state": "READY_FOR_ANALYST", "mstr_health": "DETERIORATING",
                               "asst_health": "STABLE", "valuation_constraint": {"MSTR": "BRAKE", "ASST": "BRAKE"},
                               "side_job": {"state": side_state, "window_stage": "D", "capital_scope_state": "AVAILABLE"}}
@@ -474,7 +474,7 @@ class FixedIncomeTests(unittest.TestCase):
                 for asset in ("STRC", "SATA"):
                     row = result["assets"][asset]
                     self.assertEqual(row["role"], "INCOME_ENGINE")
-                    self.assertEqual(row["strategy_delta"], "INCOME_GAP_REVIEW")
+                    self.assertEqual(row["strategy_delta"], "INCOME_COVERAGE_REVIEW")
                     self.assertEqual(row["decision_support"], "READY_FOR_ANALYST")
                     self.assertEqual(row["quantitative"], income["assets"][asset])
                     self.assertEqual(row["short_cycle_side_job"]["decision_support"], "RESEARCH_ONLY")
@@ -482,6 +482,7 @@ class FixedIncomeTests(unittest.TestCase):
                 self.assertEqual(result["assets"]["MSTR"]["strategy_delta"], "WEAKEN")
                 self.assertEqual(result["assets"]["MSTR"]["valuation_constraint"], "BRAKE")
                 self.assertEqual(allocation, original)
+                self.assertEqual(result["income_engine"]["income_goal"]["gap_usd"], gap)
 
     def test_missing_income_keeps_neutral_roles_without_choosing_allocation(self):
         result = build_asset_strategy_delta(btc_entry_gate=None, assumption_watch=None, private_context=None)
