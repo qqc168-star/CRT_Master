@@ -3,10 +3,29 @@ param(
     [string]$RuntimeRoot = "$env:USERPROFILE\CRT_Runtime",
     [int]$PhoneL4MaxAgeSeconds = 300,
     [Nullable[double]]$AcceptanceWakePercentile = $null,
-    [switch]$ConfirmAcceptanceWakeOverride
+    [switch]$ConfirmAcceptanceWakeOverride,
+    [ValidateSet("ISOLATION_ONLY", "OBSERVATION")]
+    [string]$RunMode = "ISOLATION_ONLY"
 )
 
 $ErrorActionPreference = "Stop"
+
+# Decide before resolving paths, starting processes, or touching Runtime.
+# A successful standby exit is not a completed observation cycle.
+if ($RunMode -eq "ISOLATION_ONLY") {
+    if (
+        $PSBoundParameters.ContainsKey("AcceptanceWakePercentile") -or
+        $PSBoundParameters.ContainsKey("ConfirmAcceptanceWakeOverride")
+    ) {
+        throw "ISOLATION_ONLY rejects acceptance wake override parameters"
+    }
+    Write-Output "ISOLATED_ALIGNMENT_STANDBY"
+    Write-Output "NO_OBSERVATION_CYCLE"
+    Write-Output "NO_CAPITAL_REFRESH"
+    Write-Output "NO_GPT_DELIVERY"
+    Write-Output "NO_NOTIFICATION_DELIVERY"
+    exit 0
+}
 
 if ($null -ne $AcceptanceWakePercentile) {
     if (-not $ConfirmAcceptanceWakeOverride) {

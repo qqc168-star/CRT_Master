@@ -17,11 +17,13 @@
 - Permanent Observation DB（永久觀測資料庫）：`%USERPROFILE%\CRT_Runtime\observations.sqlite3`
 - Latest Evidence Pack（最新證據包）：`%USERPROFILE%\CRT_Runtime\evidence\latest.json`
 
-手動執行一次 observation cycle（觀測循環）：
+預設執行隔離待命檢查，不啟動 observation cycle（觀測循環）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\radar\scripts\windows\run_observation_history_windows.ps1
 ```
+
+預設 `-RunMode ISOLATION_ONLY` 輸出 `ISOLATED_ALIGNMENT_STANDBY` 並以 0 結束；這不代表觀測、資本更新、GPT 或通知成功。隔離模式拒絕 acceptance wake 覆寫參數。正常觀測須在另行授權後明確指定 `-RunMode OBSERVATION`；安裝排程不會自動選擇正常模式。
 
 ### MSTR／ASST Market Health（市場健康度）→ GPT Wake（GPT 喚醒）
 
