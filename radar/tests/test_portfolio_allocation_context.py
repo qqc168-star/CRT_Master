@@ -666,8 +666,9 @@ class AssetStrategyDeltaPortfolioIntegrationTests(unittest.TestCase):
             assumption_watch={"state": "VALID"},
             private_context=private,
         )
-        self.assertEqual(result["assets"]["STRC"]["strategy_delta"], "KEEP_INCOME_CORE")
-        self.assertEqual(result["assets"]["SATA"]["strategy_delta"], "WAIT_AS_INCOME_BACKUP")
+        self.assertEqual(result["assets"]["STRC"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
+        self.assertIsNone(result["income_engine"]["coverage_ratio"])
+        self.assertEqual(result["assets"]["SATA"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
         self.assertEqual(result["assets"]["MSTR"]["decision_support"], "BLOCKED")
 
     def test_d_execute_routes_back_to_sata_not_into_strc(self):

@@ -400,6 +400,7 @@ def build_evidence_pack(
     treasury_valuation_inputs: dict[str, Any] | None = None,
     btc_long_horizon_context: dict[str, Any] | None = None,
     portfolio_allocation_inputs: dict[str, Any] | None = None,
+    fixed_income_inputs: dict[str, Any] | None = None,
     btc_etf_archive: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(source_gate, dict):
@@ -559,11 +560,6 @@ def build_evidence_pack(
             research_context=assumption_watch_context,
         )
         pack["assumption_watch"] = assumption_watch
-        pack["asset_strategy_delta"] = build_asset_strategy_delta(
-            btc_entry_gate=btc_entry_gate,
-            assumption_watch=assumption_watch,
-            private_context=private_context,
-        )
     pack["pack_state"] = _pack_state(source_gate, evidence_by_family, changes)
     pack["btc_bull_validation"] = evaluate_btc_bull_validation(
         pack_state=pack["pack_state"],
@@ -620,15 +616,22 @@ def build_evidence_pack(
             inputs=portfolio_allocation_inputs,
         )
         pack.update(portfolio_bundle)
-        if "asset_strategy_delta" in pack:
-            pack["asset_strategy_delta"] = build_asset_strategy_delta(
-                btc_entry_gate=btc_entry_gate,
-                assumption_watch=assumption_watch,
-                private_context=private_context,
-                portfolio_allocation_context=pack[
-                    "portfolio_allocation_context"
-                ],
-            )
+    # Income facts do not depend on BTC research. Preserve unrelated legacy
+    # bridges: an entirely absent income source is not a new market section.
+    income_facts_present = any(
+        isinstance(fact, dict) and fact.get("security_id") in {"SEC-STRC-PERP", "SATA"}
+        for event in (pack.get("issuer_announcement_wake") or {}).get("new_events", [])
+        for fact in event.get("normalized_facts", [])
+    )
+    capital_observed = ((private_context or {}).get("profile", {}).get("capital_reconciliation") or {}).get("broker_observed")
+    if assumption_watch_context is not None or fixed_income_inputs is not None or capital_observed is not None or income_facts_present:
+        pack["asset_strategy_delta"] = build_asset_strategy_delta(
+            btc_entry_gate=btc_entry_gate, assumption_watch=assumption_watch,
+            private_context=private_context,
+            portfolio_allocation_context=pack.get("portfolio_allocation_context"),
+            issuer_announcement_wake=pack.get("issuer_announcement_wake"),
+            fixed_income_inputs=fixed_income_inputs, at_ms=generated_at,
+        )
     if btc_etf_archive is not None:
         add_btc_etf_evidence(pack, btc_etf_archive)
     pack["evidence_pack_hash"] = _sha256(pack)

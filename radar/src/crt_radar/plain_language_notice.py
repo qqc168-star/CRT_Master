@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -158,37 +159,43 @@ def _top_change_lines(pack: dict[str, Any], limit: int = 3) -> list[str]:
             result.append(f"{label}{direction}")
     return result
 
-def _position_line(private_context: dict[str, Any] | None) -> str:
-    if not isinstance(private_context, dict) or private_context.get("state") != "AVAILABLE":
+def _position_line(private_context: dict[str, Any] | None, income: dict[str, Any] | None = None) -> str:
+    has_income = isinstance(income, dict) and income.get("schema_version") == "CRT_DUAL_FIXED_INCOME_V0.1"
+    if (not isinstance(private_context, dict) or private_context.get("state") != "AVAILABLE") and not has_income:
         return "\u672c\u6a5f\u79c1\u4eba\u6301\u5009\u8a2d\u5b9a\u5c1a\u4e0d\u53ef\u7528\uff0c\u672c\u6b21\u4e0d\u505a\u500b\u4eba\u6301\u5009\u5c0d\u7167\u3002"
-    profile = private_context.get("profile", {})
+    profile = (private_context or {}).get("profile", {})
     status = profile.get("capital_state_status") or {}
+    warning = ""
     if status.get("state") in {"BLOCKED", "PARTIAL", "STALE"}:
-        return (
+        warning = (
             f"本次券商資本資料為 {status['state']}（資料資格），原因：{status.get('reason', 'UNKNOWN')}。"
             "既有資本建議不得視為當前合格建議；需依受影響的決策範圍補齊證據後重新驗證。"
             "歷史持倉及配息設定（含 STRC）不能代替本次合格券商觀測。"
         )
-    strc = profile.get("strc", {})
-    derived = profile.get("derived", {})
-    shares = strc.get("shares")
-    rate = strc.get("current_annual_distribution_rate")
-    six_month_cash = derived.get("six_month_cash_usd")
-    minimum = derived.get("minimum_shares_for_target")
-    if not all(isinstance(value, (int, float)) and not isinstance(value, bool)
-               for value in (rate, six_month_cash)):
-        reconciliation = profile.get("capital_reconciliation") or {}
-        broker = reconciliation.get("broker_observed") or {}
-        holdings = ", ".join(f'{row["asset"]} {row["quantity"]} 股' for row in broker.get("holdings", []))
-        return (
-            f"本次券商資本觀測狀態為 {reconciliation.get('state', 'BLOCKED')}（資本資料資格），"
-            f"已觀測持倉：{holdings or '尚無可驗證持倉'}；"
-            "歷史配息政策資料不足，配息與目標股數主張受阻，不推估數值。"
-        )
-    return (
-        f"\u672c\u6a5f\u8a2d\u5b9a\u70ba STRC {shares} \u80a1\u3001\u76ee\u524d\u52d5\u614b\u914d\u606f\u7387 {float(rate) * 100:.2f}%\uff1b"
-        f"\u4f30\u7b97\u672a\u6263\u7a05\u534a\u5e74\u73fe\u91d1\u70ba ${float(six_month_cash):,.2f}\uff0c\u76ee\u6a19\u6240\u9700\u81f3\u5c11 {minimum} \u80a1\u3002"
-    )
+    if not has_income:
+        return warning or "STRC／SATA 當前收益證據尚未建立；歷史持股、利率與 derived 現金欄位僅保留原有語義，不能作當前收益或目標批准。"
+    def value(number):
+        return "未知" if number is None else f"${number:,.2f}"
+    lines = [warning] if warning else []
+    for asset, row in income["assets"].items():
+        terms = row["current_terms"]
+        rate = f"{terms['annual_rate'] * 100:.2f}%" if terms["state"] == "AVAILABLE" else "未知（正式生效來源未合格）"
+        lines.append(f"{asset} 合格當前公告利率：{rate}。")
+        lines.append(f"{asset}：合格現況股數 {row['shares'] if row['shares'] is not None else '未知'}；"
+                     f"已入帳毛／淨收益 {value(row['credited']['gross_usd'])}／{value(row['credited']['net_usd'])}，"
+                     f"其中仍可用 {value(row['credited'].get('available_cash_usd'))}；"
+                     f"已宣告應收毛／估計稅後 {value(row['receivable']['gross_usd'])}／{value(row['receivable']['net_usd'])}；"
+                     f"未宣告未來毛／估計稅後 {value(row['future_undeclared']['gross_usd'])}／{value(row['future_undeclared']['net_usd'])}（假設成立才適用，非確定現金）。")
+        for part in ("credited", "receivable", "future_undeclared"):
+            if row[part]["state"] == "BLOCKED":
+                lines.append(f"{asset} {part} 受阻：{row[part]['reason']}。")
+    goal = income["income_goal"]
+    remittance = (datetime.fromtimestamp(goal["first_remittance_date_ms"] / 1000, timezone.utc).date().isoformat()
+                  if goal["first_remittance_date_ms"] is not None else "未確認")
+    lines.append(f"半年目標（{goal.get('basis', '尚未確認毛／淨基準')}）{value(goal['target_usd'])}；條件式差額 {value(goal['gap_usd'])}；首次匯回日 "
+                 f"{remittance}。"
+                 "應收與估算不等於可動用資金；無交易授權。")
+    return " ".join(lines)
 
 
 def _market_health_events(pack: dict[str, Any]) -> list[str]:
@@ -462,7 +469,7 @@ def build_plain_language_notice(pack: dict[str, Any]) -> dict[str, Any]:
         "title": title,
         "what_happened": what_happened,
         "why_it_matters": why_it_matters,
-        "position_context": _position_line(pack.get("private_context")),
+        "position_context": _position_line(pack.get("private_context"), (pack.get("asset_strategy_delta") or {}).get("income_engine")),
         "data_limits": blockers,
         "dvol_regime_watch": dvol,
         "mstr_asst_market_health": deepcopy(

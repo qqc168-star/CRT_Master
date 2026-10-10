@@ -1,8 +1,341 @@
 from __future__ import annotations
 
+import calendar
+import re
+from copy import deepcopy
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from typing import Any
 
+from .broker_capital_observation import _hash, validate_broker_observation
+from .issuer_announcement_runner import validate_issuer_announcement_wake
+
 SCHEMA_VERSION = "CRT_ASSET_STRATEGY_DELTA_V0.2"
+INCOME_INPUT_SCHEMA = "CRT_FIXED_INCOME_INPUTS_V0.1"
+INCOME_SCHEMA = "CRT_DUAL_FIXED_INCOME_V0.1"
+_ISSUERS = {"STRC": ("STRATEGY_INC", "CIK-0001050446", "SEC-STRC-PERP", "STRATEGY_OFFICIAL_CAPITAL_DISCLOSURE"),
+            "SATA": ("STRIVE_INC", "CIK-0001920406", "SATA", "STRIVE_OFFICIAL_CAPITAL_DISCLOSURE")}
+_FORECAST_INVALIDATION = {"RATE_CHANGE", "POSITION_CHANGE", "TAX_CHANGE", "ISSUER_NONPAYMENT", "CAPITAL_QUALIFICATION_LOST"}
+
+
+def _amount(value: Any) -> Decimal:
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError("INCOME_AMOUNT_INVALID")
+    try:
+        number = Decimal(str(value))
+    except InvalidOperation as exc:
+        raise ValueError("INCOME_AMOUNT_INVALID") from exc
+    if not number.is_finite() or number < 0:
+        raise ValueError("INCOME_AMOUNT_INVALID")
+    return number
+
+
+def _money(value: Decimal) -> float:
+    return float(value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+
+def _component(reason: str) -> dict[str, Any]:
+    return {"state": "BLOCKED", "gross_usd": None, "net_usd": None, "reason": reason}
+
+
+def _period(inputs: dict[str, Any]) -> dict[str, int] | None:
+    period = inputs.get("period") or {}
+    try:
+        start, end = period["start_ms"], period["end_ms"]
+        if type(start) is not int or type(end) is not int or not 0 < start < end:
+            return None
+        return {"start_ms": start, "end_ms": end}
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _six_month_period(period: dict[str, int] | None) -> bool:
+    if period is None:
+        return False
+    try:
+        start, end = period["start_ms"], period["end_ms"]
+        date = datetime.fromtimestamp(start / 1000, timezone.utc)
+        month = date.month + 6
+        year = date.year + (month - 1) // 12
+        month = (month - 1) % 12 + 1
+        six_month_end = date.replace(year=year, month=month, day=min(date.day, calendar.monthrange(year, month)[1]))
+        return end == int(six_month_end.timestamp() * 1000)
+    except (TypeError, ValueError, OverflowError, OSError):
+        return False
+
+
+def _verified(record: Any, *, source: str, at_ms: int, period: dict[str, int] | None) -> bool:
+    """Verify supplied evidence, not create confirmation or collection timestamps."""
+    expected_state = {"IBKR_STATEMENT": "AVAILABLE", "TAX_EVIDENCE": "AVAILABLE",
+                      "USER_CONFIRMED": "CONFIRMED", "ANALYST_ASSUMPTIONS": "ASSUMPTIONS_ONLY"}[source]
+    if (not isinstance(record, dict) or period is None or record.get("source") != source
+            or record.get("state") != expected_state):
+        return False
+    try:
+        ref = record["source_ref"]
+        return (record.get("proof_hash") == _hash({k: v for k, v in record.items() if k != "proof_hash"})
+                and record.get("period") == period
+                and type(record.get("as_of_ms")) is int and 0 < record["as_of_ms"] <= at_ms
+                and type(record.get("valid_until_ms")) is int and at_ms < record["valid_until_ms"]
+                and isinstance(ref, dict) and re.fullmatch(r"[0-9a-f]{64}", ref.get("evidence_hash", "")) is not None
+                and type(ref.get("source_as_of_ms")) is int and 0 < ref["source_as_of_ms"] <= record["as_of_ms"])
+    except (ValueError, TypeError, KeyError):
+        return False
+
+
+def _public_proof(record: dict[str, Any]) -> dict[str, Any]:
+    # Never export broker account identifiers, paths or full statement rows.
+    return {"source": record["source"], "proof_hash": record["proof_hash"],
+            "evidence_hash": record["source_ref"]["evidence_hash"],
+            "source_as_of_ms": record["source_ref"]["source_as_of_ms"]}
+
+
+def _official_terms(wakes: list[Any], *, at_ms: int) -> dict[str, list[dict[str, Any]]]:
+    terms = {asset: [] for asset in _ISSUERS}
+    seen = set()
+    for wake in wakes:
+        if wake is None:
+            continue
+        try:
+            validated = validate_issuer_announcement_wake(wake, generated_at_ms=at_ms)
+        except ValueError:
+            continue
+        for event in validated["new_events"]:
+            if event.get("source_type") != "SEC_FILING" or event.get("document_state") != "VALID" or event.get("policy_stage") == "PROPOSED":
+                continue
+            for fact in event.get("normalized_facts", []):
+                if not isinstance(fact, dict):
+                    continue
+                for asset, (event_issuer, issuer, security, source) in _ISSUERS.items():
+                    ref = fact.get("source_ref") or {}
+                    metadata = fact.get("distribution_terms") or {}
+                    if not isinstance(ref, dict) or not isinstance(metadata, dict):
+                        continue
+                    if (event["issuer_id"] != event_issuer or fact.get("issuer_id") != issuer or fact.get("security_id") != security
+                            or fact.get("fact_type") != "DISTRIBUTION_RATE" or fact.get("unit") != "PERCENT_APR"
+                            or fact.get("quality_state") != "VALID_REPORTED" or ref.get("source_id") != source
+                            or ref.get("evidence_hash") != event.get("document_evidence_hash")
+                            or not re.fullmatch(r"[0-9a-f]{64}", ref.get("evidence_hash", ""))
+                            or type(ref.get("source_as_of_ms")) is not int or not 0 < ref["source_as_of_ms"] <= at_ms
+                            or metadata.get("state") != "REPORTED" or not isinstance(ref.get("document_id"), str)):
+                        continue
+                    key = (asset, ref["document_id"], ref["evidence_hash"])
+                    if key in seen:
+                        continue
+                    try:
+                        rate = _amount(fact["value"])
+                        if rate > 100:
+                            continue
+                    except (ValueError, KeyError):
+                        continue
+                    seen.add(key)
+                    allowed = ("state", "rate_effective_at_ms", "rate_valid_until_ms", "stated_amount_usd",
+                               "declared_dividend_per_share_usd", "ex_dividend_date_ms", "record_date_ms", "payment_date_ms")
+                    terms[asset].append({**{k: deepcopy(metadata.get(k)) for k in allowed}, "annual_rate": float(rate / 100),
+                                         "source_ref": deepcopy(ref), "announcement_at_ms": ref["source_as_of_ms"]})
+    return terms
+
+
+def _tax_rate(inputs: dict[str, Any], asset: str, period: Any, at_ms: int) -> Decimal | None:
+    tax = inputs.get("tax")
+    if not _verified(tax, source="TAX_EVIDENCE", at_ms=at_ms, period=period) or tax.get("verification_state") != "EVIDENCE_VERIFIED":
+        return None
+    try:
+        rate = _amount(tax.get("withholding_rates", {}).get(asset))
+        return rate if rate <= 1 else None
+    except ValueError:
+        return None
+
+
+def build_fixed_income_summary(*, private_context: Any, issuer_announcement_wake: Any = None,
+                               inputs: Any = None, at_ms: int = 0) -> dict[str, Any]:
+    """Extend the existing income engine; independent of BTC research or trades.
+
+    Inputs are read-only, source-bound records, never synthesized from legacy
+    settings. An integrity hash is not proof of real-world tax/issuer accuracy.
+    """
+    inputs = inputs if isinstance(inputs, dict) and inputs.get("schema_version") == INCOME_INPUT_SCHEMA else {}
+    period = _period(inputs)
+    profile = _private_profile(private_context) or {}
+    broker = validate_broker_observation((profile.get("capital_reconciliation") or {}).get("broker_observed"), at_ms=at_ms)
+    observation = broker.get("observation") if broker["state"] == "AVAILABLE" else None
+    terms = _official_terms([issuer_announcement_wake, inputs.get("issuer_announcement_wake")], at_ms=at_ms)
+    statement = inputs.get("broker_statement")
+    statement_ok = (observation is not None and _verified(statement, source="IBKR_STATEMENT", at_ms=at_ms, period=period)
+                    and statement.get("observation_hash") == observation["observation_hash"]
+                    and statement["source_ref"]["source_as_of_ms"] == statement["as_of_ms"] == observation["observed_at_ms"]
+                    and statement.get("same_account_verified") is True and statement.get("currency") == "USD"
+                    and statement.get("ledger_complete") is True
+                    and isinstance(statement.get("transactions"), list))
+    forecast = inputs.get("forecast_assumptions")
+    forecast_ok = (_verified(forecast, source="ANALYST_ASSUMPTIONS", at_ms=at_ms, period=period)
+                   and _six_month_period(period)
+                   and forecast.get("basis") == "SIX_MONTH_FLAT_RATE"
+                   and forecast.get("constant_holdings") is True and forecast.get("constant_rate") is True
+                   and isinstance(forecast.get("invalidation"), list) and bool(forecast["invalidation"])
+                   and all(isinstance(v, str) and v in _FORECAST_INVALIDATION for v in forecast["invalidation"])
+                   and period["start_ms"] <= at_ms < period["end_ms"])
+    assets = {}
+    for asset in _ISSUERS:
+        quantity = None if observation is None else next((r["quantity"] for r in observation["holdings"] if r["asset"] == asset), 0.0)
+        if quantity is not None and quantity < 0:
+            quantity = None
+        active = [t for t in terms[asset] if type(t.get("rate_effective_at_ms")) is int
+                  and type(t.get("rate_valid_until_ms")) is int
+                  and 0 < t["rate_effective_at_ms"] <= at_ms < t["rate_valid_until_ms"]]
+        distinct = {(t["annual_rate"], t.get("stated_amount_usd")) for t in active}
+        current = active[0] if len(distinct) == 1 else None
+        row = {"holding_state": "AVAILABLE" if quantity is not None else "BLOCKED", "holding_reason": broker["reason"], "shares": quantity,
+               "observation_hash": observation["observation_hash"] if observation else None,
+               "current_terms": {**current, "state": "AVAILABLE"} if current else
+                                {"state": "BLOCKED", "reason": "OFFICIAL_EFFECTIVE_RATE_MISSING_OR_CONFLICTING"},
+               "credited": _component("BROKER_DIVIDEND_LEDGER_UNQUALIFIED"),
+               "receivable": _component("EX_DATE_ENTITLEMENT_UNQUALIFIED"),
+               "future_undeclared": _component("FORECAST_INPUTS_UNQUALIFIED")}
+        tax_rate = _tax_rate(inputs, asset, period, at_ms)
+        declared_future = Decimal(0)
+        if statement_ok:
+            try:
+                transactions = [r for r in statement["transactions"] if r.get("asset") == asset and r.get("transaction_type") == "DIVIDEND"]
+                identities = [r["distribution_document_id"] for r in transactions]
+                if len(set(identities)) != len(identities):
+                    raise ValueError("DUPLICATE_DIVIDEND_CREDIT")
+                received_gross = received_net = available = Decimal(0)
+                credited_documents = set()
+                for receipt in transactions:
+                    clock = receipt["credited_at_ms"]
+                    if type(clock) is not int or not period["start_ms"] <= clock <= at_ms or clock >= period["end_ms"]:
+                        raise ValueError("DIVIDEND_CREDIT_CLOCK_INVALID")
+                    gross, net, cash = (_amount(receipt[key]) for key in ("gross_usd", "net_usd", "available_cash_usd"))
+                    if net > gross or cash > net:
+                        raise ValueError("DIVIDEND_CASH_INVALID")
+                    received_gross += gross
+                    received_net += net
+                    available += cash
+                    credited_documents.add(receipt["distribution_document_id"])
+                # Aggregate credited income is not all necessarily still spendable.
+                if available > _amount(observation["funds"]["available_funds_usd"]) or available > _amount(observation["funds"]["cash_usd"]):
+                    raise ValueError("DIVIDEND_AVAILABLE_CASH_EXCEEDS_BROKER_FUNDS")
+                row["credited"] = {"state": "AVAILABLE", "gross_usd": _money(received_gross), "net_usd": _money(received_net),
+                                   "available_cash_usd": _money(available), "source": _public_proof(statement),
+                                   "credited_at_ms": [r["credited_at_ms"] for r in transactions]}
+                if statement.get("entitlements_complete") is not True or not isinstance(statement.get("entitlements"), list):
+                    raise ValueError("EX_DATE_ENTITLEMENT_UNQUALIFIED")
+                receivable = Decimal(0)
+                declarations = []
+                supplied_entitlements = [e for e in statement["entitlements"] if e.get("asset") == asset]
+                declared_documents = {t["source_ref"]["document_id"] for t in terms[asset]
+                                      if t.get("declared_dividend_per_share_usd") is not None}
+                if any(e.get("distribution_document_id") not in declared_documents | credited_documents for e in supplied_entitlements):
+                    raise ValueError("DECLARED_DISTRIBUTION_SOURCE_UNQUALIFIED")
+                seen_declarations = set()
+                for term in terms[asset]:
+                    payment = term.get("payment_date_ms")
+                    if type(payment) is not int or not period["start_ms"] <= payment < period["end_ms"] or term.get("declared_dividend_per_share_usd") is None:
+                        continue
+                    document = term["source_ref"]["document_id"]
+                    if document in seen_declarations:
+                        raise ValueError("DISTRIBUTION_DOCUMENT_CONFLICT")
+                    seen_declarations.add(document)
+                    if document in credited_documents:
+                        if payment >= at_ms:
+                            declared_future += sum((_amount(r["gross_usd"]) for r in transactions
+                                                    if r["distribution_document_id"] == document), Decimal(0))
+                        continue
+                    matches = [e for e in statement["entitlements"] if e.get("asset") == asset and e.get("distribution_document_id") == document]
+                    if len(matches) != 1 or matches[0].get("ex_dividend_date_ms") != term.get("ex_dividend_date_ms") or type(term.get("ex_dividend_date_ms")) is not int or term["ex_dividend_date_ms"] > at_ms:
+                        raise ValueError("EX_DATE_ENTITLEMENT_UNQUALIFIED")
+                    entitlement = matches[0]
+                    qty = _amount(entitlement["eligible_quantity"])
+                    if entitlement.get("eligibility_verified") is not True:
+                        raise ValueError("EX_DATE_ENTITLEMENT_UNQUALIFIED")
+                    record_date = term.get("record_date_ms")
+                    if type(record_date) is not int or not term["ex_dividend_date_ms"] <= record_date <= payment:
+                        raise ValueError("DISTRIBUTION_DATE_ORDER_INVALID")
+                    gross = qty * _amount(term["declared_dividend_per_share_usd"])
+                    receivable += gross
+                    if payment >= at_ms:
+                        declared_future += gross
+                    declarations.append({"source_ref": term["source_ref"], "gross_usd": _money(gross),
+                                         "ex_dividend_date_ms": term["ex_dividend_date_ms"], "payment_date_ms": payment,
+                                         "record_date_ms": term.get("record_date_ms"), "eligible_quantity": float(qty)})
+                row["receivable"] = {"state": "AVAILABLE", "gross_usd": _money(receivable),
+                                     "net_usd": _money(receivable * (1 - tax_rate)) if tax_rate is not None else None,
+                                     "net_state": "ESTIMATE" if tax_rate is not None else "BLOCKED_TAX_UNKNOWN",
+                                     "tax_source": _public_proof(inputs["tax"]) if tax_rate is not None else None,
+                                     "declarations": declarations, "source": _public_proof(statement)}
+            except (KeyError, TypeError, ValueError) as exc:
+                # Receipt facts already established remain independent of missing entitlements.
+                row["receivable"] = _component(str(exc))
+        if quantity is not None and forecast_ok:
+            if quantity == 0:
+                row["future_undeclared"] = {"state": "ESTIMATE", "gross_usd": 0.0, "net_usd": 0.0,
+                                           "reason": "CONFIRMED_ZERO_CURRENT_HOLDING", "assumptions": _public_proof(forecast)}
+            elif current is not None and current.get("stated_amount_usd") is not None and row["receivable"]["state"] == "AVAILABLE":
+                try:
+                    remainder = Decimal(period["end_ms"] - at_ms) / Decimal(period["end_ms"] - period["start_ms"])
+                    estimate = (_amount(quantity) * _amount(current["stated_amount_usd"]) * _amount(current["annual_rate"]) / 2 * remainder)
+                    future = max(Decimal(0), estimate - declared_future)
+                    row["future_undeclared"] = {"state": "ESTIMATE", "gross_usd": _money(future),
+                                               "net_usd": _money(future * (1 - tax_rate)) if tax_rate is not None else None,
+                                               "net_state": "ESTIMATE" if tax_rate is not None else "BLOCKED_TAX_UNKNOWN",
+                                               "tax_source": _public_proof(inputs["tax"]) if tax_rate is not None else None,
+                                               "assumptions": _public_proof(forecast), "invalidation": deepcopy(forecast["invalidation"]),
+                                               "formula": "shares * stated_amount * annual_rate / 2 * remaining_period_fraction - declared_future_gross",
+                                               "source_ref": current["source_ref"], "is_guaranteed": False}
+                except ValueError:
+                    row["future_undeclared"] = _component("FORECAST_AMOUNT_INVALID")
+        assets[asset] = row
+    if observation is not None:
+        available = [r["credited"].get("available_cash_usd") for r in assets.values()]
+        if all(v is not None for v in available) and sum((_amount(v) for v in available), Decimal(0)) > min(
+                _amount(observation["funds"]["cash_usd"]), _amount(observation["funds"]["available_funds_usd"])):
+            for row in assets.values():
+                row["credited"]["available_cash_usd"] = None
+                row["credited"]["available_cash_state"] = "BLOCKED_AGGREGATE_EXCEEDS_BROKER_FUNDS"
+    totals = {}
+    for component in ("credited", "receivable", "future_undeclared"):
+        total = {}
+        for basis in ("gross_usd", "net_usd") + (("available_cash_usd",) if component == "credited" else ()):
+            known = [r[component].get(basis) for r in assets.values() if r[component].get(basis) is not None]
+            total[basis] = _money(sum((_amount(v) for v in known), Decimal(0))) if len(known) == 2 else None
+            total[f"known_subtotal_{basis}"] = _money(sum((_amount(v) for v in known), Decimal(0))) if known else None
+        total["missing_assets"] = [a for a, r in assets.items() if r[component].get("gross_usd") is None]
+        total["state"] = "BLOCKED" if total["missing_assets"] else "ESTIMATE" if component == "future_undeclared" else "AVAILABLE"
+        totals[component] = total
+    goal = inputs.get("income_goal")
+    goal_result = {"state": "BLOCKED", "reason": "CURRENT_USER_INCOME_GOAL_UNCONFIRMED", "target_usd": None,
+                   "gap_usd": None, "coverage_ratio": None, "first_remittance_date_ms": None}
+    if (_verified(goal, source="USER_CONFIRMED", at_ms=at_ms, period=period)
+            and _six_month_period(period) and period["start_ms"] <= at_ms < period["end_ms"]
+            and type(goal.get("confirmed_at_ms")) is int and goal["confirmed_at_ms"] == goal["source_ref"]["source_as_of_ms"]
+            and isinstance(goal.get("version"), str) and bool(goal["version"])):
+        try:
+            target = _amount(goal["target_usd"])
+            basis = {"GROSS": "gross_usd", "NET": "net_usd"}.get(goal.get("basis"))
+            if target <= 0 or basis is None:
+                raise ValueError("INCOME_GOAL_INVALID")
+            remittance = goal.get("first_remittance_date_ms")
+            if type(remittance) is not int or remittance < at_ms:
+                remittance = None
+            goal_result.update(target_usd=float(target), basis=goal["basis"], source=_public_proof(goal), first_remittance_date_ms=remittance)
+            goal_result["reason"] = "INCOME_COMPONENTS_OR_NET_QUALIFICATION_INCOMPLETE"
+            goal_result["first_remittance_state"] = "CONFIRMED" if remittance is not None else "UNCONFIRMED"
+            values = [totals[c][basis] for c in totals]
+            if all(v is not None for v in values):
+                cash = sum((_amount(v) for v in values), Decimal(0))
+                goal_result.update(state="ESTIMATE", reason="CONDITIONAL_INCOME_NOT_SPENDABLE_CASH", six_month_income_usd=_money(cash),
+                                   gap_usd=_money(max(Decimal(0), target - cash)), coverage_ratio=float(cash / target))
+        except (KeyError, ValueError):
+            goal_result["reason"] = "INCOME_GOAL_INVALID"
+    result = {"schema_version": INCOME_SCHEMA, "state": "AVAILABLE" if all(r["state"] != "BLOCKED" for r in totals.values()) else "PARTIAL",
+              "as_of_ms": at_ms, "period": period, "assets": assets, "totals": totals, "income_goal": goal_result,
+              "six_month_target_usd": goal_result["target_usd"], "six_month_cash_usd": None, "coverage_ratio": goal_result["coverage_ratio"],
+              "goal_covered": None, "reason": "SOURCE_QUALIFIED_FACTS_WITH_SEPARATE_ESTIMATES",
+              "legacy_strc_derived": deepcopy(profile.get("derived", {})), "legacy_policy_state": "HISTORICAL_USER_PROFILE_INPUTS",
+              "action_output": "NONE", "capital_decision_authority": "USER_ONLY", "machine_execution": "FORBIDDEN"}
+    result["summary_hash"] = _hash(result)
+    return result
 
 
 def _private_profile(private_context: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -18,6 +351,9 @@ def build_asset_strategy_delta(
     assumption_watch: dict[str, Any] | None,
     private_context: dict[str, Any] | None,
     portfolio_allocation_context: dict[str, Any] | None = None,
+    issuer_announcement_wake: dict[str, Any] | None = None,
+    fixed_income_inputs: dict[str, Any] | None = None,
+    at_ms: int = 0,
 ) -> dict[str, Any]:
     gate = btc_entry_gate if isinstance(btc_entry_gate, dict) else {}
     transition = str(gate.get("transition_state", "TRANSITION_UNRESOLVED"))
@@ -36,7 +372,6 @@ def build_asset_strategy_delta(
         eligibility = "WATCH"
         eligibility_guard_reason = "PROBE_DOWNGRADED_UNTIL_CONTROL_TRANSFER_LOOP_CLOSES"
     watch = assumption_watch if isinstance(assumption_watch, dict) else {}
-    profile = _private_profile(private_context)
     allocation = (
         portfolio_allocation_context
         if isinstance(portfolio_allocation_context, dict)
@@ -52,34 +387,13 @@ def build_asset_strategy_delta(
     elif transition.startswith("BULL_ACCEPTANCE"):
         btc_delta = "STRENGTHEN_WATCH"
 
-    income = {
-        "state": "BLOCKED",
-        "six_month_target_usd": None,
-        "six_month_cash_usd": None,
-        "coverage_ratio": None,
-        "goal_covered": None,
-        "reason": "PRIVATE_PROFILE_UNAVAILABLE",
-    }
-    if profile is not None:
-        goal = profile.get("cash_goal") if isinstance(profile.get("cash_goal"), dict) else {}
-        derived = profile.get("derived") if isinstance(profile.get("derived"), dict) else {}
-        target = goal.get("six_month_target_usd")
-        cash = derived.get("six_month_cash_usd")
-        covered = derived.get("goal_covered_at_current_rate")
-        if isinstance(target, (int, float)) and target > 0 and isinstance(cash, (int, float)):
-            income = {
-                "state": "AVAILABLE",
-                "six_month_target_usd": float(target),
-                "six_month_cash_usd": float(cash),
-                "coverage_ratio": float(cash) / float(target),
-                "goal_covered": bool(covered),
-                "reason": "PRIVATE_PROFILE_DERIVED_CASH_FLOW",
-            }
+    income = build_fixed_income_summary(private_context=private_context, issuer_announcement_wake=issuer_announcement_wake,
+                                        inputs=fixed_income_inputs, at_ms=at_ms)
 
     strc_delta = "BLOCKED_INCOME_PROFILE"
     sata_delta = "BLOCKED_INCOME_PROFILE"
-    if income["state"] == "AVAILABLE":
-        if income["goal_covered"]:
+    if income["income_goal"]["state"] == "ESTIMATE":
+        if income["income_goal"]["gap_usd"] == 0:
             strc_delta = "KEEP_INCOME_CORE"
             sata_delta = "WAIT_AS_INCOME_BACKUP"
         else:
@@ -101,7 +415,7 @@ def build_asset_strategy_delta(
 
     result = {
         "schema_version": SCHEMA_VERSION,
-        "state": "READY_FOR_ANALYST" if gate else "BLOCKED",
+        "state": "READY_FOR_ANALYST" if gate else "PARTIAL_INDEPENDENT_INCOME_FACTS",
         "btc_transition_state": transition,
         "btc_decision_eligibility": eligibility,
         "raw_btc_decision_eligibility": raw_eligibility,
@@ -119,12 +433,13 @@ def build_asset_strategy_delta(
                 "role": "INCOME_ENGINE",
                 "strategy_delta": strc_delta,
                 "decision_support": "HOLD_REVIEW_ONLY",
-                "quantitative": income,
+                "quantitative": income["assets"]["STRC"],
             },
             "SATA": {
                 "role": "INCOME_BACKUP",
                 "strategy_delta": sata_delta,
                 "decision_support": "WAIT_OR_REVIEW_ONLY",
+                "quantitative": income["assets"]["SATA"],
             },
             "MSTR": {
                 "role": "GROWTH_ENGINE",

@@ -273,6 +273,44 @@ def _as_of_ms(text: str) -> int | None:
     )
 
 
+def distribution_terms(text: str, asset: str) -> dict[str, Any]:
+    """Add explicit income dates; legacy fact effective_at remains disclosure time.
+
+    Ambiguous multi-security narratives deliberately supply no income terms.
+    Neither SEC acceptance nor a proposal proves a distribution is effective.
+    """
+    income_assets = {symbol for symbol in ("STRC", "SATA")
+                     if re.search(rf"\b{symbol}\b[^.!?]{{0,220}}\b(?:dividend|distribution)\s+rate\b", text, re.I)}
+    rates = re.findall(r"\b(?:dividend|distribution)\s+rate(?:\s+of|\s+is|:)?\s*(\d+(?:\.\d+)?)\s*%", text, re.I)
+    ambiguous = len(income_assets) > 1 or len(set(rates)) > 1
+    proposed = bool(re.search(r"\bpropos(?:e|es|ed|al)\b|if approved|subject to .* approval", text, re.I))
+    result = {"state": "AMBIGUOUS" if ambiguous else "PROPOSED" if proposed else "REPORTED"}
+    if ambiguous or proposed or not re.search(rf"\b{asset}\b", text, re.I):
+        return result
+    # Start at this security's rate statement. Stop before another income
+    # security; preceding/following terms cannot be borrowed across assets.
+    anchor = re.search(rf"\b{asset}\b[^.!?]{{0,220}}\b(?:dividend|distribution)\s+rate\b", text, re.I)
+    if anchor is None:
+        return {"state": "AMBIGUOUS"}
+    text = text[anchor.start():]
+    other_asset = "SATA" if asset == "STRC" else "STRC"
+    other = re.search(rf"\b{other_asset}\b", text, re.I)
+    if other is not None:
+        text = text[:other.start()]
+    # Do not infer the end of a variable-rate period from the ingestion clock.
+    result["rate_effective_at_ms"] = _date_after(text, r"\b(?:rate (?:is |was )?effective(?: as of)?|rate becomes effective)\b")
+    end = _date_after(text, r"\b(?:rate (?:is )?valid through|rate applies through)\b")
+    result["rate_valid_until_ms"] = None if end is None else end + 86_400_000
+    stated = re.search(r"\bstated amount(?: of| is|:)?\s*\$([\d,]+(?:\.\d+)?)", text, re.I)
+    result["stated_amount_usd"] = float(stated.group(1).replace(",", "")) if stated else None
+    dividend = re.search(r"\bdeclared\b.{0,100}?\bdividend\b.{0,60}?\$([\d,]+(?:\.\d+)?)\s*(?:per share|a share)", text, re.I)
+    result["declared_dividend_per_share_usd"] = float(dividend.group(1).replace(",", "")) if dividend else None
+    for key, label in (("ex_dividend_date_ms", r"\bex[- ]dividend date\b"),
+                       ("record_date_ms", r"\brecord date\b"), ("payment_date_ms", r"\bpayment date\b")):
+        result[key] = _date_after(text, label)
+    return result
+
+
 def _blocker(
     code: str,
     affected_ids: list[str],
@@ -560,6 +598,7 @@ def build_strategy_capital_reflexivity_input(
                     source_ref=source_ref,
                 )
             )
+            facts[-1]["distribution_terms"] = distribution_terms(text, "STRC")
 
         for fact_type, value in (
             ("EX_DIVIDEND_DATE", ex_date),

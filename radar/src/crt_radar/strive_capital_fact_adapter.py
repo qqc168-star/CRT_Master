@@ -6,6 +6,7 @@ from html.parser import HTMLParser
 from typing import Any
 
 from .issuer_disclosure_tables import dated_table_facts, bind_table_context
+from .strategy_capital_fact_adapter import distribution_terms
 
 
 ADAPTER_SCHEMA_VERSION = "CRT_STRIVE_CAPITAL_FACT_ADAPTER_V0.1"
@@ -570,6 +571,9 @@ def build_strive_capital_reflexivity_input(
                     )
                 )
 
+    for fact in facts:
+        if fact["fact_type"] == "DISTRIBUTION_RATE":
+            fact["distribution_terms"] = distribution_terms(text, "SATA")
     bind_table_context(facts, table_facts)
     return _result(
         facts=facts,
