@@ -54,6 +54,7 @@ $TreasuryValuationInputs = Join-Path $RuntimeRoot "treasury\valuation-inputs.jso
 $IssuerCtArchive = Join-Path $RuntimeRoot "issuer_ct\archive"
 $TreasuryCompanyCtInputs = Join-Path $RuntimeRoot "treasury\company-ct-inputs.json"
 $PortfolioAllocationInputs = Join-Path $RuntimeRoot "private\portfolio-allocation-inputs.json"
+$FixedIncomeInputs = Join-Path $RuntimeRoot "private\fixed-income-inputs.json"
 
 if (-not (Test-Path $RadarRoot)) {
     throw "CRT Radar repo not found: $RadarRoot"
@@ -208,6 +209,9 @@ elseif (Test-Path -LiteralPath $TreasuryCompanyCtInputs) {
 }
 if (Test-Path -LiteralPath $PortfolioAllocationInputs) {
     $RunnerArgs += @("--portfolio-allocation-inputs", $PortfolioAllocationInputs)
+}
+if (Test-Path -LiteralPath $FixedIncomeInputs -PathType Leaf) {
+    $RunnerArgs += @("--fixed-income-inputs", $FixedIncomeInputs)
 }
 
 & $Python @RunnerArgs

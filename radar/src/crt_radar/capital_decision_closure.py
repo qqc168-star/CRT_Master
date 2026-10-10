@@ -295,6 +295,15 @@ def build_projection(payload, source, *, at_ms):
     require(source["evidence_validity"]["as_of_ms"] == expanded["market_context"].get("generated_at_ms"),
             "EVIDENCE_CLOCK_RELABEL_FORBIDDEN")
     broker = validate_broker_observation(source["broker_observation"], at_ms=at_ms).get("observation")
+    income = (expanded["market_context"].get("asset_strategy_delta") or {}).get("income_engine")
+    if isinstance(income, dict) and income.get("schema_version") == "CRT_DUAL_FIXED_INCOME_V0.1":
+        require(income.get("summary_hash") == digest({k: v for k, v in income.items() if k != "summary_hash"}),
+                "INCOME_SUMMARY_HASH_INVALID")
+        require(income.get("as_of_ms") == expanded["market_context"].get("generated_at_ms"), "INCOME_CLOCK_MISMATCH")
+        for row in income["assets"].values():
+            if row.get("holding_state") == "AVAILABLE":
+                require(broker is not None and row.get("observation_hash") == broker["observation_hash"],
+                        "INCOME_BROKER_LINEAGE_MISMATCH")
     # Preserve unavailable as null, never convert it to an empty account.
     capital = None if broker is None else {
         "source": broker["source"], "observed_at_ms": broker["observed_at_ms"],

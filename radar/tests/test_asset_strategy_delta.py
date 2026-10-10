@@ -18,16 +18,17 @@ class AssetStrategyDeltaTests(unittest.TestCase):
             },
         }
 
-    def test_income_engine_quantifies_coverage(self):
+    def test_historical_derived_cannot_qualify_current_income(self):
         result = build_asset_strategy_delta(
             btc_entry_gate={"transition_state": "TRANSITION_UNRESOLVED", "decision_eligibility": "WAIT"},
             assumption_watch={"state": "VALID"},
             private_context=self.private_context,
         )
         income = result["income_engine"]
-        self.assertAlmostEqual(income["coverage_ratio"], 1643.4 / 1500.0)
-        self.assertEqual(result["assets"]["STRC"]["strategy_delta"], "KEEP_INCOME_CORE")
-        self.assertEqual(result["assets"]["SATA"]["strategy_delta"], "WAIT_AS_INCOME_BACKUP")
+        self.assertIsNone(income["coverage_ratio"])
+        self.assertEqual(income["legacy_strc_derived"]["six_month_cash_usd"], 1643.4)
+        self.assertEqual(result["assets"]["STRC"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
+        self.assertEqual(result["assets"]["SATA"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
 
     def test_bull_probe_strengthens_growth_direction_but_mstr_and_asst_remain_blocked(self):
         result = build_asset_strategy_delta(
@@ -70,7 +71,7 @@ class AssetStrategyDeltaTests(unittest.TestCase):
         self.assertEqual(result["assets"]["MSTR"]["strategy_delta"], "WEAKEN")
         self.assertEqual(result["assets"]["ASST"]["strategy_delta"], "WEAKEN")
 
-    def test_income_gap_routes_to_review_not_trade(self):
+    def test_historical_goal_cannot_create_current_gap_or_trade(self):
         private = {
             "state": "AVAILABLE",
             "profile": {
@@ -83,8 +84,9 @@ class AssetStrategyDeltaTests(unittest.TestCase):
             assumption_watch={"state": "VALID"},
             private_context=private,
         )
-        self.assertEqual(result["assets"]["STRC"]["strategy_delta"], "INCOME_GAP_REVIEW")
-        self.assertEqual(result["assets"]["SATA"]["strategy_delta"], "INCOME_BACKUP_REVIEW")
+        self.assertIsNone(result["income_engine"]["income_goal"]["gap_usd"])
+        self.assertEqual(result["assets"]["STRC"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
+        self.assertEqual(result["assets"]["SATA"]["strategy_delta"], "BLOCKED_INCOME_PROFILE")
         self.assertEqual(result["action_output"], "NONE")
         self.assertEqual(result["capital_decision_authority"], "USER_ONLY")
 
