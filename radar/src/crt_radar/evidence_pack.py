@@ -387,6 +387,7 @@ def build_evidence_pack(
     broker_capital_observation: dict[str, Any] | None = None,
     user_capital_intent: dict[str, Any] | None = None,
     mstr_asst_market_health: dict[str, Any] | None = None,
+    qualified_equity_daily_source: dict[str, Any] | None = None,
     issuer_ratio_observation: dict[str, Any] | None = None,
     issuer_announcement_wake: dict[str, Any] | None = None,
     premarket_live_market_handoff: dict[str, Any] | None = None,
@@ -525,6 +526,13 @@ def build_evidence_pack(
                 mstr_asst_market_health
             )
         )
+    if qualified_equity_daily_source is not None:
+        from .ibkr_market_health_sources import FOUR_DAILY_SCHEMA, validate_four_asset_daily_proof
+        pack["qualified_equity_daily_source"] = deepcopy(qualified_equity_daily_source)
+        if (isinstance(qualified_equity_daily_source, dict)
+                and qualified_equity_daily_source.get("schema_version") == FOUR_DAILY_SCHEMA):
+            pack["qualified_equity_prices"] = validate_four_asset_daily_proof(
+                qualified_equity_daily_source, at_ms=generated_at)
     if (premarket_live_market_handoff is None) != (premarket_battle_map is None):
         raise ValueError("premarket handoff and battle map must be supplied together")
     if premarket_live_market_handoff is not None and premarket_battle_map is not None:
@@ -624,13 +632,15 @@ def build_evidence_pack(
         for fact in event.get("normalized_facts", [])
     )
     capital_observed = ((private_context or {}).get("profile", {}).get("capital_reconciliation") or {}).get("broker_observed")
-    if assumption_watch_context is not None or fixed_income_inputs is not None or capital_observed is not None or income_facts_present:
+    if (assumption_watch_context is not None or fixed_income_inputs is not None
+            or capital_observed is not None or income_facts_present or "qualified_equity_prices" in pack):
         pack["asset_strategy_delta"] = build_asset_strategy_delta(
             btc_entry_gate=btc_entry_gate, assumption_watch=assumption_watch,
             private_context=private_context,
             portfolio_allocation_context=pack.get("portfolio_allocation_context"),
             issuer_announcement_wake=pack.get("issuer_announcement_wake"),
             fixed_income_inputs=fixed_income_inputs, at_ms=generated_at,
+            qualified_equity_prices=pack.get("qualified_equity_prices"),
         )
     if btc_etf_archive is not None:
         add_btc_etf_evidence(pack, btc_etf_archive)

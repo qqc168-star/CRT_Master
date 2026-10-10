@@ -578,6 +578,16 @@ def _bridge_qualified_equity_prices(pack: dict[str, Any]) -> dict[str, Any]:
 
     proof = pack["qualified_equity_daily_source"]
     generated = pack["generated_at_ms"]
+    from .ibkr_market_health_sources import FOUR_DAILY_SCHEMA, validate_four_asset_daily_proof
+    if isinstance(proof, dict) and proof.get("schema_version") == FOUR_DAILY_SCHEMA:
+        if pack.get("evidence_pack_hash") != _canonical_hash(
+                {key: value for key, value in pack.items() if key != "evidence_pack_hash"}):
+            raise ValueError("Qualified equity Evidence Pack hash mismatch")
+        qualified = validate_four_asset_daily_proof(proof, at_ms=generated)
+        if ("qualified_equity_prices" in pack
+                and pack["qualified_equity_prices"] != qualified):
+            raise ValueError("Qualified equity prices do not match retained source proof")
+        return qualified
     if (type(generated) is not int or generated <= 0
             or not isinstance(proof, dict)
             or type(proof.get("observed_at_ms")) is not int

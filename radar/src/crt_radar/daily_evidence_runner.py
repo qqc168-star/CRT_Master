@@ -153,6 +153,7 @@ def run_daily_evidence(
     btc_entry_gate_runner: Callable[..., dict[str, Any]] | None = None,
     assumption_watch_context: dict[str, Any] | None = None,
     mstr_asst_market_health: dict[str, Any] | None = None,
+    qualified_equity_daily_source: dict[str, Any] | None = None,
     issuer_ratio_observation: dict[str, Any] | None = None,
     issuer_announcement_wake: dict[str, Any] | None = None,
     institutional_flow_context: dict[str, Any] | None = None,
@@ -347,6 +348,7 @@ def run_daily_evidence(
         broker_capital_observation=broker_capital_observation,
         user_capital_intent=user_capital_intent,
         mstr_asst_market_health=mstr_asst_market_health,
+        qualified_equity_daily_source=qualified_equity_daily_source,
         issuer_ratio_observation=issuer_ratio_observation,
         issuer_announcement_wake=issuer_announcement_wake,
         institutional_flow_context=institutional_flow_context,
@@ -628,6 +630,8 @@ def main(argv: list[str] | None = None) -> int:
             "snapshot to fuse into Evidence Pack and GPT Wake."
         ),
     )
+    parser.add_argument("--qualified-equity-daily-source", type=Path, default=None,
+        help="Read-only retained IBKR daily close proof; original source clocks are preserved.")
     parser.add_argument(
         "--season-transition-flow-context",
         type=Path,
@@ -757,6 +761,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.mstr_asst_market_health is not None
         else None
     )
+    qualified_equity_daily_source = (
+        _load_json_object(args.qualified_equity_daily_source, label="Qualified equity daily source")
+        if args.qualified_equity_daily_source is not None else None
+    )
     institutional_flow_context = (
         _load_json_object(
             args.season_transition_flow_context,
@@ -845,6 +853,7 @@ def main(argv: list[str] | None = None) -> int:
         btc_entry_gate_runner=run_live_btc_entry_gate,
         assumption_watch_context=assumption_watch_context,
         mstr_asst_market_health=mstr_asst_market_health,
+        qualified_equity_daily_source=qualified_equity_daily_source,
         issuer_ratio_observation=issuer_observation,
         issuer_announcement_wake=issuer_announcement,
         institutional_flow_context=institutional_flow_context,
