@@ -33,6 +33,138 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 新增、刪除或重定義這 8 項必須由使用者明確批准。
 
+## 2026-10-11 七項工作接力排序
+
+本排序經使用者重新決定。它不是新增七個正式驗收項目。
+原八項實戰驗收仍為 7/8，原第八項尚未完成。
+正式六層權重、燈號、mNAV 語義及外部行動權限不變。
+
+### Q1 BTC 正式季節恢復｜最高優先
+
+目標：恢復 BTC 大週期及季節轉換的合格判斷，
+為四檔資產配置建立戰略基準。
+
+既有資產：
+radar/FORMAL_SOURCES/CRT-BTC-001_V1.0/
+radar/research/CRT_BTC_SEASON_FORMAL_SOURCE_RECOVERY_V0.1.md
+radar/CONFIG/BTC_SEASON_FORMAL_INPUT_ENVELOPE_CANDIDATE_V0.1.json
+radar/src/crt_radar/btc_season_semantic_mapping.py
+
+現況：正式季節 BLOCKED/null；
+12 類來源 0/12 完成正式綁定；
+14 項語義要求仍需閉合。
+
+驗收：正式來源、規則、觀測時間、反證及季節轉換
+均可驗證；研究候選不得冒充正式季節。
+未經使用者批准不得變更正式模型權限。
+
+### Q2 四檔真實日價接入每日循環
+
+目標：MSTR、ASST、STRC、SATA 真實日價
+進入當次證據包與資本分析。
+
+沿用 PR #143：
+radar/src/crt_radar/ibkr_market_health_sources.py
+radar/src/crt_radar/daily_evidence_runner.py
+radar/scripts/windows/run_observation_history_windows.ps1
+
+驗收：真實來源、時間、日價及當次投影一致。
+不得把合成測試或盤後價格冒充可成交行情。
+
+### Q3 MSTR／ASST 經濟價值閉合
+
+目標：評估普通股股東的真實經濟價值，
+不是只列 BTC 增長或稀釋百分比。
+
+沿用：
+radar/src/crt_radar/treasury_company_ct.py
+radar/src/crt_radar/diluted_equity_mnav.py
+radar/src/crt_radar/company_health.py
+radar/src/crt_radar/portfolio_allocation_context.py
+
+驗收：每股 BTC、稀釋股數、融資、優先請求權、
+剩餘價值、正式估值與替代投資均可比較。
+研究 mNAV 不得冒充正式 mNAV。
+
+### Q4 STRC／SATA 雙釵滾金閉合
+
+目標：比較收益、資本損益、發行人風險、
+交易摩擦及輪動後的資本購買力。
+
+沿用：
+radar/src/crt_radar/asset_strategy_delta.py
+radar/src/crt_radar/dual_hairpin_operational_orchestrator.py
+radar/research/CRT_DUAL_HAIRPIN_CAPITAL_ROTATION_MENTAL_MODEL_V0.1.md
+
+驗收：可計算有根據的輪動或不輪動決策；
+未入帳配息不算可用現金；
+高配息不自動代表較低風險。
+
+### Q5 投資推理與決策品質驗證
+
+目標：防止正確數字支撐錯誤交易結論。
+
+沿用：
+radar/src/crt_radar/capital_decision_closure.py
+radar/tests/test_capital_decision_semantics.py
+radar/tests/test_two_layer_reasoning_replay.py
+
+參謀長五項建議全部納入：
+一、每項動作必須有經濟推理與替代方案。
+二、價格與股數須有可重算的依據。
+三、買進、賣出、續抱、等待、輪動分別驗證。
+四、四檔真實日價接線由 Q2 完成。
+五、季節資格不足不得抹除已合格的現金事實。
+
+固定事故反例：
+MSTR 研究 mNAV 1.05；
+ASST 股數增幅 2.92%、每股 BTC 增幅 4.24%；
+SATA 優先股增加約 131 萬股；
+沒有推導的 ASST 減碼 39 股；
+四檔無理由一律 HOLD。
+
+驗收：任意股數及虛假經濟推論不得取得完整合格結論；
+真正有證據的買進、賣出、續抱及輪動仍須能通過。
+技術驗證不得冒充因果推理已獲證明。
+
+### Q6 原第八項完整實戰驗收
+
+沿用既有 CRT_ACTIVE_BATON 的第八項定義。
+不增加第九項、不倒填歷史完成率。
+真實事件、證據、模型判斷、通知及權限邊界
+必須按原契約驗收。
+未獲正式外部行動批准不得擅自傳送或交易。
+
+### Q7 投資決策增量價值驗證
+
+目標：檢驗 CRT 是否比簡單持有或固定配置，
+更能守住資本並增加取得第一顆 BTC 的能力。
+
+使用相同起始資本、持倉、現金需求及無槓桿限制。
+比較淨收益、回撤、交易成本、機會成本及 BTC 購買力。
+前瞻資料應事前固定規則並持續保存。
+參謀長提議的 180 天不是已批准的正式門檻。
+
+### 跨聊天室接力規則
+
+每次先讀當前 GitHub main，再讀本接力棒。
+每次只執行一個已確認的工作。
+完成一項後，記錄實際測試、阻塞、提交及下一項。
+不因換聊天室而重新施工或重新認證舊成果。
+
+本排程僅改變施工優先順序：
+Q1 -> Q2 -> Q3 -> Q4 -> Q5 -> Q6 -> Q7
+
+目前所有 Q 項均未因排程記錄而被宣告完成。
+
+正式鎖：
+六層權重 20/20/17/25/13/5
+燈號 -60/-35/35/60
+mNAV = Diluted Equity mNAV
+Production = NOT_APPROVED
+External Action Authority = NONE
+Capital Decision Authority = USER_ONLY
+
 ## 三大關／八個驗收項目
 
 ### 第一關：Live Radar（實戰雷達）
@@ -275,15 +407,15 @@ Treasury 的官方 mNAV、歷史百分位／5W、優先股淨募集證據不足�
 
 ## 下一個唯一有效動作
 
-下一個核准工作只有 `#8 End-to-End Live Acceptance`。
+2026-10-11 使用者已核准新的施工排序；下一項為 Q1 BTC 正式季節判讀恢復。原 #8 保留定義，依新排序列為 Q6。
 本 Work 到 Treasury 部署與新循環驗證即停止，不自動開始 #8。
 
 ## 暫緩工作
 
-在本 Baton（接力棒）達成 `8 / 8` 前，以下工作不主動推進，除非它們被證明直接阻塞本任務：
+2026-10-11 使用者核准的七項工作排序優先於以下舊暫緩規則；非七項範圍的新工作仍不主動推進：
 
-- Formal Season Router（正式季節路由器）恢復
-- Formal Season Input Binding（正式季節輸入綁定）
+- 正式季節路由器恢復已改列 Q1，非暫緩項
+- 正式季節來源綁定已改列 Q1，非暫緩項
 - 20-run maturity（20 次成熟度）
 - 新指標
 - 新 Overlay（覆蓋分析）
@@ -320,7 +452,7 @@ Treasury 的官方 mNAV、歷史百分位／5W、優先股淨募集證據不足�
 #7 remains COMPLETE
 7 / 8 = 87.5%
 Local Live Runtime deployed and accepted
-Next authorized work:
+歷史舊排序（2026-10-11 已由 Q1 至 Q7 取代）：
 #8 End-to-End Live Acceptance
 
 ## Treasury Valuation Context V0.1 部署記錄
