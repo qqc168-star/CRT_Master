@@ -14,9 +14,9 @@
 - `DONE = 0`
 - `ACTIVE = NONE`
 - `PROGRESS = 0%`
-- `START_AFTER = CRT_LIVE_ACTION_LOOP_8_OF_8`
+- 原 `START_AFTER = CRT_LIVE_ACTION_LOOP_8_OF_8` 為歷史排序；2026-10-11 新七項排序的 Q3/Q4 已獲使用者批准提前恢復
 - 完成率只使用：`DONE / 5`
-- 在 CRT Live Action Loop（實戰行動迴路）達成 `8 / 8` 前，本清單保持 `DORMANT`（待命）。
+- 除已核准依 Q3/Q4 施工的 MSTR、ASST、STRC、SATA 相關恢復工作外，其餘仍為待命。
 - 除非使用者明確批准，或某項被證明直接阻塞目前 8 項主線，否則不得提前施工。
 - 本清單不得增加或重定義 `radar/STATUS/CRT_ACTIVE_BATON.md` 的 8 項分母。
 
@@ -313,7 +313,7 @@ STRC（Strategy 優先股）已有大量成熟零件，本項不重做，而是�
 1. 先讀 GitHub current `main`。
 2. 先讀 `radar/STATUS/CRT_ACTIVE_BATON.md`。
 3. 再讀本檔。
-4. 若 Live Action Loop（實戰行動迴路）未達 `8 / 8`，本清單仍為 `DORMANT`。
+4. 依主接力棒 2026-10-11 七項新排序啟動 Q3/Q4；不得繼續套用舊的全面待命規則。
 5. 不得依聊天室記憶宣告任一恢復項目已完成。
 6. 每項完成都必須有可驗證的 Git / test / evidence（Git／測試／證據）血統。
 7. 歷史研究可以被恢復、驗真、更新；不得因過期數字而整體丟棄研究框架。
@@ -336,7 +336,7 @@ STRC（Strategy 優先股）已有大量成熟零件，本項不重做，而是�
 
 ## 與目前主線的關係
 
-目前主線仍是：
+以下是過期的歷史快照，不得作為現行施工排序。最新權威依主接力棒 Q1 至 Q7：
 
 `CRT Live Action Loop（CRT 實戰行動迴路）`
 `TOTAL = 8`

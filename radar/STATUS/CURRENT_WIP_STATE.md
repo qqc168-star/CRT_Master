@@ -24,8 +24,8 @@
 - Mission（任務）: `CRT Live Action Loop V0.1`
 - Progress（進度）: see `radar/STATUS/CRT_ACTIVE_BATON.md`
 - Active item（目前唯一進行中項目）: see `radar/STATUS/CRT_ACTIVE_BATON.md`
-- Priority（優先順序）: `Live Radar -> Capital State -> GPT Wake`
-- Formal Season recovery（正式季節恢復）保留，但在本實戰閉環完成前暫緩，除非被證明直接形成阻塞。
+- Priority（優先順序）: `依 CRT_ACTIVE_BATON.md 的 2026-10-11 七項新排序 Q1 -> Q7`
+- BTC 正式季節恢復已獲使用者重新排序批准，列為 Q1；原第八項端到端驗收保留原定義並列為 Q6。
 ## Current engineering distinction
 
 Engineering sources now exist across `AS-L1` through `AS-L6`.
