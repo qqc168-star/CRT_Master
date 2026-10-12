@@ -427,6 +427,21 @@ class SeasonTransitionWarningOverlayTests(unittest.TestCase):
             self.assertEqual(overlay["lights"][name]["light"], "NOT_AVAILABLE")
         self.assertEqual(overlay["gate_core_veto"]["gate"]["state"], "BLOCKED")
         self.assertIsNone(overlay["formal_season"])
+        self.assertEqual(overlay["scenario"]["id"], "SCENARIO_0")
+        self.assertEqual(overlay["lights"]["conflict_veto"]["light"], "NOT_AVAILABLE")
+        self.assertEqual(overlay["research_season"], "NOT_EVALUABLE_INSUFFICIENT_EVIDENCE")
+        self.assertFalse(overlay["historical_replay"]["spring_transition_signal_active"])
+        self.assertNotIn("春芽存在", overlay["card"])
+        self.assertEqual(validate_season_transition_warning_overlay(overlay), [])
+
+    def test_supportive_prices_with_unverified_veto_cannot_claim_strong_upgrade(self) -> None:
+        result = build(btc_bull_validation=None, btc_entry_gate=None,
+                       transition_diagnostic=None, btc_control_transfer_validation=None)
+        self.assertEqual(result["lights"]["conflict_veto"]["evidence_status"],
+                         "PARTIAL_SOURCE_EVIDENCE")
+        self.assertEqual(result["lights"]["conflict_veto"]["light"], "NOT_AVAILABLE")
+        self.assertNotEqual(result["scenario"]["id"], "SCENARIO_1")
+        self.assertEqual(validate_season_transition_warning_overlay(result), [])
 
     def test_replay_reports_latency_and_false_positive_without_imputation(self) -> None:
         overlay = build(

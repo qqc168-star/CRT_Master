@@ -52,6 +52,7 @@ FLOW_ROLES = {
 }
 
 SCENARIOS = {
+    "SCENARIO_0": "情境 0｜證據不足，尚不能評估轉季",
     "SCENARIO_1": "情境 1｜春季證據強升級",
     "SCENARIO_2": "情境 2｜春芽存在、仍在拉扯",
     "SCENARIO_3": "情境 3｜假春風險升高",
@@ -618,6 +619,9 @@ def _veto_light(
         "CONFLICT_PRESENT": ("YELLOW", "🟡"),
         "DECISIVE_VETO": ("RED", "🔴"),
     }[state]
+    # No observed adverse evidence is not proof that the veto is clear.
+    if state == "NO_DECISIVE_VETO" and evidence_status == "PARTIAL_SOURCE_EVIDENCE":
+        light, symbol = "NOT_AVAILABLE", "⚪"
     previous_state = (
         previous_light.get("threshold_bucket")
         if isinstance(previous_light, dict)
@@ -720,10 +724,14 @@ def _gate_core_veto(
     elif veto_state == "CONFLICT_PRESENT" and gate_state != "OPEN":
         scenario_id = "SCENARIO_3"
         selection_reason = "CONFLICT_WITH_PRICE_GATE_NOT_OPEN"
+    elif gate_state == "BLOCKED" or core_state == "BLOCKED":
+        scenario_id = "SCENARIO_0"
+        selection_reason = "INSUFFICIENT_QUALIFIED_GATE_OR_CORE_EVIDENCE"
     elif (
         gate_state == "OPEN"
         and core_state == "STRONG"
         and veto_state == "NO_DECISIVE_VETO"
+        and lights["conflict_veto"].get("evidence_status") == "AVAILABLE"
     ):
         scenario_id = "SCENARIO_1"
         selection_reason = "PRICE_GATE_OPEN_AND_CORE_STRONG_WITHOUT_DECISIVE_VETO"
@@ -975,7 +983,9 @@ def build_season_transition_warning_overlay(
         "level": "HIGH" if scenario_id in {"SCENARIO_1", "SCENARIO_3"} else "WATCH",
         "direction": warning_direction,
         "focus": (
-            "SPRING_EVIDENCE_UPGRADE"
+            "EVIDENCE_INSUFFICIENT"
+            if scenario_id == "SCENARIO_0"
+            else "SPRING_EVIDENCE_UPGRADE"
             if scenario_id == "SCENARIO_1"
             else "FALSE_SPRING_RISK"
             if scenario_id == "SCENARIO_3"
@@ -983,7 +993,9 @@ def build_season_transition_warning_overlay(
         ),
     }
     research_season = (
-        "WINTER -> SPRING CANDIDATE AT RISK"
+        "NOT_EVALUABLE_INSUFFICIENT_EVIDENCE"
+        if scenario_id == "SCENARIO_0"
+        else "WINTER -> SPRING CANDIDATE AT RISK"
         if scenario_id == "SCENARIO_3"
         else "WINTER -> SPRING CANDIDATE"
     )
@@ -1129,8 +1141,13 @@ def validate_season_transition_warning_overlay(
             errors.append("conflict veto must not have a numeric score")
         if veto_state not in expected_veto_lights:
             errors.append("conflict veto state invalid")
-        elif veto.get("light") != expected_veto_lights[veto_state]:
-            errors.append("conflict veto light mismatch")
+        else:
+            expected_veto = ("NOT_AVAILABLE"
+                             if veto_state == "NO_DECISIVE_VETO"
+                             and veto.get("evidence_status") == "PARTIAL_SOURCE_EVIDENCE"
+                             else expected_veto_lights[veto_state])
+            if veto.get("light") != expected_veto:
+                errors.append("conflict veto light mismatch")
 
     decision = overlay.get("gate_core_veto")
     if not isinstance(decision, dict):
