@@ -319,6 +319,9 @@ $Invocation = @{{ RepoRoot = {ps_literal(self.repo)}; RuntimeRoot = {ps_literal(
     def test_explicit_isolation_with_provider_enabled_preserves_all_historical_events(self):
         self._assert_isolated({"RunMode": "'ISOLATION_ONLY'"})
 
+    def test_equity_source_parameter_cannot_escape_isolation(self):
+        self._assert_isolated({"QualifiedEquityDailySource": ps_literal(self.runtime / "must-not-read.json")})
+
     def test_missing_runtime_and_repo_do_not_create_directories(self):
         self._assert_isolated({"RuntimeRoot": ps_literal(self.root / "missing-runtime")})
         self.assertFalse((self.root / "missing-runtime").exists())
