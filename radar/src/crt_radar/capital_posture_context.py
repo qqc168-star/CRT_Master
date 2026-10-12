@@ -387,15 +387,31 @@ def render_allocation_review_table(context, *, at_ms, envelope=None, response=No
         # base arithmetic validation alone must not qualify displayed quantities.
         validated = validated_receipt(response, envelope, at_ms=at_ms)["capital_validation"]
         assert_current(validated, source, at_ms=at_ms)
+        from decimal import Decimal
         for row in table["rows"]:
+            target_scope = table.get("allocation_adjustment_scopes", {}).get(row["asset"])
+            delta = row.get("delta_usd")
+            expected = "BUY" if delta is not None and delta > 0 else (
+                "SELL" if delta is not None and delta < 0 else None)
             legs = [{"action": leg["action"], "quantity": leg["quantity"],
                      "decision_scope": item["decision_scope"]}
                     for item in validated["items"] if item["validation_state"] == "VALIDATED"
                     for leg in item["validated_legs"]
-                    if leg["asset"] == row["asset"] and leg["validation_state"] == "VALIDATED"]
+                    if leg["asset"] == row["asset"] and leg["validation_state"] == "VALIDATED"
+                    and isinstance(target_scope, str) and target_scope.strip()
+                    and item["decision_scope"] == target_scope
+                    and expected is not None and leg["action"] == expected
+                    and leg.get("order_type") == "LIMIT"
+                    and isinstance(leg.get("capital_effect"), dict)
+                    and Decimal(str(leg["capital_effect"].get(
+                        "spend_upper_bound_usd" if expected == "BUY"
+                        else "proceeds_lower_bound_usd") or "0")) > 0
+                    and Decimal(str(leg["capital_effect"].get(
+                        "spend_upper_bound_usd" if expected == "BUY"
+                        else "proceeds_lower_bound_usd") or "0")) <= abs(Decimal(str(delta)))]
             if legs and row["state"] == "RESEARCH_ONLY":
                 row["qualified_share_counts"] = legs
-                row["quantity_state"] = "VALIDATED_DECISION_LEGS"
+                row["quantity_state"] = "VALIDATED_ALLOCATION_ADJUSTMENT_LEGS"
                 row["quantity_reason"] = None
     def cell(value):
         return "null" if value is None else str(value)
