@@ -39,8 +39,8 @@ formal source never promotes the proxy: V110 continues rejecting its identity.
 ## Read-only archive intake
 
 Set `CRT_L6_SOURCE_ROOT` to a local archive directory (default:
-`radar/runtime/l6_sources`). No downloader, scheduler, live runtime mutation, or
-automatic source substitution is introduced. The source gate reads archived
+`radar/runtime/l6_sources`). The read-only intake itself has no downloader,
+scheduler, live runtime mutation, or automatic source substitution. It reads archived
 provider responses and derives measurements itself; a supplied metric or
 precomputed daily aggregate is not sufficient.
 
@@ -113,8 +113,8 @@ day; the existing 172800-second source freshness limit still applies.
 ## Availability and validation boundary
 
 Mechanics tests use temporary synthetic provider-shaped archives only. They
-demonstrate qualification behavior, not live history readiness. No local live
-archive population is performed by this change. Missing archives, the Kraken
+demonstrate qualification behavior, not live history readiness. Archive intake
+alone does not populate live archives; the separate explicit GO4 capture is below. Missing archives, the Kraken
 quarterly publication lag, and candidate normalization-history requirements may
 remain blockers after code integration. Do not replace Kraken archives with its
 REST endpoint without a source-doctrine ruling.
@@ -124,3 +124,48 @@ Provider format references:
 [Kraken OHLCVT](https://support.kraken.com/articles/360047124832-downloadable-historical-ohlcvt-open-high-low-close-volume-trades-data),
 [Bitstamp OHLC](https://www.bitstamp.net/api/#ohlc_data),
 [Binance public archives](https://github.com/binance/binance-public-data).
+
+## Explicit public capture (GO4)
+
+`radar/research/l6_public_capture.py` fills the existing archive intake using
+`candidate_acquisition.archive_artifact` and the existing no-redirect public
+fetcher. From `radar`, with `PYTHONPATH=src`, run:
+
+```text
+python research/l6_public_capture.py --output-root <new-isolated-directory>
+```
+
+The output directory must be new. The operator must separately authorize public
+reads; this entry is never called by the daily script or Scheduled Task. It does
+not write to the existing Runtime, broker state, handoff, outbox or notifications.
+No credentials, alternative venues, Kraken REST, trade calls or model calls are
+used. It tries each exact URL once; no redirects, automatic retries or fallback.
+
+Coinbase/Bitstamp request 201 completed UTC bars ending at the current UTC day
+boundary. Kraken uses only complete quarterly ZIP links captured from its locked
+documentation and retains that original page as link evidence. Multipart ZIP
+parts are excluded. Individual venue coverage is recorded even when the composite
+is blocked; an older three-venue intersection is never selected instead.
+Binance requests the 20 measurement days plus both completed adjacent days and
+their CHECKSUM files; its window end is one day earlier than the composite cut.
+
+All backfilled responses keep actual retrieval/first-seen time and the locked
+local-research license classification. Content-addressed bytes and identity
+metadata are immutable. Local SHA-256 is not independent provider verification;
+Binance qualification additionally requires its original CHECKSUM. The download
+byte bound is an operator resource limit, not permission to truncate a source:
+an oversized response remains blocked and can never become a complete artifact.
+
+Capture writes the existing two family manifests and `capture_result.json`.
+It reuses `run_source_gate` and `build_evidence_pack` with no-network overrides for
+all other sources, saving their outputs and an isolated observation database in
+`verification/`. This verifies L6 → Evidence Pack → existing Q1 warning without
+inventing L1–L5 or institutional evidence. Captured data is not qualification,
+qualified L6 is not complete formal season evidence, and a research warning is
+not spring confirmation. Missing price/core evidence must retain `SCENARIO_0`.
+The CLI returns 2 if either L6 family remains blocked, never a false success.
+
+Kraken quarterly publication lag, missing official linked archives or missing
+201-day coverage are explicit blockers. They do not authorize replacing Kraken
+with REST or changing the source authority lock. Source/registry hashes,
+formulas, weights, thresholds and all governance authority remain unchanged.
