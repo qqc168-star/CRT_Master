@@ -584,16 +584,20 @@ def _collect_veto_evidence(
     else:
         state = "NO_DECISIVE_VETO"
 
-    source_states = {
-        str(btc_bull_validation.get("state", "NOT_AVAILABLE")),
-        str(btc_entry_gate.get("state", "NOT_AVAILABLE")),
-        str(transition_diagnostic.get("state", "NOT_AVAILABLE")),
-        str(btc_control_transfer_validation.get("state", "NOT_AVAILABLE")),
-    }
+    # Core veto sources are required; no-wake and absent post-C are optional.
+    from .btc_bull_validation import ALLOWED_TRANSITION_STATES
+    bull_ready = btc_bull_validation.get("state") in ALLOWED_TRANSITION_STATES
+    entry_ready = (
+        btc_entry_gate.get("state") == "READY_FOR_ANALYST"
+        and btc_entry_gate.get("transition_state") in ALLOWED_TRANSITION_STATES
+    )
+    # Missing optional events are not failures; attempted failed checks are.
+    diagnostic_failed = transition_diagnostic.get("state") in {"BLOCKED", "NOT_AVAILABLE"}
+    post_c_failed = btc_control_transfer_validation.get("state") == "BLOCKED"
     evidence_status = (
-        "PARTIAL_SOURCE_EVIDENCE"
-        if source_states <= {"BLOCKED", "NOT_AVAILABLE", "NOT_REQUESTED"}
-        else "AVAILABLE"
+        "AVAILABLE" if bull_ready and entry_ready
+        and not diagnostic_failed and not post_c_failed
+        else "PARTIAL_SOURCE_EVIDENCE"
     )
     return state, decisive, conflicts, evidence_status
 

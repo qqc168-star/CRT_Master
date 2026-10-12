@@ -434,6 +434,36 @@ class SeasonTransitionWarningOverlayTests(unittest.TestCase):
         self.assertNotIn("春芽存在", overlay["card"])
         self.assertEqual(validate_season_transition_warning_overlay(overlay), [])
 
+    def test_one_available_veto_source_is_not_green(self) -> None:
+        result = build(btc_bull_validation=bull_validation(), btc_entry_gate=None,
+                       transition_diagnostic=None, btc_control_transfer_validation=None)
+        veto = result["lights"]["conflict_veto"]
+        self.assertEqual(veto["evidence_status"], "PARTIAL_SOURCE_EVIDENCE")
+        self.assertEqual(veto["light"], "NOT_AVAILABLE")
+        self.assertNotEqual(result["scenario"]["id"], "SCENARIO_1")
+        self.assertEqual(validate_season_transition_warning_overlay(result), [])
+
+    def test_optional_not_requested_diagnostic_is_not_mandatory(self) -> None:
+        result = build(transition_diagnostic={"state": "NOT_REQUESTED"},
+                       btc_control_transfer_validation=None)
+        self.assertEqual(result["lights"]["conflict_veto"]["evidence_status"], "AVAILABLE")
+        self.assertEqual(result["scenario"]["id"], "SCENARIO_1")
+
+    def test_attempted_optional_check_failure_is_not_green(self) -> None:
+        result = build(transition_diagnostic={"state": "BLOCKED"})
+        self.assertEqual(result["lights"]["conflict_veto"]["light"], "NOT_AVAILABLE")
+        self.assertNotEqual(result["scenario"]["id"], "SCENARIO_1")
+
+    def test_real_decisive_veto_survives_missing_sources(self) -> None:
+        result = build(btc_bull_validation=None,
+                       btc_entry_gate=entry_gate("BEAR_REJECTION_STRENGTHENED"),
+                       transition_diagnostic=None, btc_control_transfer_validation=None)
+        veto = result["lights"]["conflict_veto"]
+        self.assertEqual(veto["evidence_status"], "PARTIAL_SOURCE_EVIDENCE")
+        self.assertEqual(veto["light"], "RED")
+        self.assertEqual(result["scenario"]["id"], "SCENARIO_3")
+        self.assertEqual(validate_season_transition_warning_overlay(result), [])
+
     def test_supportive_prices_with_unverified_veto_cannot_claim_strong_upgrade(self) -> None:
         result = build(btc_bull_validation=None, btc_entry_gate=None,
                        transition_diagnostic=None, btc_control_transfer_validation=None)
