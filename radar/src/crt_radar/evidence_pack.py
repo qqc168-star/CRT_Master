@@ -576,11 +576,12 @@ def build_evidence_pack(
         layers=layers,
         generated_at_ms=generated_at,
     )
-    pack["btc_control_transfer_validation"] = (
-        evaluate_control_transfer_validation(
-            btc_control_transfer_validation_evidence
-        )
-    )
+    with ObservationStore(observation_db) as research_store:
+        pack["btc_control_transfer_validation"] = evaluate_control_transfer_validation(
+            btc_control_transfer_validation_evidence, observation_store=research_store,
+            evaluated_at_ms=generated_at, require_observed_evidence=True)
+        if previous_season_transition_overlay is None:
+            previous_season_transition_overlay = research_store.latest_research_event("warning_snapshot")
     pack["season_transition_warning_overlay"] = (
         build_season_transition_warning_overlay(
             formal_candidate=formal_candidate,
@@ -601,6 +602,16 @@ def build_evidence_pack(
     assert_season_transition_warning_overlay(
         pack["season_transition_warning_overlay"]
     )
+    warning = pack["season_transition_warning_overlay"]
+    lifecycle = warning["historical_replay"].get("warning_lifecycle", [])
+    if lifecycle:
+        with ObservationStore(observation_db) as research_store:
+            for event in lifecycle:
+                research_store.record_research_event("warning:"+event["event_id"], "warning_lifecycle", event)
+            previous_history = (previous_season_transition_overlay or {}).get("historical_replay", {})
+            if (previous_history.get("warning_lifecycle") != lifecycle
+                    or previous_history.get("ground_truth_outcome") != warning["historical_replay"].get("ground_truth_outcome")):
+                research_store.record_research_event("warning_snapshot:"+warning["overlay_hash"], "warning_snapshot", warning)
     if treasury_company_ct_input is not None:
         if treasury_company_ct_inputs is not None:
             raise ValueError("Supply singular or per-asset CT inputs, not both")

@@ -154,31 +154,55 @@ class Capture:
 
 def verified_proxy_payload(root, artifact, now):
     """Verify original stored bytes; parsing remains exclusively in source_gate_runner."""
-    registry, spec = proxy_source()
-    l6.require(artifact.get("source_contract_id") == PROXY
-               and artifact.get("request_identity") == "GET " + spec.endpoint
-               and artifact.get("source_authority_hash") == registry.hash
-               and artifact.get("source_id") == spec.source_id
-               and artifact.get("source_documentation") == spec.raw["documentation"]
-               and artifact.get("formal_composite_authority") == "NONE", "L6_PROXY_IDENTITY_INVALID")
-    first = l6.integer(artifact.get("first_seen_at_ms"), "L6_FIRST_SEEN_INVALID")
-    retrieved = l6.integer(artifact.get("retrieved_at_ms"), "L6_RETRIEVAL_INVALID")
-    l6.require(0 < first == retrieved <= now
-               and artifact.get("available_at_coverage_start_ms") == first
-               and artifact.get("available_at_coverage_end_ms") == first
-               and artifact.get("replay_eligible") is False
-               and artifact.get("evidence_class") == "CURRENT_FIRST_SEEN_CAPTURE"
-               and artifact.get("license_classification") == "TERMS_REVIEW_REQUIRED_LOCAL_RESEARCH_ONLY",
-               "L6_PROXY_AVAILABILITY_INVALID")
-    digest = artifact.get("sha256")
-    l6.require(isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest), "L6_HASH_INVALID")
-    expected = f"artifacts/sha256/{digest[:2]}/{digest}"
-    path = acquisition._safe_archive_path(root, artifact.get("archive_relpath"))
-    l6.require(path is not None and artifact.get("archive_relpath") == expected, "L6_ARTIFACT_PATH_ESCAPE")
-    raw = path.read_bytes()
-    l6.require(acquisition.sha256_bytes(raw) == digest and len(raw) == artifact.get("size_bytes"),
-               "L6_ARTIFACT_BYTES_MISMATCH")
-    return json.loads(raw)
+    from crt_radar.source_gate_runner import verified_price_structure_archive
+    return verified_price_structure_archive(root, artifact, now)
+
+
+def archive_structure_observation(root, artifact, store, *, recorded_at_ms,
+                                  window_start_ms=None, window_end_ms=None):
+    """Reuse GO4's sealed reader/parser; no fetch and no candidate classification.
+
+    Historical market times remain separate from actual CRT first visibility.
+    The existing observation database holds the immutable research observation.
+    """
+    from crt_radar.source_gate_runner import parse_price_structure
+    from crt_radar.btc_control_transfer_validation import research_identity
+    from crt_radar.btc_transition_replay_evidence import archived_structure_bars
+    payload = verified_proxy_payload(Path(root), artifact, recorded_at_ms)
+    parse_price_structure(payload, now_ms=artifact["retrieved_at_ms"])
+    rows = [row for row in payload if row[6] < artifact["retrieved_at_ms"]]
+    rows = rows[-201:]
+    if window_start_ms is not None:
+        rows = [row for row in rows if row[0] >= window_start_ms]
+    if window_end_ms is not None:
+        rows = [row for row in rows if row[6] <= window_end_ms]
+    l6.require(bool(rows), "STRUCTURE_OBSERVATION_WINDOW_EMPTY")
+    identity = {"source_id": artifact["source_id"], "product": "BTCUSDT",
+                "window_start_ms": rows[0][0], "window_end_ms": rows[-1][6],
+                "event_definition": "COMPLETED_DAILY_OHLC"}
+    event_id = research_identity(identity)
+    observation = {**identity, "observation_id": event_id,
+        "raw_sha256": artifact["sha256"], "request_identity": artifact["request_identity"],
+        "archive_root": str(Path(root).resolve()), "artifact": artifact,
+        "source_authority_hash": artifact["source_authority_hash"],
+        "source_available_at_ms": artifact["retrieved_at_ms"],
+        "source_published_at_ms": None,
+        "source_availability_proof_type": "ACTUAL_FIRST_SUCCESSFUL_RETRIEVAL_BOUND",
+        "first_seen_at_ms": artifact["first_seen_at_ms"], "recorded_at_ms": recorded_at_ms,
+        "quality_state": "RESEARCH_ARCHIVE_VERIFIED", "formal_composite_authority": "NONE",
+        "availability_scope": "ACTUAL_FIRST_SEEN_NOT_HISTORICAL_FORECAST",
+        "bars": archived_structure_bars(payload, available_at_ms=artifact["first_seen_at_ms"],
+                    window_start_ms=identity["window_start_ms"], window_end_ms=identity["window_end_ms"])}
+    prior = store.research_event(event_id, kind="structure_observation")
+    if prior:
+        # A new download hash/clock cannot manufacture another market event.
+        l6.require(prior["bars"] == observation["bars"] or
+                   [{k:v for k,v in b.items() if k != "available_at"} for b in prior["bars"]] ==
+                   [{k:v for k,v in b.items() if k != "available_at"} for b in observation["bars"]],
+                   "STRUCTURE_OBSERVATION_REVISION_CONFLICT")
+        return prior
+    store.record_research_event(event_id, "structure_observation", observation)
+    return observation
 
 
 def capture_directional_proxy(root, *, fetcher=fetch_official_bytes, l6_root=None):

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import math
+import json
+import hashlib
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -277,12 +279,62 @@ class ObservationStore:
             );
             CREATE INDEX IF NOT EXISTS idx_observations_metric_time
             ON observations(input_family, metric, as_of_ms);
+            CREATE TABLE IF NOT EXISTS btc_research_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                event_id TEXT NOT NULL UNIQUE,
+                kind TEXT NOT NULL,
+                payload_hash TEXT NOT NULL,
+                payload_json TEXT NOT NULL
+            );
             """
         )
         self.conn.commit()
 
     def close(self) -> None:
         self.conn.close()
+
+    def record_research_event(self, event_id: str, kind: str, payload: dict) -> bool:
+        """Append immutable research history in the existing observation database.
+
+        This is content integrity, not an assertion of external source authority.
+        The archive intake must verify original bytes before recording observations.
+        """
+        if not isinstance(event_id, str) or not event_id or not isinstance(kind, str) or not kind:
+            raise ValueError("RESEARCH_EVENT_IDENTITY_INVALID")
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+        digest = hashlib.sha256(encoded.encode()).hexdigest()
+        prior = self.conn.execute(
+            "SELECT kind, payload_hash FROM btc_research_events WHERE event_id=?", (event_id,)
+        ).fetchone()
+        if prior:
+            if prior["kind"] != kind or prior["payload_hash"] != digest:
+                raise ObservationRevisionConflict("FROZEN_RESEARCH_EVENT_CONFLICT")
+            return False
+        self.conn.execute(
+            "INSERT INTO btc_research_events(event_id,kind,payload_hash,payload_json) VALUES (?,?,?,?)",
+            (event_id, kind, digest, encoded),
+        )
+        self.conn.commit()
+        return True
+
+    def research_event(self, event_id: str, *, kind: str) -> dict | None:
+        if not isinstance(event_id, str) or not event_id:
+            return None
+        row = self.conn.execute(
+            "SELECT payload_json,payload_hash FROM btc_research_events WHERE event_id=? AND kind=?",
+            (event_id, kind),
+        ).fetchone()
+        if row is None:
+            return None
+        if hashlib.sha256(row["payload_json"].encode()).hexdigest() != row["payload_hash"]:
+            raise ObservationRevisionConflict("RESEARCH_HISTORY_INTEGRITY_INVALID")
+        return json.loads(row["payload_json"])
+
+    def latest_research_event(self, kind: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT event_id FROM btc_research_events WHERE kind=? ORDER BY id DESC LIMIT 1", (kind,)
+        ).fetchone()
+        return self.research_event(row["event_id"], kind=kind) if row else None
 
     def __enter__(self) -> "ObservationStore":
         return self

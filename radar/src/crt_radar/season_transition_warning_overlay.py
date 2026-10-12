@@ -799,17 +799,24 @@ def _historical_replay(
     replay_context: dict[str, Any] | None,
 ) -> dict[str, Any]:
     signal_active = scenario_id in {"SCENARIO_1", "SCENARIO_2"}
+    context = replay_context if isinstance(replay_context, dict) else {}
     previous_replay = previous.get("historical_replay", {}) if previous else {}
+    if (previous_replay.get("historical_case_id") != context.get("historical_case_id")
+            or (previous and previous.get("generated_at_ms", 0) > generated_at_ms)):
+        previous_replay = {}
     previous_active = bool(previous_replay.get("spring_transition_signal_active"))
     previous_onset = previous_replay.get("warning_onset_ms")
-    if signal_active and previous_active and isinstance(previous_onset, int):
-        onset = previous_onset
-    elif signal_active:
-        onset = generated_at_ms
-    else:
-        onset = None
+    onset = previous_onset if isinstance(previous_onset, int) else (generated_at_ms if signal_active else None)
+    lifecycle = [dict(item) for item in previous_replay.get("warning_lifecycle", [])]
+    if signal_active != previous_active:
+        event = {"kind": "WARNING_STARTED" if signal_active else "WARNING_WITHDRAWN",
+                 "at_ms": generated_at_ms, "scenario_id": scenario_id,
+                 "observation_event_id": context.get("observation_event_id"),
+                 "historical_case_id": context.get("historical_case_id")}
+        event["event_id"] = canonical_hash(event)
+        if not any(item["event_id"] == event["event_id"] for item in lifecycle):
+            lifecycle.append(event)
 
-    context = replay_context if isinstance(replay_context, dict) else {}
     historical_case_id = context.get("historical_case_id")
     ground_truth_at = context.get("ground_truth_transition_at_ms")
     if not isinstance(ground_truth_at, int):
@@ -823,9 +830,9 @@ def _historical_replay(
         else None
     )
     if outcome == "NO_TRANSITION":
-        false_positive = signal_active
+        false_positive = onset is not None
     elif outcome == "TRANSITION_CONFIRMED":
-        false_positive = False if signal_active else None
+        false_positive = False if onset is not None else None
     else:
         false_positive = None
     return {
@@ -834,6 +841,9 @@ def _historical_replay(
         "historical_case_id": historical_case_id,
         "spring_transition_signal_active": signal_active,
         "warning_onset_ms": onset,
+        "warning_ever_issued": onset is not None,
+        "warning_lifecycle": lifecycle,
+        "warning_episode_count": sum(item["kind"] == "WARNING_STARTED" for item in lifecycle),
         "ground_truth_transition_at_ms": ground_truth_at,
         "detection_latency_ms": latency,
         "ground_truth_outcome": outcome,
