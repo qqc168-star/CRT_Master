@@ -127,6 +127,11 @@ Provider format references:
 
 ## Explicit public capture (GO4)
 
+GO4 verifies source feasibility and restores traceable real market observations.
+It does **not** promise restoration of formal season decisions or a sustainable
+daily formal composite. Q1's 12 formal source families and 14 semantic obligations
+remain independent acceptance requirements; research acquisition closes neither.
+
 `radar/research/l6_public_capture.py` fills the existing archive intake using
 `candidate_acquisition.archive_artifact` and the existing no-redirect public
 fetcher. From `radar`, with `PYTHONPATH=src`, run:
@@ -144,7 +149,11 @@ used. It tries each exact URL once; no redirects, automatic retries or fallback.
 Coinbase/Bitstamp request 201 completed UTC bars ending at the current UTC day
 boundary. Kraken uses only complete quarterly ZIP links captured from its locked
 documentation and retains that original page as link evidence. Multipart ZIP
-parts are excluded. Individual venue coverage is recorded even when the composite
+parts are excluded. Before downloading quarterly ZIPs, the collector checks their
+nominal maximum date. If even this upper bound cannot cover the latest window,
+it records publication lag and skips the giant downloads. A quarter name is not
+proof of actual coverage, ZIP publication time or historical availability.
+Individual venue coverage is recorded even when the composite
 is blocked; an older three-venue intersection is never selected instead.
 Binance requests the 20 measurement days plus both completed adjacent days and
 their CHECKSUM files; its window end is one day earlier than the composite cut.
@@ -169,3 +178,32 @@ Kraken quarterly publication lag, missing official linked archives or missing
 201-day coverage are explicit blockers. They do not authorize replacing Kraken
 with REST or changing the source authority lock. Source/registry hashes,
 formulas, weights, thresholds and all governance authority remain unchanged.
+
+### Existing directional research observation
+
+Use the same operator entry to capture only the registered Binance BTCUSDT daily
+directional proxy; this makes one small public request, without quarterly ZIPs:
+
+```text
+python research/l6_public_capture.py --directional-proxy-only --output-root <new-isolated-directory> --l6-source-root <existing-isolated-L6-archives>
+```
+
+`--l6-source-root` is optional and read-only. The registry fixes the endpoint,
+source ID and parser. Original raw bytes carry its registry hash, retrieval time,
+local SHA-256, research-only license classification and `formal_composite_authority
+= NONE`. `source_gate_runner.parse_price_structure` remains the sole parser:
+201 completed UTC days must be consecutive, dates unique and original order
+strictly ascending; a valid trailing current-day bar is excluded and cannot fill
+a missing day. Malformed/future bars fail closed. Complete old windows remain
+`STALE` under the gate's existing 48-hour rule, preserving original source time.
+
+The verified raw JSON enters the existing Source Gate, Observation Store and
+Evidence Pack via an explicit offline override. Every other uncaptured source is
+marked missing with zero fetch attempts. Research metrics do not replace formal
+three-venue evidence or grant season/transaction authority. PR #146's missing-core
+`SCENARIO_0` behavior remains; any research warning is still not a formal season.
+
+Next-step handoff only: control-transfer candidate and independent subsequent
+confirmation remain outside GO4. Future review must address event order, duplicate
+same-source confirmation, retrospective reference-zone redrawing, and withdrawn
+historical alerts still counting toward false alarms. No new engine is introduced.

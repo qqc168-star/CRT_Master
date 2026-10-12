@@ -22,6 +22,19 @@ import candidate_acquisition as acquisition
 from prospective_capture import fetch_official_bytes
 from crt_radar import l6_source_binding as l6
 
+PROXY = "PRICE_STRUCTURE_CONTEXT"
+
+
+def proxy_source():
+    from crt_radar.source_registry import SourceRegistry
+    from crt_radar.source_gate_runner import default_registry_path
+    registry = SourceRegistry.load(default_registry_path())
+    registry.with_l6_candidate_sources()  # Verify the existing base registry seal.
+    spec = registry.by_input_family(PROXY)
+    l6.require(spec.parser_id == "BINANCE_PRICE_STRUCTURE_PROXY_V1"
+               and spec.raw["formal_composite_authority"] == "NONE", "L6_PROXY_CONTRACT_CONFLICT")
+    return registry, spec
+
 
 def utc_date(at):
     return datetime.fromtimestamp(at / 1000, timezone.utc).strftime("%Y-%m-%d")
@@ -51,11 +64,27 @@ def quarterly_links(page):
         r"https://assets\.kraken\.com/marketing/institutions/Kraken_OHLCVT_20\d\dQ[1-4]\.zip", u)))
 
 
-def request_allowed(url, documentation, archives):
+def quarterly_feasibility(urls, end):
+    # A quarter name provides only an upper bound, never actual coverage or
+    # publication proof. If even that bound is old, downloading cannot fix it.
+    bounds = []
+    for url in urls:
+        match = re.search(r"_(20\d\d)Q([1-4])\.zip$", url)
+        year, quarter = map(int, match.groups())
+        year, month = (year+1, 1) if quarter == 4 else (year, quarter*3+1)
+        bounds.append(int(datetime(year, month, 1, tzinfo=timezone.utc).timestamp()*1000))
+    latest = max(bounds) if bounds else None
+    return {"state":"POTENTIALLY_COVERS_WINDOW_NOT_YET_VERIFIED" if latest and latest >= end else "BLOCKED",
+            "latest_nominal_utc_day":utc_date(latest-l6.DAY) if latest else None,
+            "archive_publication_time":"NOT_PROVEN", "reason":"L6_KRAKEN_QUARTERLY_PUBLICATION_LAG"
+            if latest is None or latest < end else None}
+
+
+def request_allowed(url, documentation, archives, proxy_url=None):
     parsed = urlsplit(url)
     if parsed.scheme != "https" or parsed.username or parsed.password or parsed.fragment:
         return False
-    if url == documentation or url in archives:
+    if url == documentation or url in archives or url == proxy_url:
         return True
     if parsed.netloc == "api.exchange.coinbase.com" and parsed.path == "/products/BTC-USD/candles":
         from urllib.parse import parse_qs
@@ -74,6 +103,7 @@ class Capture:
         self.fetcher, self.max_archive_bytes = fetcher, max_archive_bytes
         self.attempts, self.cache = [], {}
         self.archives = set()
+        self.proxy_registry, self.proxy_spec = proxy_source()
         self.documentation = next(v["documentation"] for v in
             authority["decisions"][l6.COMPOSITE]["venue_universe"] if v["venue_id"] == "KRAKEN_XBT_USD")
 
@@ -83,7 +113,9 @@ class Capture:
             if isinstance(cached, Exception):
                 raise cached
             return cached
-        l6.require(request_allowed(url, self.documentation, self.archives), "L6_CAPTURE_REQUEST_NOT_LOCKED")
+        l6.require(request_allowed(url, self.documentation, self.archives,
+                                  self.proxy_spec.endpoint if family == PROXY else None),
+                   "L6_CAPTURE_REQUEST_NOT_LOCKED")
         record = {"request_identity": "GET " + url, "attempts": 1,
                   "started_at_ms": int(time.time() * 1000), "state": "BLOCKED"}
         self.attempts.append(record)
@@ -103,8 +135,10 @@ class Capture:
                 retrieved_at_ms=retrieved, first_seen_at_ms=retrieved,
                 available_at_coverage_start_ms=retrieved, available_at_coverage_end_ms=retrieved,
                 integrity_proof_type="LOCAL_SHA256", provider_checksum=None,
-                license_classification=self.authority["decisions"][family]["license_classification"],
-                source_authority_hash=l6.AUTHORITY_HASH, evidence_class="CURRENT_FIRST_SEEN_CAPTURE",
+                license_classification=("TERMS_REVIEW_REQUIRED_LOCAL_RESEARCH_ONLY" if family == PROXY
+                    else self.authority["decisions"][family]["license_classification"]),
+                source_authority_hash=self.proxy_registry.hash if family == PROXY else l6.AUTHORITY_HASH,
+                evidence_class="CURRENT_FIRST_SEEN_CAPTURE",
                 replay_eligible=False, content_type=response["content_type"],
                 availability_proof_type="ACTUAL_FIRST_SUCCESSFUL_RETRIEVAL", revision_of_sha256=None)
             record.update(state="CAPTURED_NOT_YET_QUALIFIED", sha256=artifact["sha256"],
@@ -116,6 +150,63 @@ class Capture:
             # One request per identity, including failures; never loop until READY.
             self.cache[url] = exc
             raise
+
+
+def verified_proxy_payload(root, artifact, now):
+    """Verify original stored bytes; parsing remains exclusively in source_gate_runner."""
+    registry, spec = proxy_source()
+    l6.require(artifact.get("source_contract_id") == PROXY
+               and artifact.get("request_identity") == "GET " + spec.endpoint
+               and artifact.get("source_authority_hash") == registry.hash
+               and artifact.get("source_id") == spec.source_id
+               and artifact.get("source_documentation") == spec.raw["documentation"]
+               and artifact.get("formal_composite_authority") == "NONE", "L6_PROXY_IDENTITY_INVALID")
+    first = l6.integer(artifact.get("first_seen_at_ms"), "L6_FIRST_SEEN_INVALID")
+    retrieved = l6.integer(artifact.get("retrieved_at_ms"), "L6_RETRIEVAL_INVALID")
+    l6.require(0 < first == retrieved <= now
+               and artifact.get("available_at_coverage_start_ms") == first
+               and artifact.get("available_at_coverage_end_ms") == first
+               and artifact.get("replay_eligible") is False
+               and artifact.get("evidence_class") == "CURRENT_FIRST_SEEN_CAPTURE"
+               and artifact.get("license_classification") == "TERMS_REVIEW_REQUIRED_LOCAL_RESEARCH_ONLY",
+               "L6_PROXY_AVAILABILITY_INVALID")
+    digest = artifact.get("sha256")
+    l6.require(isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest), "L6_HASH_INVALID")
+    expected = f"artifacts/sha256/{digest[:2]}/{digest}"
+    path = acquisition._safe_archive_path(root, artifact.get("archive_relpath"))
+    l6.require(path is not None and artifact.get("archive_relpath") == expected, "L6_ARTIFACT_PATH_ESCAPE")
+    raw = path.read_bytes()
+    l6.require(acquisition.sha256_bytes(raw) == digest and len(raw) == artifact.get("size_bytes"),
+               "L6_ARTIFACT_BYTES_MISMATCH")
+    return json.loads(raw)
+
+
+def capture_directional_proxy(root, *, fetcher=fetch_official_bytes, l6_root=None):
+    """One small registered research request; no quarterly/archive downloads."""
+    authority = l6.lock()
+    root = Path(root).resolve()
+    root.mkdir(parents=True, exist_ok=False)
+    capture = Capture(root, authority, fetcher=fetcher, max_archive_bytes=4 * 1024 * 1024)
+    result = {"scope": "BINANCE_BTCUSDT_DIRECTIONAL_PROXY_RESEARCH_ONLY",
+              "formal_composite_authority": "NONE", "state": "BLOCKED"}
+    try:
+        raw, artifact = capture.get(capture.proxy_spec.endpoint, PROXY)
+        artifact.update(source_id=capture.proxy_spec.source_id,
+                        source_documentation=capture.proxy_spec.raw["documentation"],
+                        formal_composite_authority="NONE")
+        # Persist original acquisition even if parsing/freshness later fails.
+        write_new(root/"directional_proxy_artifact.json", artifact)
+        result["artifact"] = artifact
+        now = int(time.time() * 1000)
+        result["evidence_chain"] = verify_evidence_chain(root, now, proxy_artifact=artifact, l6_root=l6_root)
+        quality = result["evidence_chain"]["directional_proxy_evidence"]["quality_state"]
+        result["state"] = "PASS" if quality == "VALID_FRESH" else "STALE" if quality == "STALE" else "BLOCKED"
+    except Exception as exc:
+        result["reason"] = f"{type(exc).__name__}:{exc}"
+    result.update(requests=capture.attempts, request_count=len(capture.attempts),
+                  evaluated_at_ms=int(time.time()*1000), authority=authority["authority"])
+    write_new(root/"directional_proxy_capture.json", result)
+    return result
 
 
 def venue_coverage(raw, item, venue, end):
@@ -171,8 +262,12 @@ def capture_sources(root, *, fetcher=fetch_official_bytes, max_archive_bytes=512
                 l6.require(urls, "L6_KRAKEN_NO_OFFICIAL_QUARTERLY_LINKS")
                 results[vid] = {"state":"BLOCKED", "official_quarterly_urls":urls,
                     "documentation_sha256":link["sha256"], "coverage":[]}
+                feasibility = quarterly_feasibility(urls, end)
+                results[vid]["feasibility"] = feasibility
                 responses = []
-                for url in urls:
+                # Page-first feasibility: never download old giant archives
+                # when they cannot possibly supply the requested latest window.
+                for url in urls if feasibility["state"] != "BLOCKED" else []:
                     try:
                         raw, artifact = capture.get(url,l6.COMPOSITE,archive=True)
                         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
@@ -215,16 +310,18 @@ def capture_sources(root, *, fetcher=fetch_official_bytes, max_archive_bytes=512
     for family, manifest in manifests.items():
         write_new(root / f"{family}.json",manifest)
     now = int(time.time() * 1000)
+    from crt_radar.source_gate_runner import _assert_fresh, StaleData
     qualified = {}
     for family in l6.SOURCE_IDS:
         try:
             value = l6.load_source(family,now_ms=now,root=root)
-            l6.require(now-value["as_of_ms"] <= 172800000, "L6_CAPTURE_WINDOW_STALE")
+            _assert_fresh(value["as_of_ms"], now_ms=now, max_age_seconds=172800)
             qualified[family] = {"state":"PASS","as_of_ms":value["as_of_ms"],
                 "metrics":{metric:value[metric] for metric in l6.METRICS[family]},
                 "measurement_days":len(value["measurement_rows"])}
         except Exception as exc:
-            qualified[family] = {"state":"BLOCKED","reason":f"{type(exc).__name__}:{exc}"}
+            qualified[family] = {"state":"STALE" if isinstance(exc, StaleData) else "BLOCKED",
+                                 "reason":f"{type(exc).__name__}:{exc}"}
     result = {"schema_version":"CRT_L6_PUBLIC_CAPTURE_RESULT_V0.1", "started_at_ms":started,
         "evaluated_at_ms":now,"venues":results,"qualification":qualified,"errors":errors,
         "requests":capture.attempts,"request_count":len(capture.attempts),
@@ -235,7 +332,7 @@ def capture_sources(root, *, fetcher=fetch_official_bytes, max_archive_bytes=512
     return result
 
 
-def verify_evidence_chain(root, now):
+def verify_evidence_chain(root, now, *, proxy_artifact=None, l6_root=None):
     """Existing gate and pack only; other uncaptured sources remain explicitly missing."""
     from crt_radar.source_registry import SourceRegistry
     from crt_radar.source_gate_runner import run_source_gate, default_registry_path, FetchResult
@@ -243,7 +340,11 @@ def verify_evidence_chain(root, now):
     registry = SourceRegistry.load(default_registry_path())
     overrides = {s["source_id"]:FetchResult(s["source_id"],"ERROR", attempts=0,
         error="SOURCE_NOT_COLLECTED_BY_THIS_L6_ONLY_CAPTURE") for s in registry.with_l6_candidate_sources().payload["sources"]}
-    gate = run_source_gate(registry, now_ms=now, l6_source_root=root, fetch_overrides=overrides,
+    proxy_spec = registry.by_input_family(PROXY)
+    if proxy_artifact is not None:
+        overrides[proxy_spec.source_id] = FetchResult(proxy_spec.source_id, "OK", attempts=0,
+            payload=verified_proxy_payload(root, proxy_artifact, now))
+    gate = run_source_gate(registry, now_ms=now, l6_source_root=l6_root or root, fetch_overrides=overrides,
         probe_fetcher=lambda spec:overrides[spec.source_id])
     folder = root/"verification"
     folder.mkdir()
@@ -255,15 +356,24 @@ def verify_evidence_chain(root, now):
         "l6_blocked_reasons":gate["l6_candidate_blocked_reasons"],
         "evidence_pack_hash":pack["evidence_pack_hash"], "pack_state":pack["pack_state"],
         "l6_metrics":pack["layers"].get("L6", {}).get("metrics", {}),
+        "directional_proxy_evidence":next(e for e in gate["evidence"] if e["input_family"] == PROXY),
         "scenario_id":overlay["scenario"]["id"], "formal_season":pack["formal_candidate"].get("formal_season"),
-        "scope":"L6_ONLY_OTHER_SOURCES_NOT_COLLECTED_NO_FORMAL_SEASON_RESTORATION_CLAIM"}
+        "scope":"L6_AND_OPTIONAL_DIRECTIONAL_RESEARCH_OTHER_SOURCES_NOT_COLLECTED_NO_FORMAL_SEASON_RESTORATION_CLAIM"}
 
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-root",type=Path,required=True,help="New isolated archive directory; existing roots are refused")
     parser.add_argument("--max-archive-bytes",type=int,default=512*1024*1024,help="Operator download resource bound, not a source qualification limit")
+    parser.add_argument("--directional-proxy-only",action="store_true",help="Only the existing registered Binance daily research request; never a formal composite")
+    parser.add_argument("--l6-source-root",type=Path,help="Read-only existing isolated archives for proxy-only evidence verification")
     args=parser.parse_args(argv)
+    if args.l6_source_root and not args.directional_proxy_only:
+        parser.error("--l6-source-root requires --directional-proxy-only")
+    if args.directional_proxy_only:
+        result=capture_directional_proxy(args.output_root,l6_root=args.l6_source_root)
+        print(json.dumps({"state":result["state"],"request_count":result["request_count"]},ensure_ascii=False))
+        return 0 if result["state"] == "PASS" else 2
     result=capture_sources(args.output_root,max_archive_bytes=args.max_archive_bytes)
     print(json.dumps({"qualification":result["qualification"],"request_count":result["request_count"]},ensure_ascii=False))
     return 0 if all(r["state"]=="PASS" for r in result["qualification"].values()) else 2

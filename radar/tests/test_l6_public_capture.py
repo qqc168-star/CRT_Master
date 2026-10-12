@@ -34,7 +34,9 @@ class L6PublicCaptureTests(unittest.TestCase):
         self.calls=[]
         self.authority=l6.lock()
         self.kraken_doc=next(v['documentation'] for v in self.authority['decisions'][l6.COMPOSITE]['venue_universe'] if v['venue_id']=='KRAKEN_XBT_USD')
-        self.archive='https://assets.kraken.com/marketing/institutions/Kraken_OHLCVT_2026Q2.zip'
+        from datetime import datetime,timezone
+        today=datetime.fromtimestamp(self.end/1000,timezone.utc)
+        self.archive=f'https://assets.kraken.com/marketing/institutions/Kraken_OHLCVT_{today.year}Q{(today.month-1)//3+1}.zip'
         self.kraken_missing=False
         self.bad_checksum=False
         self.coinbase_error=False
@@ -110,6 +112,18 @@ class L6PublicCaptureTests(unittest.TestCase):
         self.assertEqual(list(result['evidence_chain']['l6_metrics']),['cvd_20d_share'])
         self.assertEqual(result['evidence_chain']['scenario_id'],'SCENARIO_0')
 
+    def test_complete_formal_family_window_is_stale_through_existing_gate(self):
+        self.run_capture()
+        from crt_radar.source_gate_runner import run_source_gate
+        registry=capture.proxy_source()[0]
+        gate=run_source_gate(registry,fetch_overrides={},l6_source_root=self.root,
+                             now_ms=self.end+4*l6.DAY)
+        for family in l6.SOURCE_IDS:
+            evidence=next(e for e in gate['evidence'] if e['input_family']==family)
+            self.assertEqual(evidence['quality_state'],'STALE')
+            self.assertNotIn(family,gate['parsed'])
+        self.assertEqual(gate['l6_candidate_state'],'BLOCKED')
+
     def test_missing_source_does_not_erase_other_verified_data_or_retry(self):
         self.coinbase_error=True
         result=self.run_capture()
@@ -117,6 +131,16 @@ class L6PublicCaptureTests(unittest.TestCase):
         self.assertEqual(result['qualification'][l6.COMPOSITE]['state'],'BLOCKED')
         self.assertEqual(result['qualification'][l6.AGGRESSOR]['state'],'PASS')
         self.assertEqual(len(self.calls),len(set(self.calls)))
+
+    def test_known_old_quarter_stops_before_giant_download(self):
+        self.archive='https://assets.kraken.com/marketing/institutions/Kraken_OHLCVT_2024Q1.zip'
+        result=self.run_capture()
+        self.assertNotIn(self.archive,self.calls)
+        self.assertEqual(result['venues']['KRAKEN_XBT_USD']['feasibility']['state'],'BLOCKED')
+        self.assertEqual(result['venues']['KRAKEN_XBT_USD']['feasibility']['archive_publication_time'],'NOT_PROVEN')
+        self.assertEqual(result['qualification'][l6.COMPOSITE]['state'],'BLOCKED')
+        self.assertEqual(result['qualification'][l6.AGGRESSOR]['state'],'PASS')
+        self.assertEqual(result['evidence_chain']['scenario_id'],'SCENARIO_0')
 
     def test_checksum_and_cross_day_boundary_fail_closed(self):
         for fault in ('bad_checksum','boundary_gap'):
@@ -170,6 +194,57 @@ class L6PublicCaptureTests(unittest.TestCase):
         for _ in range(2):
             with self.assertRaises(OSError):client.get(url,l6.COMPOSITE)
         self.assertEqual(self.calls,[url])
+
+    def proxy_fetch(self, **kwargs):
+        self.calls.append(kwargs['url'])
+        self.assertEqual(kwargs['url'], capture.proxy_source()[1].endpoint)
+        rows=[]
+        for index in range(210):
+            start=self.end-(210-index)*l6.DAY
+            rows.append([start,'100','120','90','110','50',start+l6.DAY-1,
+                         '5000',100,'30','3000','0'])
+        return {'body':json.dumps(rows).encode(),'status_code':200,'final_url':kwargs['url'],
+                'content_type':'application/json','retrieved_at_ms':int(time.time()*1000)}
+
+    def test_registered_proxy_capture_is_research_only_and_never_downloads_quarters(self):
+        with patch('crt_radar.source_gate_runner._http_get',side_effect=AssertionError('OTHER_NETWORK')):
+            result=capture.capture_directional_proxy(self.root,fetcher=self.proxy_fetch)
+        self.assertEqual(result['state'],'PASS')
+        self.assertEqual(result['request_count'],1)
+        self.assertEqual(result['artifact']['source_authority_hash'],capture.proxy_source()[0].hash)
+        self.assertEqual(result['evidence_chain']['l6_candidate_state'],'BLOCKED')
+        self.assertIsNone(result['evidence_chain']['formal_season'])
+        self.assertEqual(result['evidence_chain']['directional_proxy_evidence']['quality_state'],'VALID_FRESH')
+        for row in result['evidence_chain']['l6_metrics'].values():
+            self.assertEqual(row['input_family'],capture.PROXY)
+
+    def test_parseable_historical_real_shapes_remain_stale_without_refreshing_source_time(self):
+        def old(**kw):
+            response=self.proxy_fetch(**kw)
+            rows=json.loads(response['body'])
+            for row in rows:
+                row[0]-=4*l6.DAY;row[6]-=4*l6.DAY
+            response['body']=json.dumps(rows).encode()
+            return response
+        result=capture.capture_directional_proxy(self.root,fetcher=old)
+        self.assertEqual(result['state'],'STALE')
+        self.assertEqual(result['evidence_chain']['directional_proxy_evidence']['quality_state'],'STALE')
+        self.assertEqual(result['evidence_chain']['l6_metrics'],{})
+        self.assertIsNone(result['evidence_chain']['formal_season'])
+
+    def test_proxy_original_bytes_and_identity_must_verify_before_replay(self):
+        result=capture.capture_directional_proxy(self.root,fetcher=self.proxy_fetch)
+        artifact=result['artifact']
+        self.assertIsInstance(capture.verified_proxy_payload(self.root,artifact,int(time.time()*1000)),list)
+        for field,value in (('source_id','UNKNOWN'),('source_authority_hash','0'*64),
+                            ('formal_composite_authority','APPROVED'),('archive_relpath','../escape')):
+            with self.subTest(field=field):
+                with self.assertRaises(l6.L6SourceError):
+                    capture.verified_proxy_payload(self.root,{**artifact,field:value},int(time.time()*1000))
+        path=self.root/artifact['archive_relpath']
+        path.write_bytes(path.read_bytes()+b' ')
+        with self.assertRaisesRegex(l6.L6SourceError,'BYTES_MISMATCH'):
+            capture.verified_proxy_payload(self.root,artifact,int(time.time()*1000))
 
 
 if __name__=='__main__':unittest.main()

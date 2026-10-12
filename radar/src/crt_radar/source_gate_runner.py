@@ -489,14 +489,41 @@ def parse_coinmetrics_caps(payload: Any) -> dict[str, Any]:
     return result
 
 
-def parse_price_structure(payload: Any) -> dict[str, Any]:
+def parse_price_structure(payload: Any, *, now_ms: int | None = None) -> dict[str, Any]:
     if not isinstance(payload, list):
         raise ContractViolation("BTC kline payload must be a list")
-    now_ms = int(time.time() * 1000)
-    complete = [row for row in payload if isinstance(row, list) and len(row) >= 11 and int(row[6]) < now_ms]
+    now = int(time.time() * 1000) if now_ms is None else now_ms
+    day_ms = 86_400_000
+    current_day = now // day_ms * day_ms
+    complete = []
+    previous_open = None
+    seen = set()
+    for index, row in enumerate(payload):
+        if not isinstance(row, list) or len(row) < 11:
+            raise ContractViolation("BTC daily kline row incomplete")
+        if any(not isinstance(row[field], int) or isinstance(row[field], bool) for field in (0, 6)):
+            raise ContractViolation("BTC daily kline timestamps must be integer milliseconds")
+        open_ms = _timestamp_ms(row[0], "open_time")
+        close_ms = _timestamp_ms(row[6], "close_time")
+        if open_ms % day_ms or close_ms != open_ms + day_ms - 1:
+            raise ContractViolation("BTC daily kline must cover one UTC day")
+        if open_ms in seen:
+            raise ContractViolation("BTC daily kline duplicate date")
+        if previous_open is not None and open_ms <= previous_open:
+            raise ContractViolation("BTC daily klines must be strictly ascending")
+        if open_ms > current_day:
+            raise ContractViolation("BTC daily kline future date")
+        seen.add(open_ms)
+        previous_open = open_ms
+        if close_ms < now:
+            complete.append(row)
+        elif open_ms != current_day or index != len(payload) - 1:
+            raise ContractViolation("BTC unfinished daily kline must be the trailing current day")
     if len(complete) < 201:
         raise ContractViolation("BTC price structure requires 201 complete daily bars")
     bars = complete[-201:]
+    if any(bars[index][0] - bars[index - 1][0] != day_ms for index in range(1, len(bars))):
+        raise ContractViolation("BTC price structure requires 201 consecutive UTC daily bars")
     parsed: list[dict[str, float]] = []
     for row in bars:
         open_value = _finite(row[1], "open", positive=True)
@@ -843,7 +870,11 @@ def run_source_gate(
                 parser = PARSERS.get(spec.parser_id)
                 if parser is None:
                     raise ContractViolation(f"unsupported parser_id: {spec.parser_id}")
-                parsed_value = parser(fetched.payload)
+                parsed_value = (
+                    parser(fetched.payload, now_ms=now)
+                    if spec.parser_id == "BINANCE_PRICE_STRUCTURE_PROXY_V1"
+                    else parser(fetched.payload)
+                )
                 _assert_fresh(parsed_value["as_of_ms"], now_ms=now, max_age_seconds=spec.max_age_seconds)
                 quality_state = "VALID_FRESH"
                 parsed[family] = parsed_value
