@@ -243,7 +243,7 @@ class BtcBullValidationTests(unittest.TestCase):
         )
 
     def test_price_structure_derives_breakout_volume_research_metrics(self):
-        start_ms = 1_700_000_000_000
+        start_ms = 1_699_920_000_000  # 2023-11-14 00:00 UTC
         day_ms = 86_400_000
         payload = []
 

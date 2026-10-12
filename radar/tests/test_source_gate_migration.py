@@ -4,15 +4,20 @@ import json
 import sys
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from crt_radar.source_gate_runner import FetchResult, parse_coinmetrics_caps, parse_funding, run_source_gate
+from crt_radar.source_gate_runner import (
+    ContractViolation, FetchResult, parse_coinmetrics_caps, parse_funding,
+    parse_price_structure, run_source_gate,
+)
 from crt_radar.liquidation_aggregator import canonical_json_bytes, sha256_hex
 from crt_radar.source_registry import RegistryError, SourceRegistry
-from layer_fixtures import supplemental_overrides
+from layer_fixtures import DAY_MS, _price_rows, supplemental_overrides
 
 
 REGISTRY_PATH = ROOT / "CONFIG" / "SOURCE_REGISTRY_V1.2.json"
@@ -320,6 +325,98 @@ class SourceGateMigrationTests(unittest.TestCase):
         self.assertIn("ONCHAIN_VALUE", result["parsed"])
         self.assertAlmostEqual(result["parsed"]["ONCHAIN_VALUE"]["mvrv"], 2.0)
         self.assertAlmostEqual(result["parsed"]["ONCHAIN_VALUE"]["nupl"], 0.5)
+
+
+class PriceStructureIntegrityTests(unittest.TestCase):
+    def setUp(self):
+        self.rows = _price_rows(NOW_MS)[-201:]
+
+    def parse(self, rows=None):
+        return parse_price_structure(self.rows if rows is None else rows, now_ms=NOW_MS)
+
+    def test_complete_201_days_retains_research_scope(self):
+        result = self.parse()
+        self.assertEqual(result["as_of_ms"], self.rows[-1][6])
+        self.assertEqual(result["source_scope"], "BINANCE_BTCUSDT_DIRECTIONAL_PROXY")
+        self.assertEqual(result["formal_composite_authority"], "NONE")
+
+    def test_missing_day_is_not_repaired_by_older_extra_bar(self):
+        rows = _price_rows(NOW_MS)
+        rows.pop(50)
+        with self.assertRaisesRegex(ContractViolation, "consecutive"):
+            self.parse(rows)
+
+    def test_duplicate_date_is_not_counted_as_another_day(self):
+        self.rows.append(deepcopy(self.rows[-1]))
+        with self.assertRaisesRegex(ContractViolation, "duplicate"):
+            self.parse()
+
+    def test_original_time_order_must_be_strictly_ascending(self):
+        self.rows[50], self.rows[51] = self.rows[51], self.rows[50]
+        with self.assertRaisesRegex(ContractViolation, "ascending"):
+            self.parse()
+
+    def current_day_row(self, offset=0):
+        row = deepcopy(self.rows[-1])
+        row[0] = NOW_MS // DAY_MS * DAY_MS + offset * DAY_MS
+        row[6] = row[0] + DAY_MS - 1
+        return row
+
+    def test_trailing_current_day_is_excluded_from_metrics(self):
+        expected = self.parse()
+        current = self.current_day_row()
+        current[1:5] = ["999999", "999999", "999999", "999999"]
+        self.assertEqual(self.parse(self.rows + [current]), expected)
+
+    def test_unfinished_day_cannot_complete_a_201_day_window(self):
+        with self.assertRaisesRegex(ContractViolation, "201 complete"):
+            self.parse(self.rows[1:] + [self.current_day_row()])
+
+    def test_future_day_is_rejected(self):
+        with self.assertRaisesRegex(ContractViolation, "future"):
+            self.parse(self.rows + [self.current_day_row(offset=1)])
+
+    def test_daily_timestamp_must_cover_one_utc_day(self):
+        for field in (0, 6):
+            rows = deepcopy(self.rows)
+            rows[50][field] += 1
+            with self.subTest(field=field), self.assertRaisesRegex(ContractViolation, "UTC day"):
+                self.parse(rows)
+
+    def test_malformed_or_fractional_timestamp_is_not_silently_dropped(self):
+        for bad_row in ([self.rows[50][0]], [None] * 11):
+            rows = deepcopy(self.rows)
+            rows[50] = bad_row
+            with self.subTest(row=bad_row), self.assertRaises(ContractViolation):
+                self.parse(rows)
+        self.rows[50][0] += 0.5
+        with self.assertRaisesRegex(ContractViolation, "integer"):
+            self.parse()
+
+    def gate(self, rows, now_ms):
+        registry = SourceRegistry.load(REGISTRY_PATH)
+        spec = registry.by_input_family("PRICE_STRUCTURE_CONTEXT")
+        with patch("crt_radar.source_gate_runner._http_get", side_effect=AssertionError("NO_NETWORK")):
+            return run_source_gate(
+                registry, now_ms=now_ms,
+                fetch_overrides={spec.source_id: FetchResult(spec.source_id, "OK", payload=rows)},
+            )
+
+    def test_historical_complete_window_is_stale_not_invalid(self):
+        result = self.gate(self.rows, NOW_MS + 3 * DAY_MS)
+        evidence = next(row for row in result["evidence"] if row["input_family"] == "PRICE_STRUCTURE_CONTEXT")
+        self.assertEqual(evidence["quality_state"], "STALE")
+        self.assertEqual(evidence["as_of_ms"], self.rows[-1][6])
+        self.assertNotIn("PRICE_STRUCTURE_CONTEXT", result["parsed"])
+
+    def test_gate_uses_evaluation_clock_and_keeps_formal_l6_blocked(self):
+        fresh = self.gate(self.rows + [self.current_day_row()], NOW_MS)
+        self.assertIn("PRICE_STRUCTURE_CONTEXT", fresh["parsed"])
+        self.assertEqual(fresh["l6_candidate_state"], "BLOCKED")
+        future = self.gate(self.rows + [self.current_day_row(offset=1)], NOW_MS)
+        evidence = next(row for row in future["evidence"] if row["input_family"] == "PRICE_STRUCTURE_CONTEXT")
+        self.assertEqual(evidence["quality_state"], "INVALID")
+        self.assertIn("future", evidence["quality_error"])
 
 
 if __name__ == "__main__":
