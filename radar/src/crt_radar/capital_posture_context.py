@@ -316,10 +316,17 @@ def build_capital_posture_context(inputs, evidence_pack, gold_context=None):
     blockers = [name for name, value in (("CURRENT_RAIL", rail), ("OPERATING_ANCHOR", fund),
         ("FLYWHEEL_ECONOMICS", economics), ("GOLD_CONTEXT", {"state": "AVAILABLE" if gold_valid else "BLOCKED"}))
         if not _available(value)]
+    from .portfolio_allocation_context import build_allocation_review_table
+    allocation_review = _claim(_record, inputs.get("allocation_review"), as_of=as_of,
+                              metric="ALLOCATION_REVIEW")
+    if allocation_review.get("cycle_id") != cycle:
+        allocation_review = _blocked("ALLOCATION_REVIEW_CYCLE_MISMATCH")
+    table = build_allocation_review_table(evidence_pack, rail, allocation_review)
     output = {"schema_version": SCHEMA_VERSION, "storage": "LOCAL_ONLY", "research_state": "RESEARCH_ONLY",
         "state": "READY_FOR_ANALYST" if any(_available(v) for v in (rail, economics, fund, review)) else "BLOCKED",
         "as_of_ms": as_of, "cycle_id": cycle, "parent_evidence_pack_hash": parent_hash,
         "gold_context_hash": gold.get("context_hash"), "current_strategic_capital_posture": rail,
+        "allocation_review_table": table,
         "current_rail_step": rail.get("current_rail_step", "BLOCKED"),
         "eligible_next_posture": {"state": "NOT_EVALUATED", "final_eligibility": "NOT_DETERMINED",
                                   "research_candidate": posture["posture_candidate"],
@@ -352,6 +359,72 @@ def build_capital_posture_context(inputs, evidence_pack, gold_context=None):
         "bridge_policy": "LOCAL_ONLY_NO_BRIDGE_BYTES_ADDED", **LOCKS}
     output["context_hash"] = _hash(output)
     return output
+
+
+def render_allocation_review_table(context, *, at_ms, envelope=None, response=None):
+    """Local human table; share counts come only from the existing final validator."""
+    if not _sealed_context(context, "context_hash"):
+        raise ValueError("CAPITAL_POSTURE_CONTEXT_HASH_INVALID")
+    table = deepcopy(context["allocation_review_table"])
+    expiry = table.get("valid_until_ms")
+    current = (type(at_ms) is int and context["as_of_ms"] <= at_ms
+               and type(expiry) is int and at_ms < expiry)
+    if not current:
+        for row in table["rows"]:
+            for key in ("target_pct", "delta_pct", "target_usd", "delta_usd"):
+                row[key] = None
+            row["state"] = "BLOCKED"
+            row["blockers"].append("ALLOCATION_REVIEW_EXPIRED_OR_UNBOUNDED")
+    if current and envelope is not None and response is not None:
+        from .capital_decision_closure import validated_receipt, assert_current
+        source = envelope["capital_source"]
+        if source.get("evidence_lineage") != context["parent_evidence_pack_hash"]:
+            raise ValueError("ALLOCATION_TABLE_CAPITAL_SOURCE_LINEAGE_MISMATCH")
+        if (not table.get("capital_observation_hash") or table["capital_observation_hash"] !=
+                (source.get("broker_observation") or {}).get("observation_hash")):
+            raise ValueError("ALLOCATION_TABLE_CAPITAL_OBSERVATION_MISMATCH")
+        # The receipt gate includes formal buy valuation and reasoning bindings;
+        # base arithmetic validation alone must not qualify displayed quantities.
+        validated = validated_receipt(response, envelope, at_ms=at_ms)["capital_validation"]
+        assert_current(validated, source, at_ms=at_ms)
+        from decimal import Decimal
+        for row in table["rows"]:
+            target_scope = table.get("allocation_adjustment_scopes", {}).get(row["asset"])
+            delta = row.get("delta_usd")
+            expected = "BUY" if delta is not None and delta > 0 else (
+                "SELL" if delta is not None and delta < 0 else None)
+            legs = [{"action": leg["action"], "quantity": leg["quantity"],
+                     "decision_scope": item["decision_scope"]}
+                    for item in validated["items"] if item["validation_state"] == "VALIDATED"
+                    for leg in item["validated_legs"]
+                    if leg["asset"] == row["asset"] and leg["validation_state"] == "VALIDATED"
+                    and isinstance(target_scope, str) and target_scope.strip()
+                    and item["decision_scope"] == target_scope
+                    and expected is not None and leg["action"] == expected
+                    and leg.get("order_type") == "LIMIT"
+                    and isinstance(leg.get("capital_effect"), dict)
+                    and Decimal(str(leg["capital_effect"].get(
+                        "spend_upper_bound_usd" if expected == "BUY"
+                        else "proceeds_lower_bound_usd") or "0")) > 0
+                    and Decimal(str(leg["capital_effect"].get(
+                        "spend_upper_bound_usd" if expected == "BUY"
+                        else "proceeds_lower_bound_usd") or "0")) <= abs(Decimal(str(delta)))]
+            if legs and row["state"] == "RESEARCH_ONLY":
+                row["qualified_share_counts"] = legs
+                row["quantity_state"] = "VALIDATED_ALLOCATION_ADJUSTMENT_LEGS"
+                row["quantity_reason"] = None
+    def cell(value):
+        return "null" if value is None else str(value)
+    lines = ["RESEARCH_ONLY · 總戰術組合口徑 · 合格股數為決策腿，非自動再平衡",
+             "| 資產 | 目前％ | 目標％ | 差額％ | 目標 USD | 差額 USD | 合格股數 | 資格／缺口 |",
+             "|---|---:|---:|---:|---:|---:|---|---|"]
+    for row in table["rows"]:
+        quantities = row["qualified_share_counts"]
+        quantity_text = "; ".join(f"{leg['action']} {leg['quantity']}" for leg in quantities) if quantities else "null"
+        status = "; ".join(row["blockers"] + ([row["quantity_reason"]] if row["quantity_reason"] else [])) or row["state"]
+        lines.append("| " + " | ".join([row["asset"], *(cell(row[k]) for k in
+            ("current_pct", "target_pct", "delta_pct", "target_usd", "delta_usd")), quantity_text, status]) + " |")
+    return "\n".join(lines)
 
 
 def main(argv=None):

@@ -130,6 +130,29 @@ class GptAnalysisDoctrineTests(unittest.TestCase):
         boot = self.readme.split("## Boot sequence for a fresh GPT", 1)[1].split("\n## ", 1)[0]
         self.assertIn("Read `CRT_GPT_ANALYSIS_DOCTRINE_V0.1.md`", boot)
 
+    def test_four_tables_preserve_eight_obligations_and_independent_verdict(self):
+        original = self.doctrine.split('## 11. 最小輸出格式', 1)[1].split('### 11.1', 1)[0]
+        for label in ('Data adequacy', 'What changed', 'Causal map', 'Independence / contradictions',
+                      'Regime / weather / forces', 'Asset roles / portfolio', 'Capital judgment',
+                      'Invalidation / next evidence'):
+            self.assertIn(label, original)
+        section = self.doctrine.split('### 11.1', 1)[1].split('## 12.', 1)[0]
+        for label in ('① CRT 全框架實際貢獻表', '② BTC 價格比較與 CRT 獨立裁決',
+                      '③ CRT 資本決策表', '④ BTC 路徑 → 各投資標的目標持股％（示範版）',
+                      '才與前行者假說比較', 'L0 維持既有源頭事件定位', '不是第五檔美國證券',
+                      '65/35 是已投入資本桶內比例', '65/35 是成長桶內比例', 'null／BLOCKED',
+                      '不重配剩餘權重湊分', '不宣告 Q1～Q7 功能或實戰驗收已完成'):
+            self.assertIn(label, section)
+
+    def test_queue_order_and_historical_replay_do_not_inflate_acceptance(self):
+        baton = (self.root / 'radar/STATUS/CRT_ACTIVE_BATON.md').read_text(encoding='utf-8')
+        offsets = [baton.index('### Q' + str(i) + ' ') for i in range(1, 8)]
+        self.assertEqual(offsets, sorted(offsets))
+        self.assertIn('原八項實戰驗收仍為 7/8', baton)
+        self.assertIn('事後整理', baton)
+        self.assertIn('不能倒填事前紀錄', self.doctrine)
+        self.assertIn('模型理解能力維持 NOT_YET_PROVEN', self.doctrine)
+
     def identity_lock(self) -> str:
         return self.doctrine.split("### 1.1 Project Identity Lock（專案身份鎖）", 1)[1].split(
             "## 2. 權限與正式邊界", 1

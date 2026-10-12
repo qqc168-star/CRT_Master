@@ -748,7 +748,7 @@ def _portfolio_state(private_context: Any, market_prices: Any) -> dict[str, Any]
                 unknown.append(asset)
                 continue
             value = qty * px
-            values[asset] = value
+            values[asset] = values.get(asset, 0.0) + value
             if asset in {"STRC", "SATA"}:
                 fixed += value
             else:
@@ -771,6 +771,9 @@ def _portfolio_state(private_context: Any, market_prices: Any) -> dict[str, Any]
     total = cash_total + invested
     if total <= 0:
         return {"state": "BLOCKED", "reason": "PORTFOLIO_TOTAL_NONPOSITIVE"}
+    # Multiple legitimate lots of one asset must agree with bucket totals.
+    if abs(sum(values.values()) - invested) > max(0.000001, abs(invested) * 1e-10):
+        return {"state": "BLOCKED", "reason": "HOLDING_DETAIL_BUCKET_TOTAL_MISMATCH"}
     result = {
         "state": "AVAILABLE",
         "values_usd": values,
@@ -1111,6 +1114,141 @@ def build_portfolio_allocation_context(
     if side_job.get("capital_scope_state") == "BLOCKED":
         out["blockers"].append("SIDE_JOB_CAPITAL_SCOPE_BLOCKED")
     return {"common_equity_health": health, "portfolio_allocation_context": out}
+
+
+def _q4_split_has_economic_support(q4, income, review, split, as_of_ms):
+    """Require a same-clock Q4 comparison, not an analyst's free-standing ratio.
+
+    This checks documentation and lineage, not whether GPT's reasoning is correct.
+    Q5 remains responsible for evaluating the investment conclusion.
+    """
+    from .gold_research_context import _hash
+    case = q4.get("strc_sata_allocation_case") if isinstance(q4, dict) else None
+    if not isinstance(case, dict) or not isinstance(review, dict):
+        return False
+    if not (case.get("state") == "RESEARCH_EVIDENCED"
+            and case.get("as_of_ms") == as_of_ms
+            and case.get("income_summary_hash") == income.get("summary_hash")
+            and case.get("recommended_strc_sata_pct") == split
+            and review.get("q4_allocation_case_hash") == _hash(case)):
+        return False
+    required = ("income_tradeoff", "issuer_risk", "capital_preservation",
+                "round_trip_friction", "cash_alternative", "allocation_reason", "invalidation")
+    reasons = case.get("economic_reasons")
+    if not isinstance(reasons, dict) or any(
+            not isinstance(reasons.get(key), str) or not reasons[key].strip() for key in required):
+        return False
+    references = case.get("asset_evidence_refs")
+    if not isinstance(references, dict) or any(
+            not isinstance(references.get(asset), str)
+            or references[asset] != f"income_engine.assets.{asset}.current_terms"
+            for asset in ("STRC", "SATA")):
+        return False
+    return True
+
+
+def build_allocation_review_table(pack, rail, review):
+    """Local table 4 arithmetic, using existing policy and a bound analyst review.
+
+    Never chooses a rail, splits income assets by itself, or creates trade legs.
+    Callers supply a PIT-validated review through capital_posture_context.
+    """
+    from .gold_research_context import _hash
+    if (not isinstance(pack, dict) or pack.get("evidence_pack_hash") != _hash(
+            {k: v for k, v in pack.items() if k != "evidence_pack_hash"})):
+        raise ValueError("ALLOCATION_TABLE_PARENT_HASH_INVALID")
+    assets = ("MSTR", "ASST", "STRC", "SATA", "USD_CASH")
+    allocation = pack.get("portfolio_allocation_context") or {}
+    current = allocation.get("current_allocation") or {}
+    total = _number(current.get("total_portfolio_usd")) if current.get("state") == "AVAILABLE" else None
+    if total is not None and total <= 0:
+        total = None
+    values = current.get("values_usd") or {}
+    targets, reasons = {}, []
+    parent = pack["evidence_pack_hash"]
+    if (not isinstance(review, dict) or review.get("state") == "BLOCKED"
+            or review.get("parent_evidence_pack_hash") != parent
+            or review.get("reviewed_by") != "ANALYST"
+            or review.get("allocation_source_hash") != _hash(allocation)):
+        reasons.append("BOUND_ALLOCATION_REVIEW_REQUIRED")
+    if rail.get("state") != "READY_FOR_ANALYST":
+        reasons.append("USER_CONFIRMED_CURRENT_RAIL_REQUIRED")
+    cash = _number(allocation.get("cash_target_pct"))
+    if allocation.get("state") != "READY_FOR_ANALYST" or cash is None:
+        reasons.append("EXPLICIT_EXISTING_CASH_POLICY_REQUIRED")
+    targets_ready = not reasons
+    split = rail.get("current_rail_step", {}).get("fixed_growth_pct") if targets_ready else None
+    if not isinstance(split, list) or len(split) != 2:
+        reasons.append("CURRENT_RAIL_HAS_NO_PERCENTAGE_SPLIT")
+        targets_ready = False
+    if targets_ready:
+        # Reuse approved range, current confirmed step, and existing health tilt.
+        lo, hi = allocation["cash_target_range"]
+        if not lo <= cash <= allocation["cash_stress_cap_pct"] or hi < lo:
+            reasons.append("CASH_OUTSIDE_EXISTING_POLICY")
+            targets_ready = False
+    if targets_ready:
+        invested = 100 - cash
+        targets["USD_CASH"] = cash
+        mstr = _number(allocation.get("suggested_mstr_pct"))
+        asst = _number(allocation.get("suggested_asst_pct"))
+        if (mstr is not None and asst is not None and min(mstr, asst) >= 0
+                and abs(mstr + asst - 100) < 1e-8):
+            for asset, pct in (("MSTR", mstr), ("ASST", asst)):
+                health = (pack.get("common_equity_health", {}).get("assets") or {}).get(asset) or {}
+                if health.get("health_direction") in {"IMPROVING", "STABLE", "DETERIORATING"}:
+                    targets[asset] = invested * split[1] / 100 * pct / 100
+        q4 = pack.get("asset_strategy_delta")
+        income = (q4.get("income_engine") or {}) if isinstance(q4, dict) else {}
+        income_valid = (income.get("schema_version") == "CRT_DUAL_FIXED_INCOME_V0.1"
+            and income.get("as_of_ms") == pack["generated_at_ms"]
+            and income.get("summary_hash") == _hash({k: v for k, v in income.items() if k != "summary_hash"}))
+        income_split = review.get("strc_sata_within_fixed_pct")
+        if (income_valid and review.get("q4_source_hash") == _hash(q4)
+                and _q4_split_has_economic_support(
+                    q4, income, review, income_split, pack["generated_at_ms"])
+                and isinstance(income_split, list) and len(income_split) == 2
+                and all(_number(x) is not None and 0 <= x <= 100 for x in income_split)
+                and abs(sum(income_split) - 100) < 1e-8):
+            for asset, pct in zip(("STRC", "SATA"), income_split):
+                fact = (income.get("assets") or {}).get(asset) or {}
+                if (fact.get("holding_state") == "AVAILABLE"
+                        and (fact.get("current_terms") or {}).get("state") == "AVAILABLE"):
+                    targets[asset] = invested * split[0] / 100 * pct / 100
+    rows = []
+    for asset in assets:
+        value = _number(current.get("cash_usd")) if asset == "USD_CASH" else _number(values.get(asset))
+        # Unknown holdings are never inferred as zero or renormalized.
+        current_pct = value / total * 100 if total is not None and value is not None else None
+        target = targets.get(asset)
+        target_usd = total * target / 100 if total is not None and target is not None else None
+        row_reasons = list(reasons)
+        if target is None:
+            row_reasons.append("ASSET_ALLOCATION_BASIS_INCOMPLETE")
+        if current_pct is None:
+            row_reasons.append("COMPLETE_CURRENT_PORTFOLIO_DENOMINATOR_REQUIRED")
+        rows.append({"asset": asset, "current_usd": value, "current_pct": current_pct,
+            "target_pct": target, "delta_pct": None if current_pct is None or target is None else target-current_pct,
+            "target_usd": target_usd, "delta_usd": None if value is None or target_usd is None else target_usd-value,
+            "qualified_share_counts": None,
+            "quantity_state": "NOT_APPLICABLE" if asset == "USD_CASH" else "BLOCKED",
+            "quantity_reason": "EXISTING_FINAL_CAPITAL_VALIDATION_REQUIRED" if asset != "USD_CASH" else None,
+            "state": "RESEARCH_ONLY" if not row_reasons else "BLOCKED", "blockers": row_reasons})
+    all_targets = len(targets) == len(assets)
+    expiries = [r.get("valid_until_ms") for r in (review, rail.get("provenance", {}))]
+    expiry = min(expiries) if all(type(v) is int for v in expiries) else None
+    return {"state": "RESEARCH_ONLY" if all_targets and all(r["state"] == "RESEARCH_ONLY" for r in rows) else "PARTIAL", "rows": rows,
+        "target_total_pct": sum(targets.values()) if all_targets else None,
+        "known_target_subtotal_pct": sum(targets.values()), "percentage_basis": "TOTAL_TACTICAL_PORTFOLIO",
+        "parent_evidence_pack_hash": parent, "as_of_ms": pack["generated_at_ms"],
+        "valid_until_ms": expiry,
+        "capital_observation_hash": ((pack.get("private_context") or {}).get("profile", {})
+            .get("capital_reconciliation", {}).get("broker_observed") or {}).get("observation_hash"),
+        "current_rail_step": deepcopy(rail.get("current_rail_step")),
+        "allocation_adjustment_scopes": deepcopy(review.get("allocation_adjustment_scopes", {}))
+            if isinstance(review, dict) and review.get("state") != "BLOCKED" else {},
+        "allocation_source_hash": _hash(allocation), "review_source_hash": _hash(review),
+        "limitation": "RESEARCH_TARGETS_NOT_TRADE_QUANTITIES_NO_AUTOMATIC_RAIL_ADVANCEMENT"}
 
 
 def compact_portfolio_allocation_context_for_bridge(pack: dict[str, Any]) -> dict[str, Any]:

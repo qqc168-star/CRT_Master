@@ -1,0 +1,295 @@
+{
+  "replay_kind": "RETROSPECTIVE_ARCHIVE_COMPARISON_ONLY",
+  "archive_handoff_date": "2026-10-11",
+  "radar_original_file_sha256": "f73f19b9856de205f099d634913d874b2d4b1b5e2596eb6f4dbfa72a8fef8d88",
+  "radar_artifact_status": "PARTIAL_EXPORTED_PACKET_FULL_PACK_HASH_NOT_VERIFIED",
+  "radar": {
+    "generated_at_ms": 1791636565305,
+    "claimed_evidence_pack_hash": "c7aba62e96a10c09e35b4177fb847d78b2286812f668ece926ad1d9176b7727a",
+    "pack_state": "BLOCKED",
+    "formal_season": null,
+    "formal_season_state": "CANDIDATE_BLOCKED",
+    "weights": {
+      "L1": 20,
+      "L2": 20,
+      "L3": 17,
+      "L4": 25,
+      "L5": 13,
+      "L6": 5
+    },
+    "light_thresholds": [
+      -60,
+      -35,
+      35,
+      60
+    ],
+    "layer_status": {
+      "L1": "VALID",
+      "L2": "VALID",
+      "L3": "PARTIAL",
+      "L4": "VALID",
+      "L5": "VALID",
+      "L6": "VALID"
+    },
+    "btc_spot": {
+      "as_of_ms": 1791636564001,
+      "evidence_hash": "b8da6ed32acad1240b5afc972f077019e0ecb445a76ce73a0bba17cb59b4cd1a",
+      "input_family": "BTC_SPOT_PRICE",
+      "quality_state": "VALID_FRESH",
+      "source_id": "CRT-CONN-BTC-SPOT-BINANCE-WAKE-001",
+      "value": 82822.01
+    },
+    "credit_counterevidence": {
+      "as_of_ms": 1791590400000,
+      "evidence_hash": "882deaec122f59e7515ac41f879982241e549409c654c3d1c6470b93778adefa",
+      "input_family": "CREDIT_LIQUIDITY_CONTEXT",
+      "quality_state": "VALID_FRESH",
+      "source_id": "CRT-CONN-CREDIT-LIQUIDITY-CONTEXT-001",
+      "value": 44.99999999999997
+    },
+    "missing_etp_metric": [
+      "spot_btc_etp_flow_20d_pct_aum"
+    ],
+    "formal_blockers": [
+      "L2_BROAD_USD_20D_LOG_CHANGE_OBSERVATION_REVISION_CONFLICT_BLOCKED",
+      "L3_HIGH_YIELD_OAS_20D_CHANGE_BP_OBSERVATION_REVISION_CONFLICT_BLOCKED",
+      "L3_SPOT_BTC_ETP_FLOW_20D_PCT_AUM_METRIC_MISSING",
+      "L3_STABLECOIN_SUPPLY_30D_LOG_CHANGE_OBSERVATION_REVISION_CONFLICT_BLOCKED",
+      "L3_spot_btc_etp_flow_20d_pct_aum_MISSING",
+      "L6_CLOSE_MINUS_SMA200_OVER_ATR20_INPUT_FAMILY_NOT_APPROVED",
+      "L6_CLOSE_MINUS_SMA200_OVER_ATR20_SOURCE_NOT_APPROVED",
+      "L6_CVD_20D_SHARE_INPUT_FAMILY_NOT_APPROVED",
+      "L6_CVD_20D_SHARE_SOURCE_NOT_APPROVED",
+      "L6_RETURN_20D_OVER_ATR_VOL_INPUT_FAMILY_NOT_APPROVED",
+      "L6_RETURN_20D_OVER_ATR_VOL_SOURCE_NOT_APPROVED",
+      "L6_SMA50_MINUS_SMA200_OVER_ATR20_INPUT_FAMILY_NOT_APPROVED",
+      "L6_SMA50_MINUS_SMA200_OVER_ATR20_SOURCE_NOT_APPROVED"
+    ]
+  },
+  "research_archive_sha256": "925078fd0104c381ae15fc160b96bc4728ccd6355a96b8a50590ea52a5042f8c",
+  "research": [
+    {
+      "source_id": "AMAO_OCTOBER",
+      "author": "阿貓",
+      "title": "比特币牛市确认！10月份BTC会怎么走？还会深跌吗？3个理由看好比特币继续上涨",
+      "original_docx_sha256": "1f81beb4e7fa1a8467013c69fae2788d148f67fcc1bda2a16da5aa24ad7917a8",
+      "claim_summary": "50 週均線收復支持牛市假說；10 月及 90K–95K 為條件式研究目標。",
+      "publication_at_ms": null,
+      "first_seen_at_ms": null,
+      "point_in_time_eligible": false,
+      "original_price_coordinates_usd": [
+        [
+          77700,
+          78800
+        ],
+        [
+          90000,
+          95000
+        ]
+      ],
+      "original_time_conditions": [
+        "2026 年 10 月偏多",
+        "收復 50WMA 後約 1～2 個月延續"
+      ],
+      "original_confirmation": "收復 50WMA；成熟牛市常見 20%～30% 回撤為來源假說。",
+      "original_invalidation": null,
+      "crt_countercondition": "50WMA 收復不獨立確認正式季節；結構未保留可削弱延續假說。",
+      "original_invalidation_status": "NOT_STATED_AS_EXPLICIT_RULE"
+    },
+    {
+      "source_id": "AMAO_PULLBACK",
+      "author": "阿貓",
+      "title": "比特币跌破8万怎么办？5.7万美元会破吗？阿猫一周年复盘",
+      "original_docx_sha256": "660616522e35a25fbdd06ff82cdd60675d3d2471de5ddf1130fa663e05fdea9f",
+      "claim_summary": "83K 為短期支持；77K／71K 為更深結構；57K 不再跌破是可反駁的來源主張。",
+      "publication_at_ms": null,
+      "first_seen_at_ms": null,
+      "point_in_time_eligible": false,
+      "original_price_coordinates_usd": [
+        [
+          83000
+        ],
+        [
+          77000
+        ],
+        [
+          71000
+        ],
+        [
+          57000
+        ],
+        [
+          68000
+        ],
+        [
+          52000,
+          56000
+        ],
+        [
+          48000
+        ]
+      ],
+      "original_time_conditions": [
+        "83K 短期支持；底部往往事後才確認"
+      ],
+      "original_confirmation": "回顧收復約 68K 的 200DMA 後才逐步認定 57K 底部。",
+      "original_invalidation": "57K 不再破的原主張明列超級黑天鵝例外。",
+      "crt_countercondition": "83K 原短期主張須直接檢驗；57K 仍保留可反駁尾部路徑。",
+      "original_invalidation_status": "EXPLICIT_SOURCE_CONDITION"
+    },
+    {
+      "source_id": "BEN_LINE",
+      "author": "Ben",
+      "title": "Bitcoin The Line in the Sand",
+      "original_docx_sha256": "01d65866f2dff2967068d6b4a6b34f331044a7c2b8da297b8fa1754906ff29ed",
+      "claim_summary": "83K 分界及週線接受決定買賣方舉證責任；不是 CRT 正式季節規則。",
+      "publication_at_ms": null,
+      "first_seen_at_ms": null,
+      "point_in_time_eligible": false,
+      "original_price_coordinates_usd": [
+        [
+          83000
+        ],
+        [
+          82800
+        ],
+        [
+          82300
+        ],
+        [
+          81000,
+          82000
+        ],
+        [
+          90000
+        ]
+      ],
+      "original_time_conditions": [
+        "週線接受；2019 類比為時間投降假說"
+      ],
+      "original_confirmation": "83K 若守住可回 90K 區。",
+      "original_invalidation": "跌回 81K～82K 會快速轉弱。",
+      "crt_countercondition": "週線與即時價格不可互換；2019 類比不構成正式季節。",
+      "original_invalidation_status": "EXPLICIT_SOURCE_CONDITION"
+    },
+    {
+      "source_id": "BEN_Q4",
+      "author": "Ben",
+      "title": "Bitcoin Q4 2026",
+      "original_docx_sha256": "984a2d8a8ea74fd99a6f2e82e74514d01bfc63a9f4c116e2a0cf572cc3cb122b",
+      "claim_summary": "歷史期中選舉年可有假突破與 Q4 再低點；政策事件後 40～50 天是類比假說。",
+      "publication_at_ms": null,
+      "first_seen_at_ms": null,
+      "point_in_time_eligible": false,
+      "original_price_coordinates_usd": [
+        [
+          57000,
+          60000
+        ]
+      ],
+      "original_time_conditions": [
+        "2026 Q4；2018／2022 類比",
+        "9 月政策事件後約 40～50 天"
+      ],
+      "original_confirmation": "重新接受回原區間支持假突破及回區間低點的原假說。",
+      "original_invalidation": null,
+      "crt_countercondition": "須核對當期市場接受及利率傳導；類比天數不構成自動倒數門檻。",
+      "original_invalidation_status": "NOT_STATED_AS_EXPLICIT_RULE"
+    },
+    {
+      "source_id": "JASON_JUDGEMENT",
+      "author": "Jason",
+      "title": "Bitcoin Judgement Day Has Arrived",
+      "original_docx_sha256": "97430bc518796ca0848e6e297a7ac63098cd6272fe5bc3b3c4c21a9858675372",
+      "claim_summary": "87.4K 時間與價格超越平衡；原規則不要求收盤，CRT 的持續與接受條件另列。",
+      "publication_at_ms": null,
+      "first_seen_at_ms": null,
+      "point_in_time_eligible": false,
+      "original_price_coordinates_usd": [
+        [
+          87400
+        ],
+        [
+          82000
+        ],
+        [
+          74000
+        ],
+        [
+          57000,
+          67000
+        ]
+      ],
+      "original_time_conditions": [
+        "超過先前約 89～90 天反彈及約 22.7K～23K 價格距離",
+        "67K 下停留過久為賣方重新占優的原條件"
+      ],
+      "original_confirmation": "刺穿 87.4K 即符合原價格規則，不要求收盤。",
+      "original_invalidation": "67K 下停留過久，賣方重新占優。",
+      "crt_countercondition": "CRT 另要求 Persistence 與 Acceptance；不得改寫原刺穿規則。",
+      "original_invalidation_status": "EXPLICIT_SOURCE_CONDITION"
+    },
+    {
+      "source_id": "JASON_FAILING",
+      "author": "Jason",
+      "title": "Bitcoin It’s Failing The Test",
+      "original_docx_sha256": "bcbc273821c42e9ed745b5a9d1df3472361a3f9a65f8c579c267506ac1b52896",
+      "claim_summary": "87.4K 多次失敗與 82K 假突破風險；大額 ETP 買盤不保證需求延續。",
+      "publication_at_ms": null,
+      "first_seen_at_ms": null,
+      "point_in_time_eligible": false,
+      "original_price_coordinates_usd": [
+        [
+          87400
+        ],
+        [
+          82000
+        ]
+      ],
+      "original_time_conditions": [
+        "突破 50WMA 後可能約六個月整理"
+      ],
+      "original_confirmation": "買方須證明更強、更持久需求；87.4K 多次失敗仍未完成。",
+      "original_invalidation": "先前突破後跌回 82K 以下可能是假突破。",
+      "crt_countercondition": "極端 ETP 買盤及貪婪不自動等於反向交易；須檢查流量到價格傳導。",
+      "original_invalidation_status": "EXPLICIT_SOURCE_CONDITION"
+    },
+    {
+      "source_id": "JASON_NOW",
+      "author": "Jason",
+      "title": "Bitcoin It’s NOW or NEVER",
+      "original_docx_sha256": "a1c00d908b99f4dd717b1e35b38622f46e3e700e8a71b9dd330562958b21571f",
+      "claim_summary": "確認窗口可能失效；82K 日線、74K 週線及突破脈衝保留是研究檢查。",
+      "publication_at_ms": null,
+      "first_seen_at_ms": null,
+      "point_in_time_eligible": false,
+      "original_price_coordinates_usd": [
+        [
+          87000
+        ],
+        [
+          82000
+        ],
+        [
+          74000
+        ]
+      ],
+      "original_time_conditions": [
+        "確認必須在原主觀窗口完成；拖延且下跌先接手可能失效",
+        "9/21 約 +6.7% 突破脈衝其後幾乎吃回"
+      ],
+      "original_confirmation": "時間及價格超越平衡；突破脈衝保留。",
+      "original_invalidation": "拖太久且下跌動能先接手；82K 日線失守及 74K 週線擺動低點須分列。",
+      "crt_countercondition": "CRT 不採主觀窗口為正式期限；保留日線／週線不同尺度。",
+      "original_invalidation_status": "EXPLICIT_SOURCE_CONDITION"
+    }
+  ],
+  "capital_state": "NOT_PROVIDED_IN_RADAR_ATTACHMENT",
+  "model_comprehension": "NOT_YET_PROVEN",
+  "incremental_btc_purchasing_power": "NOT_YET_PROVEN",
+  "authority": {
+    "production": "NOT_APPROVED",
+    "external_action_authority": "NONE",
+    "capital_decision_authority": "USER_ONLY"
+  }
+}
