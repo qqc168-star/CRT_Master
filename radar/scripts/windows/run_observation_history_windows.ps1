@@ -2,6 +2,7 @@ param(
     [string]$RepoRoot = "$env:USERPROFILE\CRT_EvidenceRunner",
     [string]$RuntimeRoot = "$env:USERPROFILE\CRT_Runtime",
     [int]$PhoneL4MaxAgeSeconds = 300,
+    [string]$QualifiedEquityDailySource = "",
     [Nullable[double]]$AcceptanceWakePercentile = $null,
     [switch]$ConfirmAcceptanceWakeOverride,
     [ValidateSet("ISOLATION_ONLY", "OBSERVATION")]
@@ -69,6 +70,9 @@ $IssuerAnnouncementState = Join-Path $RuntimeRoot "issuer_announcements\state.js
 $IssuerAnnouncementLedger = Join-Path $RuntimeRoot "issuer_announcements\events.jsonl"
 $IssuerAnnouncementOutput = Join-Path $RuntimeRoot "issuer_announcements\latest.json"
 $MstrAsstMarketHealth = Join-Path $RuntimeRoot "market-health\latest.json"
+if ([string]::IsNullOrWhiteSpace($QualifiedEquityDailySource)) {
+    $QualifiedEquityDailySource = Join-Path $RuntimeRoot "market-health\sources\four-asset-daily-proof.json"
+}
 $TreasuryValuationInputs = Join-Path $RuntimeRoot "treasury\valuation-inputs.json"
 $IssuerCtArchive = Join-Path $RuntimeRoot "issuer_ct\archive"
 $TreasuryCompanyCtInputs = Join-Path $RuntimeRoot "treasury\company-ct-inputs.json"
@@ -217,6 +221,16 @@ else {
 
 if (Test-Path -LiteralPath $TreasuryValuationInputs) {
     $RunnerArgs += @("--treasury-valuation-inputs", $TreasuryValuationInputs)
+}
+
+# Consume the retained four-asset proof only; qualification remains in the runner.
+# Missing inputs never trigger a broker capture or reuse the legacy two-asset proof.
+if (Test-Path -LiteralPath $QualifiedEquityDailySource -PathType Leaf) {
+    $RunnerArgs += @("--qualified-equity-daily-source", $QualifiedEquityDailySource)
+    Write-Host "FOUR_ASSET_DAILY_SOURCE_PRESENT_REQUIRES_VALIDATION" -ForegroundColor Yellow
+}
+else {
+    Write-Host "FOUR_ASSET_DAILY_SOURCE_MISSING_PRICES_BLOCKED" -ForegroundColor Yellow
 }
 
 # Read existing inputs only. Archive and direct company inputs are mutually exclusive.
