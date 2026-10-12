@@ -27,6 +27,46 @@ USER_AGENT = "CRT-Radar/0.4-RC1 read-only source gate"
 FUTURE_CLOCK_SKEW_S = 300
 
 
+def verified_price_structure_archive(root: Path, artifact: dict, now: int) -> list:
+    """GO4's existing sealed archive reader, shared with research replay.
+
+    Local hash integrity proves captured content, not formal composite authority.
+    This reads only; no fallback source or network request is permitted.
+    """
+    from . import l6_source_binding as l6
+    registry = SourceRegistry.load(default_registry_path())
+    registry.with_l6_candidate_sources()
+    spec = registry.by_input_family("PRICE_STRUCTURE_CONTEXT")
+    l6.require(spec.parser_id == "BINANCE_PRICE_STRUCTURE_PROXY_V1"
+               and spec.raw["formal_composite_authority"] == "NONE", "L6_PROXY_CONTRACT_CONFLICT")
+    l6.require(artifact.get("source_contract_id") == "PRICE_STRUCTURE_CONTEXT"
+               and artifact.get("request_identity") == "GET " + spec.endpoint
+               and artifact.get("source_authority_hash") == registry.hash
+               and artifact.get("source_id") == spec.source_id
+               and artifact.get("source_documentation") == spec.raw["documentation"]
+               and artifact.get("formal_composite_authority") == "NONE", "L6_PROXY_IDENTITY_INVALID")
+    first = l6.integer(artifact.get("first_seen_at_ms"), "L6_FIRST_SEEN_INVALID")
+    retrieved = l6.integer(artifact.get("retrieved_at_ms"), "L6_RETRIEVAL_INVALID")
+    l6.require(0 < first == retrieved <= now
+               and artifact.get("available_at_coverage_start_ms") == first
+               and artifact.get("available_at_coverage_end_ms") == first
+               and artifact.get("replay_eligible") is False
+               and artifact.get("evidence_class") == "CURRENT_FIRST_SEEN_CAPTURE"
+               and artifact.get("license_classification") == "TERMS_REVIEW_REQUIRED_LOCAL_RESEARCH_ONLY",
+               "L6_PROXY_AVAILABILITY_INVALID")
+    digest = artifact.get("sha256")
+    l6.require(isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest), "L6_HASH_INVALID")
+    expected = f"artifacts/sha256/{digest[:2]}/{digest}"
+    root = Path(root).resolve()
+    path = (root / expected).resolve()
+    l6.require(path.is_relative_to(root) and artifact.get("archive_relpath") == expected,
+               "L6_ARTIFACT_PATH_ESCAPE")
+    raw = path.read_bytes()
+    l6.require(hashlib.sha256(raw).hexdigest() == digest and len(raw) == artifact.get("size_bytes"),
+               "L6_ARTIFACT_BYTES_MISMATCH")
+    return json.loads(raw)
+
+
 class ContractViolation(ValueError):
     pass
 

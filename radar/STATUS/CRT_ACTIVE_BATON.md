@@ -60,6 +60,15 @@ radar/src/crt_radar/btc_season_semantic_mapping.py
 均可驗證；研究候選不得冒充正式季節。
 未經使用者批准不得變更正式模型權限。
 
+研究接線補充：沿用 GO4 封存與 Source Gate 讀取器，將真實市場時間、
+實際首次取得、CRT 記錄及判斷形成時間分開。控制權轉移候選的參考
+在既有 ObservationStore 內凍結；後續事件依底層來源及不重疊時間窗口
+核驗，不能靠換 ID、重下載或外部順序旗標升級。
+警報開始與撤回保留為不可覆寫研究歷史，最終 NO_TRANSITION 不抹除錯報。
+介面及限制見 `radar/research/CRT_CONTROL_TRANSFER_OBSERVED_REPLAY_V0.1.md`。
+這是研究事件接線，沒有完成 Q1 正式季節、12 類來源或 14 項語義要求；
+缺乏已分類候選與真正後續資料時維持待分析／待確認，原 7/8 不變。
+
 ### Q2 四檔真實日價接入每日循環
 
 目標：MSTR、ASST、STRC、SATA 真實日價

@@ -1,6 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
+import hashlib
+import json
+from datetime import datetime, timezone
+
+from .btc_transition_replay_evidence import build_structure_measurements, archived_structure_bars, _parse_timestamp
 
 
 SCHEMA_VERSION = "CRT_BTC_CONTROL_TRANSFER_VALIDATION_EVIDENCE_V0.1"
@@ -36,6 +41,107 @@ REVIEW_STATES = {
     "UNDER_REVIEW",
     "REVERSAL_CONFIRMED",
 }
+
+OBSERVED_SCHEMA_VERSION = "CRT_BTC_CONTROL_TRANSFER_OBSERVED_EVIDENCE_V0.1"
+
+
+def research_identity(value: dict) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
+                                     allow_nan=False).encode()).hexdigest()
+
+
+def _clock(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError("RESEARCH_CLOCK_INVALID")
+    return value
+
+
+def _iso_ms(value: int) -> str:
+    return datetime.fromtimestamp(value / 1000, timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _observation(store, observation_id: str, cutoff: int) -> dict:
+    observation = store.research_event(observation_id, kind="structure_observation")
+    if not observation:
+        raise ValueError("UNDERLYING_OBSERVATION_MISSING")
+    identity = {key: observation[key] for key in
+                ("source_id", "product", "window_start_ms", "window_end_ms", "event_definition")}
+    if research_identity(identity) != observation_id:
+        raise ValueError("UNDERLYING_OBSERVATION_IDENTITY_INVALID")
+    start, end, available, first, recorded = [_clock(observation[key]) for key in
+        ("window_start_ms", "window_end_ms", "source_available_at_ms", "first_seen_at_ms", "recorded_at_ms")]
+    if not start <= end < available <= first <= recorded <= cutoff:
+        raise ValueError("UNDERLYING_OBSERVATION_NOT_VISIBLE")
+    if (observation.get("quality_state") != "RESEARCH_ARCHIVE_VERIFIED"
+            or observation.get("formal_composite_authority") != "NONE"
+            or observation["source_id"] != "CRT-CONN-BTC-SPOT-PRICE-STRUCTURE-PROXY-001"
+            or observation["product"] != "BTCUSDT"):
+        raise ValueError("UNDERLYING_OBSERVATION_SOURCE_INVALID")
+    bars = observation.get("bars")
+    if not isinstance(bars, list) or not bars:
+        raise ValueError("UNDERLYING_OBSERVATION_BARS_MISSING")
+    for bar in bars:
+        market = int(_parse_timestamp(bar.get("observed_at"), "observed_at").timestamp()*1000)
+        visible = int(_parse_timestamp(bar.get("available_at"), "available_at").timestamp()*1000)
+        if not start <= market <= end or visible != first:
+            raise ValueError("UNDERLYING_OBSERVATION_BAR_CLOCK_MISMATCH")
+    if int(_parse_timestamp(bars[-1]["observed_at"], "observed_at").timestamp()*1000) != end:
+        raise ValueError("UNDERLYING_OBSERVATION_WINDOW_MISMATCH")
+    from .source_gate_runner import verified_price_structure_archive, parse_price_structure
+    artifact = observation.get("artifact", {})
+    payload = verified_price_structure_archive(observation["archive_root"], artifact, cutoff)
+    parse_price_structure(payload, now_ms=artifact["retrieved_at_ms"])
+    if (artifact.get("sha256") != observation.get("raw_sha256")
+            or artifact.get("first_seen_at_ms") != first
+            or artifact.get("retrieved_at_ms") != available
+            or artifact.get("source_id") != observation["source_id"]
+            or archived_structure_bars(payload, available_at_ms=first,
+                    window_start_ms=start, window_end_ms=end) != bars):
+        raise ValueError("UNDERLYING_OBSERVATION_ARCHIVE_MISMATCH")
+    return observation
+
+
+def freeze_control_transfer_candidate(store, *, observation_id: str, formed_at_ms: int,
+                                     references: dict, classification_provenance: str) -> dict:
+    """Freeze an analyst-classified candidate; never classify a measured breakout.
+
+    Call only after analyst classification under the existing research contract.
+    No archive, price coordinate, or raw crossing automatically calls this API.
+    """
+    formed = _clock(formed_at_ms)
+    if not isinstance(classification_provenance, str) or not classification_provenance.strip():
+        raise ValueError("ANALYST_CLASSIFICATION_PROVENANCE_REQUIRED")
+    observation = _observation(store, observation_id, formed)
+    measurements = build_structure_measurements(observation["bars"], as_of=_iso_ms(formed), **references)
+    if measurements["state"] == "BLOCKED":
+        raise ValueError(measurements["reason"])
+    # The reference source and its first visibility must themselves be provable.
+    reference_source = store.research_event(references["reference_provenance"], kind="structure_observation")
+    if not reference_source:
+        raise ValueError("REFERENCE_OBSERVATION_MISSING")
+    frozen = int(_parse_timestamp(references["references_frozen_at"], "references_frozen_at").timestamp()*1000)
+    _observation(store, references["reference_provenance"], frozen)
+    reference_hash = research_identity(measurements["references"])
+    # Same candidate observation/provenance cannot be redrawn under another hash.
+    lock_id = research_identity({"candidate_observation": observation_id,
+                                 "reference_provenance": references["reference_provenance"]})
+    store.record_research_event("reference:"+lock_id, "reference_lock", measurements["references"])
+    event_id = research_identity({"observation_id": observation_id, "event_definition": "CONTROL_TRANSFER_CANDIDATE",
+                                  "frozen_reference_hash": reference_hash})
+    candidate = {"event_id": event_id, "state": "CONTROL_TRANSFER_CANDIDATE",
+        "observation_id": observation_id, "formed_at_ms": formed,
+        "timestamp": _iso_ms(formed), "references": references,
+        "reference_hash": reference_hash, "measurements": measurements,
+        "classification_provenance": classification_provenance,
+        "old_control_zone_ref": reference_hash, "candidate_invalidation_anchor_ref": reference_hash,
+        "reference_provenance": references["reference_provenance"]}
+    prior = store.research_event(event_id, kind="control_transfer_candidate")
+    if prior:
+        if prior["references"] != references or prior["classification_provenance"] != classification_provenance:
+            raise ValueError("FROZEN_CANDIDATE_CONFLICT")
+        return prior
+    store.record_research_event(event_id, "control_transfer_candidate", candidate)
+    return candidate
 
 AUTHORITY_FIELDS = (
     "formal_model_authority",
@@ -106,7 +212,7 @@ def _pending(
     )
 
 
-def evaluate_control_transfer_validation(
+def _evaluate_classified_control_transfer_validation(
     evidence: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Evaluate pre-classified post-C validation evidence.
@@ -344,3 +450,115 @@ def evaluate_control_transfer_validation(
         current_validation_status=current_status,
         strengthening_evidence=strengthening_evidence,
     )
+
+
+def evaluate_control_transfer_validation(evidence: dict | None, *, observation_store=None,
+                                         evaluated_at_ms: int | None = None,
+                                         require_observed_evidence: bool = False) -> dict:
+    """Derive actual event chronology from immutable archive observations.
+
+    Legacy cases retain classification regression coverage, explicitly without
+    real-time proof. Evidence Pack cannot use those cases as observed validation.
+    """
+    if not isinstance(evidence, dict) or evidence.get("schema_version") != OBSERVED_SCHEMA_VERSION:
+        if require_observed_evidence and isinstance(evidence, dict):
+            result = _blocked("OBSERVED_EVENT_LINEAGE_REQUIRED")
+        else:
+            result = _evaluate_classified_control_transfer_validation(evidence)
+        result.update(evidence_scope="CLASSIFICATION_ONLY", temporal_verification="NOT_PROVEN")
+        return result
+    if observation_store is None or evaluated_at_ms is None:
+        return _blocked("OBSERVATION_STORE_AND_EVALUATION_CLOCK_REQUIRED")
+    try:
+        cutoff = _clock(evaluated_at_ms)
+        authority = evidence.get("authority")
+        if (not isinstance(authority, dict) or any(authority.get(key) != "NONE" for key in AUTHORITY_FIELDS)
+                or authority.get("external_action_performed") is not False):
+            raise ValueError("OBSERVED_EVIDENCE_AUTHORITY_INVALID")
+        candidate = observation_store.research_event(evidence.get("candidate_event_id"), kind="control_transfer_candidate")
+        if not candidate:
+            if evidence.get("candidate_event_id") is not None:
+                raise ValueError("FROZEN_CANDIDATE_NOT_FOUND")
+            observation = _observation(observation_store, evidence.get("observation_id"), cutoff)
+            result = _result(state="READY_FOR_ANALYST", research_state="INCONCLUSIVE",
+                             reason="FROZEN_ANALYST_CANDIDATE_NOT_AVAILABLE")
+            result.update(evidence_scope="ARCHIVED_RESEARCH_OBSERVATIONS", temporal_verification="VERIFIED",
+                structure_observation={k:v for k,v in observation.items() if k != "archive_root"},
+                structure_measurements={"state": "BLOCKED", "reason": "FROZEN_ANALYST_REFERENCES_NOT_AVAILABLE"},
+                forecast_claim="NONE", evaluated_at_ms=cutoff)
+            return result
+        if _clock(candidate["formed_at_ms"]) > cutoff:
+            raise ValueError("CANDIDATE_NOT_YET_VISIBLE")
+        original = _observation(observation_store, candidate["observation_id"], candidate["formed_at_ms"])
+        expected_candidate_id = research_identity({"observation_id": candidate["observation_id"],
+            "event_definition": "CONTROL_TRANSFER_CANDIDATE", "frozen_reference_hash": candidate["reference_hash"]})
+        if (expected_candidate_id != evidence["candidate_event_id"]
+                or candidate["event_id"] != expected_candidate_id
+                or candidate["timestamp"] != _iso_ms(candidate["formed_at_ms"])):
+            raise ValueError("FROZEN_CANDIDATE_IDENTITY_OR_CLOCK_INVALID")
+        measured = build_structure_measurements(original["bars"], as_of=candidate["timestamp"], **candidate["references"])
+        if measured != candidate["measurements"] or research_identity(measured.get("references", {})) != candidate["reference_hash"]:
+            raise ValueError("FROZEN_REFERENCE_OR_MEASUREMENT_CHANGED")
+        frozen_at = int(_parse_timestamp(candidate["references"]["references_frozen_at"], "frozen_at").timestamp()*1000)
+        _observation(observation_store, candidate["reference_provenance"], frozen_at)
+        classified = {"schema_version": SCHEMA_VERSION, "authority": evidence.get("authority"),
+                      "candidate": candidate}
+        supplied = evidence.get("post_c_test")
+        later = None
+        followup_measurements = None
+        if isinstance(supplied, dict):
+            later = _observation(observation_store, supplied.get("observation_id"), cutoff)
+            if supplied.get("frozen_reference_hash") != candidate["reference_hash"]:
+                raise ValueError("POST_C_FROZEN_REFERENCE_MISMATCH")
+            # Ignore caller event IDs, event_order and distinct_event claims.
+            if (later["product"] != original["product"]
+                    or later["window_start_ms"] <= original["window_end_ms"]
+                    or later["window_start_ms"] <= candidate["formed_at_ms"]):
+                raise ValueError("POST_C_EVENT_NOT_INDEPENDENT_OR_NOT_AFTER_CANDIDATE")
+            followup_measurements = build_structure_measurements(later["bars"],
+                as_of=_iso_ms(cutoff), **{**candidate["references"], "candidate_breakout_at": candidate["timestamp"]})
+            if followup_measurements["state"] == "BLOCKED":
+                raise ValueError(followup_measurements["reason"])
+            post = {key: supplied.get(key) for key in ("observation_id", "frozen_reference_hash",
+                "old_control_zone_result", "candidate_structure_result", "renewed_expansion", "new_local_control_high_break")}
+            post.update(event_id=research_identity({"observation_id": later["observation_id"],
+                        "event_definition": "POST_C_TEST", "reference_hash": candidate["reference_hash"]}),
+                        timestamp=_iso_ms(later["window_end_ms"]), event_order="AFTER_CANDIDATE", distinct_event=True)
+            classified["post_c_test"] = post
+        review = evidence.get("post_validation_review")
+        if isinstance(review, dict) and review.get("state") != "NONE":
+            if later is None:
+                raise ValueError("REVIEW_WITHOUT_VALIDATION")
+            prior_validation = observation_store.research_event("assessment:"+research_identity(classified), kind="control_transfer_assessment")
+            if not prior_validation or prior_validation.get("research_state") != "CONTROL_TRANSFER_VALIDATED":
+                raise ValueError("REVIEW_WITHOUT_FROZEN_VALIDATION")
+            validated_at = int(_parse_timestamp(prior_validation["control_transfer_validated_at"], "validated_at").timestamp()*1000)
+            review_obs = _observation(observation_store, review.get("observation_id"), cutoff)
+            if (review.get("frozen_reference_hash") != candidate["reference_hash"]
+                    or review_obs["window_start_ms"] <= later["window_end_ms"]
+                    or review_obs["window_start_ms"] <= validated_at):
+                raise ValueError("REVIEW_EVENT_NOT_INDEPENDENT_OR_REFERENCE_CHANGED")
+            classified["post_validation_review"] = {"state": review["state"], "event_id": review_obs["observation_id"],
+                "timestamp": _iso_ms(review_obs["window_end_ms"]), "event_order": "AFTER_VALIDATION", "distinct_event": True}
+        assessment_id = "assessment:"+research_identity(classified)
+        prior = observation_store.research_event(assessment_id, kind="control_transfer_assessment")
+        if prior:
+            return {**prior, "evaluated_at_ms": cutoff}
+        result = _evaluate_classified_control_transfer_validation(classified)
+        if result.get("control_transfer_validated_at") is not None:
+            result["control_transfer_validated_at"] = _iso_ms(cutoff)
+        result.update(evidence_scope="ARCHIVED_RESEARCH_OBSERVATIONS", temporal_verification="VERIFIED",
+            candidate_formed_at_ms=candidate["formed_at_ms"], evaluated_at_ms=cutoff,
+            candidate_observation={k:v for k,v in original.items() if k != "archive_root"},
+            followup_observation={k:v for k,v in later.items() if k != "archive_root"} if later else None,
+            followup_measurements=followup_measurements,
+            frozen_reference_hash=candidate["reference_hash"],
+            causal_source_independence="NOT_PROVEN",
+            classification_quality="ANALYST_JUDGMENT_NOT_MACHINE_PROVEN",
+            forecast_claim="NONE")
+        # Ignore refreshed evaluation clocks for deduplication; retain first result.
+        immutable = {k:v for k,v in result.items() if k != "evaluated_at_ms"}
+        observation_store.record_research_event(assessment_id, "control_transfer_assessment", immutable)
+        return result
+    except (ValueError, KeyError, TypeError, OverflowError, OSError) as exc:
+        return _blocked(str(exc))

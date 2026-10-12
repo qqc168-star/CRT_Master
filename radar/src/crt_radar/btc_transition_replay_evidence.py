@@ -114,19 +114,23 @@ def _visible_structure_bars(
             raw.get("available_at"), f"bars[{index}].available_at"
         )
         if available_at <= as_of:
-            visible.append((available_at, raw))
+            observed_at = _parse_timestamp(raw.get("observed_at", raw.get("available_at")),
+                                           f"bars[{index}].observed_at")
+            if observed_at > available_at:
+                raise TransitionReplayEvidenceError("OBSERVATION_NOT_COMPLETE_AT_AVAILABILITY")
+            visible.append((observed_at, raw))
 
     normalized: list[dict[str, Any]] = []
     previous: datetime | None = None
-    for visible_index, (available_at, raw) in enumerate(visible):
-        if previous is not None and available_at <= previous:
+    for visible_index, (observed_at, raw) in enumerate(visible):
+        if previous is not None and observed_at <= previous:
             reason = (
                 "DUPLICATE_STRUCTURE_BAR_TIME"
-                if available_at == previous
+                if observed_at == previous
                 else "UNSORTED_STRUCTURE_BARS"
             )
             raise TransitionReplayEvidenceError(reason)
-        previous = available_at
+        previous = observed_at
 
         open_price = _positive_number(raw.get("open"), f"visible[{visible_index}].open")
         high = _positive_number(raw.get("high"), f"visible[{visible_index}].high")
@@ -138,8 +142,10 @@ def _visible_structure_bars(
             )
         normalized.append(
             {
-                "available_at_dt": available_at,
-                "available_at": _iso_z(available_at),
+                "observed_at_dt": observed_at,
+                "observed_at": _iso_z(observed_at),
+                "available_at_dt": _parse_timestamp(raw["available_at"], "available_at"),
+                "available_at": _iso_z(_parse_timestamp(raw["available_at"], "available_at")),
                 "open": open_price,
                 "high": high,
                 "low": low,
@@ -149,13 +155,25 @@ def _visible_structure_bars(
     return normalized
 
 
+def archived_structure_bars(payload: list, *, available_at_ms: int,
+                            window_start_ms: int | None = None,
+                            window_end_ms: int | None = None) -> list[dict]:
+    """Adapt verified native daily OHLC; availability is never market time."""
+    rows = [row for row in payload if row[6] < available_at_ms][-201:]
+    return [{"observed_at": _iso_z(datetime.fromtimestamp(row[6]/1000, timezone.utc)),
+             "available_at": _iso_z(datetime.fromtimestamp(available_at_ms/1000, timezone.utc)),
+             "open": float(row[1]), "high": float(row[2]), "low": float(row[3]), "close": float(row[4])}
+            for row in rows if (window_start_ms is None or row[0] >= window_start_ms)
+            and (window_end_ms is None or row[6] <= window_end_ms)]
+
+
 def _first_timestamp(
     bars: list[dict[str, Any]],
     predicate: Any,
 ) -> str | None:
     for bar in bars:
         if predicate(bar):
-            return str(bar["available_at"])
+            return str(bar["observed_at"])
     return None
 
 
@@ -207,7 +225,7 @@ def build_structure_measurements(
             )
         candidate_visible = candidate_at is not None and candidate_at <= cutoff
         post_candidate = (
-            [bar for bar in visible if bar["available_at_dt"] >= candidate_at]
+            [bar for bar in visible if bar["observed_at_dt"] >= candidate_at]
             if candidate_visible and candidate_at is not None
             else []
         )
@@ -216,7 +234,7 @@ def build_structure_measurements(
                 "CANDIDATE_WINDOW_HAS_NO_VISIBLE_BARS"
             )
         after_candidate = (
-            [bar for bar in visible if bar["available_at_dt"] > candidate_at]
+            [bar for bar in visible if bar["observed_at_dt"] > candidate_at]
             if candidate_visible and candidate_at is not None
             else []
         )
@@ -234,7 +252,7 @@ def build_structure_measurements(
             [
                 bar
                 for bar in post_candidate
-                if breach_dt is not None and bar["available_at_dt"] > breach_dt
+                if breach_dt is not None and bar["observed_at_dt"] > breach_dt
             ],
             lambda bar: bar["close"] >= zone_lower,
         )
@@ -270,13 +288,13 @@ def build_structure_measurements(
                 post_high_bar["high"] if post_high_bar is not None else None
             ),
             "post_candidate_high_at": (
-                post_high_bar["available_at"] if post_high_bar is not None else None
+                post_high_bar["observed_at"] if post_high_bar is not None else None
             ),
             "post_candidate_low": (
                 post_low_bar["low"] if post_low_bar is not None else None
             ),
             "post_candidate_low_at": (
-                post_low_bar["available_at"] if post_low_bar is not None else None
+                post_low_bar["observed_at"] if post_low_bar is not None else None
             ),
             "prior_control_high_raw_break": (
                 any(bar["high"] > control_high for bar in post_candidate)
@@ -1188,7 +1206,7 @@ def _completed_daily_measurement_bars(bars: object, *, as_of: datetime) -> list[
         if result and closed <= _parse_timestamp(result[-1]["day_closed_at"], "previous.daily"):
             raise TransitionReplayEvidenceError("DUPLICATE_OR_UNSORTED_DAILY_CLOSE")
         result.append({"day_closed_at": _iso_z(closed),
-                       **{k: v for k, v in row.items() if k != "available_at_dt"}})
+                       **{k: row[k] for k in ("available_at", "open", "high", "low", "close")}})
     return result
 
 
