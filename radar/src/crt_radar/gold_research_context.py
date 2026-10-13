@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .assumption_boundary_watch import evaluate_external_research_assumptions
 from .btc_transition_replay_evidence import build_forward_200wma_context
+from .diluted_equity_mnav import DENOMINATOR_BASIS, FORMULA_VERSION, SEMANTIC_REF
 from .mstr_asst_full_day_market_intake import build_btc_convexity_research
 from .treasury_company_ct import ISSUERS, validate_pit_replay
 
@@ -363,8 +364,9 @@ def pmi_cycle_maturity(inputs, *, as_of):
 def historical_gross_multiple_distribution(inputs, *, asset, as_of):
     """Gross BTC-asset ratio = equity price / (BTC price * diluted BTC/share).
 
-    This is explicitly not CRT formal Diluted Equity mNAV. Sample completeness
-    and usable-period selection must be evidenced, not inferred from surviving rows.
+    This uses CRT's BTC-market-value denominator and the same diluted formula.
+    Its secondary research sample is not qualified formal/action evidence.
+    Sample completeness and usable-period selection must be evidenced.
     """
     if asset not in ISSUERS:
         raise ValueError("SUPPORTED_TREASURY_ASSET_REQUIRED")
@@ -414,10 +416,12 @@ def historical_gross_multiple_distribution(inputs, *, asset, as_of):
         return {**distribution([r for r in observations if a <= r["as_of"] <= b]),
                 "window_binding": binding, "limitation": "LABELED_RESEARCH_WINDOW_NOT_FORMAL_SEASON"}
     return {"state": "AVAILABLE", "asset": asset, "valuation_lane": "HISTORICAL_GROSS_BTC_ASSET_MULTIPLE",
+            "formula_version": FORMULA_VERSION, "denominator_basis": DENOMINATOR_BASIS,
+            "semantic_ref": SEMANTIC_REF, "formal_action_critical_state": "BLOCKED",
             "distribution": distribution(observations), "bull_window": _attempt(bull_sample),
             "observations": observations, "sample_definition": definition,
             "confidence": "LOWER_CONFIDENCE_SHORT_ISSUER_HISTORY" if asset == "ASST" else "DESCRIPTIVE_SAMPLE_ONLY",
-            "limitation": "GROSS_BTC_ASSETS_EXCLUDE_CASH_SENIOR_CLAIMS_AND_CARRY_NOT_FORMAL_MNAV", **_authority()}
+            "limitation": "SAME_DILUTED_BTC_MARKET_VALUE_FORMULA_RESEARCH_SOURCE_NOT_FORMAL_ACTION_EVIDENCE", **_authority()}
 
 
 def next_cycle_valuation(inputs, *, asset, treasury_context, as_of):
@@ -460,7 +464,8 @@ def next_cycle_valuation(inputs, *, asset, treasury_context, as_of):
                 "scenario_equity_price_usd": value, "multiple_kind": kind, "sample_period": sample_period,
                 "source": {"current_btc_per_share": current, "historical_context": distribution.get("sample_definition")},
                 "as_of": as_of, "confidence": "LOWER_CONFIDENCE" if asset == "ASST" else "SCENARIO_CONDITIONAL",
-                "limitation": "GROSS_ASSET_RESEARCH_ENVELOPE_NOT_EQUITY_FAIR_VALUE_OR_FORMAL_MNAV"}
+                "formula_version": FORMULA_VERSION, "denominator_basis": DENOMINATOR_BASIS,
+                "limitation": "CONDITIONAL_FUTURE_PRICE_RESEARCH_NOT_QUALIFIED_CURRENT_MNAV_OR_EQUITY_FAIR_VALUE"}
     scenarios = inputs.get("scenarios", [])
     if not isinstance(scenarios, list):
         raise ValueError("SCENARIO_ARRAY_REQUIRED")
@@ -469,6 +474,9 @@ def next_cycle_valuation(inputs, *, asset, treasury_context, as_of):
             "asset": asset, "historical_gross_multiple": distribution, "scenarios": envelopes,
             "formal_diluted_equity_mnav_lane": {"value": treasury_context.get("diluted_mnav"),
                 "state": treasury_context.get("formal_action_critical_state"),
+                "formula_version": treasury_context.get("formula_version"),
+                "denominator_basis": treasury_context.get("denominator_basis"),
+                "semantic_ref": treasury_context.get("semantic_ref"),
                 "context_hash": treasury_context["context_hash"], "authority": "EXISTING_TREASURY_VALUATION_CONTEXT"},
             "legacy_multiple_candidates": [1.5, 2.0, 2.5] if asset == "MSTR" else [1.5, 2.32, 3.14],
             "legacy_candidate_label": "RESEARCH_SCENARIO_CANDIDATE_NOT_HISTORICAL_MEDIAN", **_authority()}

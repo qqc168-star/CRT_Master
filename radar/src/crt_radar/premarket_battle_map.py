@@ -1,4 +1,5 @@
 from __future__ import annotations
+from .premarket_evidence_binding import _mnav_wrapper
 
 from copy import deepcopy
 from typing import Any
@@ -263,7 +264,9 @@ def build_premarket_battle_map(
 
     for asset in ASSET_ORDER:
         facts = supplied_assets.get(asset)
-        facts = facts if isinstance(facts, dict) else {}
+        facts = deepcopy(facts) if isinstance(facts, dict) else {}
+        if asset in {"MSTR", "ASST"} and "diluted_mnav" in facts:
+            facts["diluted_mnav"] = _mnav_wrapper(facts["diluted_mnav"], asset)
         asset_ready = _asset_readiness(asset, facts, required_facts[asset])
         readiness[asset] = asset_ready
 

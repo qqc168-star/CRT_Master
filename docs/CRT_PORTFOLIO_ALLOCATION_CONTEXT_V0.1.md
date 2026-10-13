@@ -131,7 +131,7 @@ GPT bridge（GPT 橋）只傳送 compact projection（精簡投影），避免�
 
 - 六層權重 `20 / 20 / 17 / 25 / 13 / 5`
 - 燈號 `-60 / -35 / 35 / 60`
-- 未限定 `mNAV` = Diluted Equity mNAV（稀釋後股權資產淨值倍數）
+- 未限定 `mNAV` = Diluted mNAV（稀釋後資產淨值倍數），依 `radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`：`(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`；債務、優先股、現金及剩餘價值是獨立風險證據，不是分母。
 - Production（正式生產）`NOT_APPROVED`
 - External Action Authority（外部行動權限）`NONE`
 - Capital Decision Authority（資本決策權限）`USER_ONLY`

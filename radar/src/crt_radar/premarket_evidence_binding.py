@@ -4,7 +4,8 @@ import math
 from copy import deepcopy
 from typing import Any
 
-from .diluted_equity_mnav import SCHEMA_VERSION as MNAV_SCHEMA_VERSION
+from .diluted_equity_mnav import (SCHEMA_VERSION as MNAV_SCHEMA_VERSION,
+                                 validate_diluted_mnav_evidence)
 
 from .issuer_fact_history import (
     latest_fact,
@@ -312,6 +313,9 @@ def _mnav_wrapper(result: dict[str, Any] | None, asset_id: str) -> dict[str, Any
     ):
         return {**envelope, **_blocked("MNAV_RESULT_INVALID"), "mnav": None}
 
+    verified = validate_diluted_mnav_evidence(result, as_of_ms=result.get("as_of_ms"), asset_id=asset_id)
+    if verified["state"] != "AVAILABLE":
+        return {**envelope, **_blocked(verified["reason"]), "mnav": None}
     return {**envelope, "state": "AVAILABLE", "mnav": float(value)}
 
 

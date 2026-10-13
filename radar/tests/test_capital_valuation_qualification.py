@@ -11,6 +11,7 @@ from tests.test_full_bridge_budget import captured_pack, handoff_for
 from tests.test_capital_decision_closure import (
     NOW, source_fixture, item, leg, recommendation, match_scopes, full_provider_response,
 )
+from test_diluted_equity_mnav import compact_qualified_mnav
 
 
 class FormalValuationReceiptTests(unittest.TestCase):
@@ -78,7 +79,7 @@ class FormalValuationReceiptTests(unittest.TestCase):
                 with self.subTest(asset=asset, section=section):
                     with self.assertRaisesRegex(ValueError, "VALUATION_EVIDENCE_UNQUALIFIED:" + asset):
                         self.receipt(rec, section)
-            receipt = self.receipt(rec, {asset: {"formal_action_critical_state": "AVAILABLE"}})
+            receipt = self.receipt(rec, {asset: compact_qualified_mnav(asset, at=NOW)})
             self.assertEqual(receipt["capital_validation"]["items"][0]["validation_state"], "VALIDATED")
 
     def test_strc_sata_buy_has_no_common_equity_mnav_requirement(self):
@@ -97,12 +98,19 @@ class FormalValuationReceiptTests(unittest.TestCase):
     def test_available_common_equity_buy_and_independent_non_buy_claims_survive(self):
         for asset in ("MSTR", "ASST"):
             receipt = self.receipt(recommendation(item(asset=asset, legs=[leg(asset=asset)])),
-                                   {asset: {"formal_action_critical_state": "AVAILABLE"}})
+                                   {asset: compact_qualified_mnav(asset, at=NOW)})
             self.assertEqual(receipt["capital_validation"]["items"][0]["validation_state"], "VALIDATED")
         for action in ("SELL", "HOLD", "WAIT"):
             with self.subTest(action=action):
                 receipt = self.receipt(recommendation(item(action)), None)
                 self.assertEqual(receipt["capital_validation"]["items"][0]["validation_state"], "VALIDATED")
+
+    def test_available_label_without_new_formula_proof_is_not_qualified(self):
+        for asset in ("MSTR", "ASST"):
+            with self.subTest(asset=asset):
+                with self.assertRaisesRegex(ValueError, "VALUATION_EVIDENCE_UNQUALIFIED:" + asset):
+                    self.receipt(recommendation(item(asset=asset, legs=[leg(asset=asset)])),
+                                 {asset: {"formal_action_critical_state": "AVAILABLE"}})
 
 
 if __name__ == "__main__":

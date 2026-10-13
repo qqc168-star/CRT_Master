@@ -7,7 +7,10 @@ import unittest
 from copy import deepcopy
 from pathlib import Path
 
-from crt_radar.diluted_equity_mnav import build_diluted_equity_mnav
+from crt_radar.diluted_equity_mnav import (
+    FORMULA_VERSION, DENOMINATOR_BASIS, SCHEMA_VERSION as MNAV_SCHEMA_VERSION,
+    build_diluted_equity_mnav,
+)
 from crt_radar.evidence_pack import build_evidence_pack
 from crt_radar.treasury_company_ct import (FORMAL_MNAV_REF, admit_saylortracker_sensor,
     build_net_bps_attribution, build_treasury_company_ct, import_saylortracker_offline_csv,
@@ -61,9 +64,29 @@ def conversion(key="buy", source="MSTR_COMMON_ISSUANCE", destination="BTC_PURCHA
                     active_for_calculation=True, consequence_basis_ref="verified-event-accounting", **deltas)
 
 
+def qualified_mnav(at=T2, *, asset_id="MSTR"):
+    values = dict(diluted_shares=100, equity_price_usd=.65,
+                  btc_holdings=100, btc_price_usd=1)
+    issuer = {"MSTR": ISSUER, "ASST": "CIK-0001920406"}[asset_id]
+    proof = {}
+    for key, value in values.items():
+        row = evidence(at, value=value, asset_id="BTC" if key == "btc_price_usd" else asset_id,
+            issuer_id=issuer, source_ref=f"synthetic-fixture:mnav:{key}:{at}",
+            raw_sha256=hashlib.sha256(key.encode()).hexdigest())
+        if key in ("equity_price_usd", "btc_price_usd"):
+            row["currency"] = "USD"
+        if key == "diluted_shares":
+            row.update(basis_ref="diluted-split-adjusted-v1",
+                       coverage_state="COMPLETE",
+                       dilution_scope="SYNTHETIC_FULLY_DILUTED_ORIGINAL_SCOPE")
+        proof[key] = row
+    return build_diluted_equity_mnav(asset_id=asset_id, **values,
+        share_basis_ref="diluted-split-adjusted-v1", input_evidence=proof, as_of_ms=at,
+        semantic_ref=FORMAL_MNAV_REF, evidence_alignment_state="VALIDATED")
+
+
 def kwargs():
-    mnav = build_diluted_equity_mnav(asset_id="MSTR", diluted_equity_market_cap_usd=65,
-        asset_nav_usd=100, semantic_ref=FORMAL_MNAV_REF, evidence_alignment_state="VALIDATED")
+    mnav = qualified_mnav()
     return dict(issuer_id=ISSUER, as_of_ms=T2,
                 asset_history=[asset(T0, 100), asset(T1, 110), asset(T2, 121)],
                 funding_instruments=[funding()], burden_current=burden(), burden_previous=burden(T1),
@@ -91,6 +114,8 @@ class TreasuryCompanyCtTests(unittest.TestCase):
         imported = import_saylortracker_offline_csv("effective_time,disclosure_time,first_seen_time,mnav\n10,11,12,1.2\n", admitted, retrieval_time=13)
         self.assertEqual(imported["state"], "RESEARCH_SECONDARY")
         self.assertFalse(imported["trading_threshold_eligible"])
+        self.assertFalse(imported["formal_history_eligible"])
+        self.assertEqual(imported["rows"][0]["formula_version"], "LEGACY_UNQUALIFIED")
         attribution = build_net_bps_attribution(opening_btc=100, closing_btc=120, opening_shares=100,
             closing_shares=110, components={key: 0 for key in ("Market Translation", "Asset Action", "Claim Action", "Reserve Action", "Share Denominator")}, semantic_state="RESEARCH_CANDIDATE")
         self.assertEqual(attribution["state"], "RESEARCH_CANDIDATE")
@@ -331,6 +356,87 @@ class TreasuryCompanyCtTests(unittest.TestCase):
         result = build_treasury_company_ct(**data)
         self.assertIsNone(result["price_financing_state"]["mnav"])
         self.assertEqual(result["organs"]["per_share_asset_engine"]["state"], "AVAILABLE")
+
+    def test_mnav_components_and_formula_are_retained_in_ct(self):
+        result = build_treasury_company_ct(**kwargs())["price_financing_state"]
+        self.assertEqual(result["schema_version"], MNAV_SCHEMA_VERSION)
+        self.assertEqual(result["formula_version"], FORMULA_VERSION)
+        self.assertEqual(result["denominator_basis"], DENOMINATOR_BASIS)
+        self.assertEqual(result["btc_market_value_usd"], 100)
+        self.assertEqual(result["input_evidence"]["diluted_shares"]["dilution_scope"],
+                         "SYNTHETIC_FULLY_DILUTED_ORIGINAL_SCOPE")
+        self.assertEqual(result["mnav"], .65)
+
+    def test_self_consistent_claim_adjusted_denominator_cannot_pass(self):
+        data = kwargs()
+        row = data["price_financing_state"]
+        row.update(asset_nav_usd=80, btc_market_value_usd=80, mnav=65/80)
+        result = build_treasury_company_ct(**data)
+        self.assertIsNone(result["price_financing_state"]["mnav"])
+        self.assertEqual(result["organs"]["per_share_asset_engine"]["state"], "AVAILABLE")
+
+    def test_legacy_schema_or_formula_cannot_be_relabelled_formal(self):
+        for key, value in (("schema_version", "CRT_DILUTED_EQUITY_MNAV_EVIDENCE_V0.1"),
+                           ("formula_version", "CLAIM_ADJUSTED_NAV_V1"),
+                           ("denominator_basis", "NET_ASSETS_AFTER_CLAIMS")):
+            with self.subTest(key=key):
+                data = kwargs()
+                data["price_financing_state"][key] = value
+                self.assertIsNone(build_treasury_company_ct(**data)["price_financing_state"]["mnav"])
+
+    def test_missing_component_proof_blocks_price_without_erasing_btc_facts(self):
+        for key in ("diluted_shares", "equity_price_usd", "btc_holdings", "btc_price_usd"):
+            with self.subTest(key=key):
+                data = kwargs()
+                del data["price_financing_state"]["input_evidence"][key]
+                result = build_treasury_company_ct(**data)
+                self.assertIsNone(result["price_financing_state"]["mnav"])
+                self.assertEqual(result["organs"]["per_share_asset_engine"]["state"], "AVAILABLE")
+
+    def test_mnav_asset_and_ct_issuer_cannot_disagree(self):
+        data = kwargs()
+        data["price_financing_state"]["asset_id"] = "ASST"
+        self.assertIsNone(build_treasury_company_ct(**data)["price_financing_state"]["mnav"])
+
+    def test_mnav_future_retrieval_and_cross_date_components_block(self):
+        for key, value in (("retrieval_time", T2+1), ("effective_time", T1)):
+            with self.subTest(key=key):
+                data = kwargs()
+                data["price_financing_state"]["input_evidence"]["btc_holdings"][key] = value
+                self.assertIsNone(build_treasury_company_ct(**data)["price_financing_state"]["mnav"])
+        data = kwargs()
+        data["price_financing_state"]["retrieval_time"] = T2+1
+        self.assertIsNone(build_treasury_company_ct(**data)["price_financing_state"]["mnav"])
+
+    def test_mnav_scope_and_ct_snapshot_time_must_match_components(self):
+        for change in ({"share_basis_ref": "silently-excluding-warrants"},
+                       {"effective_time": T1}):
+            with self.subTest(change=change):
+                data = kwargs()
+                data["price_financing_state"].update(change)
+                self.assertIsNone(build_treasury_company_ct(**data)["price_financing_state"]["mnav"])
+
+    def test_partial_original_share_scope_is_preserved_and_cannot_pass(self):
+        data = kwargs()
+        row = data["price_financing_state"]["input_evidence"]["diluted_shares"]
+        row.update(coverage_state="PARTIAL", dilution_scope="AFDS_EXCLUDES_TRADITIONAL_WARRANTS")
+        before = deepcopy(data)
+        result = build_treasury_company_ct(**data)
+        self.assertIsNone(result["price_financing_state"]["mnav"])
+        self.assertEqual(data, before)
+
+    def test_mnav_zero_and_unknown_components_fail_closed(self):
+        for value in (0, None):
+            with self.subTest(value=value):
+                data = kwargs()
+                data["price_financing_state"]["btc_holdings"] = value
+                data["price_financing_state"]["input_evidence"]["btc_holdings"]["value"] = value
+                self.assertIsNone(build_treasury_company_ct(**data)["price_financing_state"]["mnav"])
+
+    def test_btc_market_value_receipt_cannot_be_tampered(self):
+        data = kwargs()
+        data["price_financing_state"]["btc_market_value_usd"] = 1234
+        self.assertIsNone(build_treasury_company_ct(**data)["price_financing_state"]["mnav"])
 
     def test_pack_preserves_existing_blockers_and_independent_ct_facts(self):
         data = kwargs()

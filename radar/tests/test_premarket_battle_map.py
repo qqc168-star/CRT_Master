@@ -4,6 +4,8 @@ import json
 import unittest
 from copy import deepcopy
 from pathlib import Path
+from crt_radar.diluted_equity_mnav import build_diluted_equity_mnav
+from test_diluted_equity_mnav import qualified_inputs
 
 from crt_radar.premarket_battle_map import (
     ANALYSIS_SECTION_IDS,
@@ -35,13 +37,21 @@ class PremarketBattleMapTests(unittest.TestCase):
         self.assertEqual(locked["analysis_sections"][0]["id"], "ISSUER_REFLEXIVITY")
         self.assertTrue(locked["governance"]["mnav_semantics_unchanged"])
 
+    def test_unproved_available_mnav_is_not_displayed_by_direct_map_entry(self):
+        facts = {"MSTR": {"diluted_mnav": {"state": "AVAILABLE", "mnav": 9}}}
+        original = deepcopy(facts)
+        result = build_premarket_battle_map(contract=self.contract, asset_facts=facts,
+            issuer_reflexivity=None, as_of="2026-10-13T08:00:00Z", source_mode="MANUAL_WEB_SUPPLEMENT")
+        self.assertIsNone(result["first_screen"][0]["diluted_mnav"])
+        self.assertEqual(facts, original)
+
     def test_first_screen_never_machine_fills_analyst_fields(self):
         result = build_premarket_battle_map(
             contract=self.contract,
             asset_facts={
                 "MSTR": {
                     "premarket_price": {"state": "AVAILABLE", "value": 120.0},
-                    "diluted_mnav": {"state": "AVAILABLE", "mnav": 0.91},
+                    "diluted_mnav": build_diluted_equity_mnav(**qualified_inputs(ratio=0.91)),
                 }
             },
             issuer_reflexivity={

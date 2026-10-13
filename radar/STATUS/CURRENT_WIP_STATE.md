@@ -39,8 +39,21 @@ and approved under the existing governance boundary.
 
 - Six-layer weights: `20 / 20 / 17 / 25 / 13 / 5`
 - Light thresholds: `-60 / -35 / 35 / 60`
-- Unqualified `mNAV`: `Diluted Equity mNAV`
+- Unqualified `mNAV`: `Diluted mNAV`（稀釋後資產淨值倍數）; see the current semantic revision below
 - Q4: `2026 Q4`
 - Production approval: unchanged
 - External action authority: `NONE`
 - Constitution and governance boundaries: unchanged
+
+## Current mNAV semantic revision（目前資產淨值倍數語義修訂）
+
+The later explicit user approval on `2026-10-13` supersedes only the current
+mNAV interpretation of the preserved `2026-08-05` seal. The original seal and
+the reconciliation/test snapshots above remain historical records, not newly
+performed validation. Current authority is
+`radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`:
+`(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`.
+Current formula version: `CRT_DILUTED_MNAV_BTC_MARKET_VALUE_V1`.
+Legacy unknown/different-denominator values remain labeled research evidence;
+they do not enter the current formal historical distribution. No formal Season,
+production, external action, allocation or capital-execution approval is added.

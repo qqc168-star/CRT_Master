@@ -189,10 +189,25 @@ GPT may use appropriately labeled lower-precision evidence for qualitative judgm
 
 ## Governance Boundary
 
+### Current Formal mNAV Definition（目前正式資產淨值倍數定義）
+
+The user explicitly approved the `2026-10-13` semantic revision recorded in
+`radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`.
+Every unqualified `mNAV` means Diluted mNAV（稀釋後資產淨值倍數）:
+`(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`.
+Its version is `CRT_DILUTED_MNAV_BTC_MARKET_VALUE_V1`; the denominator is only
+qualified BTC holdings market value, never debt/preferred/cash-adjusted residual
+equity value. Qualified source, dilution scope and aligned clocks are required
+for all four components. Debt, preferred claims, cash and residual shareholder
+value remain separate company-health evidence. Earlier seals and approvals are
+preserved as historical records; only their current mNAV interpretation is
+superseded by this later explicit approval. Research and incompatible legacy
+values cannot be silently promoted or pooled into the current formal series.
+
 - Production remains `NOT_APPROVED` unless explicitly changed by later formal approval.
 - External Action Authority remains `NONE` unless explicitly changed by later formal approval.
 - No trading, account access, or fund movement is authorized by this contract.
-- Existing approved formal models, weights, thresholds, mNAV semantics, and other formal locks are not changed by this contract.
+- Apart from the explicitly approved mNAV revision above, existing approved formal models, weights, thresholds and other formal locks are not changed by this contract.
 - Existing stash state must not be applied, popped, dropped, or rewritten by this contract.
 
 ## Knowledge Survival Rule

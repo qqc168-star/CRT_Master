@@ -4,7 +4,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from crt_radar.diluted_equity_mnav import build_diluted_equity_mnav
+from crt_radar.diluted_equity_mnav import (
+    DENOMINATOR_BASIS, FORMULA_VERSION, SCHEMA_VERSION as MNAV_VERSION, build_diluted_equity_mnav,
+)
 from crt_radar.evidence_pack import build_evidence_pack, _sha256
 from crt_radar.gpt_handoff import build_minimized_bridge_payload, run_gpt_handoff_gate, _compact_treasury_bridge
 from crt_radar.openai_responses_adapter_contract import build_request_envelope, SMOKE_MODEL
@@ -30,8 +32,20 @@ def metadata(asset, at, **fields):
 
 
 def observation(asset="MSTR", at=NOW, value=1.5, basis="same-basis", research=False):
+    components = dict(diluted_shares=10, equity_price_usd=value*10,
+        btc_holdings=1, btc_price_usd=100)
+    input_evidence = {}
+    for key, component in components.items():
+        record = {**metadata(asset, at), "asset_id": "BTC" if key == "btc_price_usd" else asset,
+            "value": component, "raw_sha256": "a"*64}
+        if key.endswith("price_usd"):
+            record["currency"] = "USD"
+        if key == "diluted_shares":
+            record.update(basis_ref=basis, dilution_scope="SYNTHETIC_FULLY_DILUTED_SHARE_SCOPE", coverage_state="COMPLETE")
+        input_evidence[key] = record
     row = {**build_diluted_equity_mnav(asset_id=asset, diluted_equity_market_cap_usd=value*100,
-        asset_nav_usd=100, semantic_ref=FORMAL_MNAV_REF, evidence_alignment_state="VALIDATED"),
+        asset_nav_usd=100, semantic_ref=FORMAL_MNAV_REF, evidence_alignment_state="VALIDATED",
+        **components, share_basis_ref=basis, input_evidence=input_evidence, as_of_ms=at),
         **metadata(asset, at), "basis_ref": basis}
     if research:
         row["source_class"] = "RESEARCH_SECONDARY"
@@ -62,6 +76,26 @@ def funding():
 
 
 class TreasuryValuationTests(unittest.TestCase):
+    def test_legacy_and_recomputed_versions_same_day_do_not_collide(self):
+        data = inputs()
+        old = deepcopy(data["mnav_history"][-1])
+        old.update(schema_version="CRT_DILUTED_EQUITY_MNAV_EVIDENCE_V0.1",
+                   formula_version="LEGACY_UNPROVEN_NAV", mnav=9)
+        data["mnav_history"].append(old)
+        result = build_treasury_valuation_context(asset_id="MSTR", as_of_ms=NOW, **data)
+        self.assertEqual(result["diluted_mnav"], 1.5)
+        self.assertEqual(result["formal_action_critical_state"], "AVAILABLE")
+        self.assertEqual(result["legacy_mnav_observations"][0]["reported_mnav"], 9)
+        self.assertNotIn(9, [r["mnav"] for r in result["own_history_empirical_cdf_pct"]["baseline"]])
+
+    def test_two_current_formula_declarations_same_day_remain_blocked(self):
+        data = inputs()
+        data["mnav_history"].append(deepcopy(data["mnav_history"][-1]))
+        result = build_treasury_valuation_context(asset_id="MSTR", as_of_ms=NOW, **data)
+        self.assertIsNone(result["diluted_mnav"])
+        self.assertEqual(result["formal_action_critical_state"], "BLOCKED")
+        self.assertTrue(any(r["code"] == "DUPLICATE_MNAV_TIME" for r in result["blockers"]))
+
     def test_compact_dictionaries_recover_exact_claim_values(self):
         p = {"generated_at_ms": NOW, "asset_facts": {"items": []}}
         add_treasury_valuation_context(p, {a: inputs(a, research=True) for a in ISSUERS})
@@ -130,6 +164,73 @@ class TreasuryValuationTests(unittest.TestCase):
         data["mnav_history"][-1] = observation(research=True)
         c = context(mnav_history=data["mnav_history"])
         self.assertEqual(c["own_history_empirical_cdf_pct"]["baseline_count"], 0)
+
+    def test_legacy_nav_denominator_kept_explicitly_out_of_current_history(self):
+        legacy = observation()
+        legacy.update(schema_version="CRT_DILUTED_EQUITY_MNAV_EVIDENCE_V0.1",
+            semantic_ref="radar/RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md", asset_nav_usd=90)
+        legacy.pop("formula_version")
+        legacy.pop("denominator_basis")
+        original = deepcopy(legacy)
+        c = context(mnav_history=[legacy])
+        self.assertIsNone(c["diluted_mnav"])
+        self.assertEqual(c["mnav_observations"], [None])
+        self.assertEqual(c["legacy_mnav_observations"][0]["reported_mnav"], 1.5)
+        self.assertEqual(c["legacy_mnav_observations"][0]["qualification"],
+            "LEGACY_RESEARCH_ONLY_NOT_CURRENT_FORMAL_MNAV")
+        self.assertEqual(c["formal_action_critical_state"], "BLOCKED")
+        self.assertEqual(legacy, original)
+
+    def test_version_switch_keeps_cdf_and_five_week_algorithm_without_legacy_pooling(self):
+        data = inputs()
+        old = [observation(at=NOW-(90-i)*DAY_MS, value=99) for i in range(25)]
+        for row in old:
+            row["formula_version"] = "LEGACY_NET_ASSETS_RATIO_V0"
+        c = context(mnav_history=old + data["mnav_history"])
+        self.assertEqual(len(c["legacy_mnav_observations"]), 25)
+        self.assertEqual(c["own_history_empirical_cdf_pct"]["baseline_count"], 40)
+        self.assertEqual(c["own_history_empirical_cdf_pct"]["value"], 52.5)
+        self.assertAlmostEqual(c["five_week_mnav_change_pct"]["value"], 1.5/1.125-1)
+
+    def test_current_legacy_row_does_not_fall_back_to_an_older_new_formula(self):
+        old = observation()
+        old["formula_version"] = "LEGACY_NET_ASSETS_RATIO_V0"
+        c = context(mnav_history=[observation(at=NOW-DAY_MS), old])
+        self.assertIsNone(c["diluted_mnav"])
+        self.assertEqual(c["formal_action_critical_state"], "BLOCKED")
+
+    def test_same_formula_research_components_are_recomputed_and_remain_secondary(self):
+        row = observation(research=True)
+        c = context(mnav_history=[row])
+        self.assertEqual(c["diluted_mnav"], 1.5)
+        self.assertEqual(c["formula_version"], FORMULA_VERSION)
+        self.assertEqual(c["evidence_authority"], "RESEARCH_SECONDARY_EVIDENCE")
+        self.assertEqual(c["formal_action_critical_state"], "BLOCKED")
+        row["asset_nav_usd"] = 90
+        self.assertIsNone(context(mnav_history=[row])["diluted_mnav"])
+
+    def test_same_formula_different_dilution_scope_is_not_a_comparable_series(self):
+        data = inputs()
+        data["mnav_history"][-1]["input_evidence"]["diluted_shares"]["dilution_scope"] = "EXCLUDES_TRADITIONAL_WARRANTS"
+        c = context(**data)
+        self.assertEqual(c["diluted_mnav"], 1.5)
+        self.assertEqual(c["own_history_empirical_cdf_pct"]["baseline_count"], 0)
+        self.assertEqual(c["five_week_mnav_change_pct"]["state"], "BLOCKED")
+
+    def test_formula_version_and_components_survive_pack_and_compact_projection(self):
+        p = {"generated_at_ms": NOW, "asset_facts": {"items": []}}
+        add_treasury_valuation_context(p, {a: inputs(a) for a in ISSUERS})
+        compact = compact_treasury_valuation_context(p)
+        for asset in ISSUERS:
+            self.assertEqual(compact[asset]["formula_version"], FORMULA_VERSION)
+            self.assertEqual(compact[asset]["denominator_basis"], DENOMINATOR_BASIS)
+            self.assertEqual(compact[asset]["semantic_ref"], FORMAL_MNAV_REF)
+            self.assertEqual(compact[asset]["mnav_schema_version"], MNAV_VERSION)
+            self.assertEqual(compact[asset]["mnav_evidence_alignment_state"], "VALIDATED")
+            self.assertEqual(compact[asset]["source_semantic_version"], "1")
+            self.assertEqual(compact[asset]["share_basis_ref"], "same-basis")
+            self.assertEqual(compact[asset]["mnav_calculation_inputs"]["btc_market_value_usd"], 100)
+            self.assertEqual(compact[asset]["mnav_input_evidence"]["diluted_shares"]["value"], 10)
 
     def test_share_and_mnav_basis_fail_closed(self):
         data = inputs()

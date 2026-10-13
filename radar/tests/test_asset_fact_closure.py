@@ -3,6 +3,7 @@ import json
 import unittest
 
 from crt_radar.diluted_equity_mnav import build_diluted_equity_mnav
+from test_diluted_equity_mnav import qualified_inputs
 from crt_radar.issuer_fact_history import select_fact_history
 from crt_radar.premarket_evidence_binding import build_premarket_evidence_binding
 from crt_radar.ibkr_live_market_data_intake import (
@@ -18,11 +19,7 @@ from test_premarket_evidence_binding import _fact, _overlay
 
 def envelope(asset="MSTR"):
     return {
-        **build_diluted_equity_mnav(
-            asset_id=asset, diluted_equity_market_cap_usd=800,
-            asset_nav_usd=1000, semantic_ref="FORMAL_CRT",
-            evidence_alignment_state="VALIDATED",
-        ),
+        **build_diluted_equity_mnav(**qualified_inputs(asset, at=1787919300000)),
         "provenance": {"source_refs": [{"evidence_hash": "a" * 64}]},
         "as_of": "2026-08-28T12:15:00Z",
     }
@@ -58,6 +55,15 @@ class AssetFactClosureTests(unittest.TestCase):
         )["asset_facts"]["MSTR"]["diluted_mnav"]
         self.assertEqual(result["provenance"], value["provenance"])
         self.assertEqual(result["reason"], "SOURCE_STALE")
+        self.assertIsNone(result["mnav"])
+
+    def test_matching_ratio_with_non_btc_denominator_is_not_a_formal_envelope(self):
+        value = envelope()
+        value.update(asset_nav_usd=90, btc_market_value_usd=90, mnav=80/90)
+        result = build_premarket_evidence_binding(
+            reflexivity_overlay=None, mnav_results={"MSTR": value},
+        )["asset_facts"]["MSTR"]["diluted_mnav"]
+        self.assertEqual(result["state"], "BLOCKED")
         self.assertIsNone(result["mnav"])
 
     def test_claim_scoping_retains_valid_fact_and_global_blockers(self):

@@ -16,12 +16,16 @@ from typing import Any
 
 from .diluted_equity_mnav import (
     SCHEMA_VERSION as MNAV_SCHEMA_VERSION,
+    FORMULA_VERSION,
+    DENOMINATOR_BASIS,
+    SEMANTIC_REF as FORMAL_MNAV_REF,
     build_diluted_equity_mnav,
+    validate_diluted_mnav_evidence,
 )
 
 SCHEMA_VERSION = "CRT_TREASURY_COMPANY_CT_V0.1.1"
 OVERLAY_TYPE = "NON_WEIGHTED_EVIDENCE_OVERLAY"
-FORMAL_MNAV_REF = "radar/RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md"
+LEGACY_FORMAL_MNAV_REF = "radar/RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md"
 REPLAY_MODES = {"DECISION_REPLAY", "AUDIT_REPLAY"}
 MNAV_SEMANTIC_IDENTITIES = {
     "CRT_FORMAL_DILUTED_EQUITY_MNAV",
@@ -424,7 +428,7 @@ def _events(raw: Any, issuer: str, as_of: int, coverage: Any, *, management: boo
 def _price(raw: Any, issuer: str, as_of: int) -> dict:
     out = _section()
     out.update(mnav=None, semantic_ref=None)
-    meta = _metadata(raw, out, "price_financing_state", issuer, as_of)
+    meta = _metadata(raw, out, "price_financing_state", issuer, as_of, "AUDIT_REPLAY")
     if meta is None:
         return out
     semantic = meta["source_semantic"]
@@ -435,25 +439,48 @@ def _price(raw: Any, issuer: str, as_of: int) -> dict:
              and raw.get("semantic_ref") == FORMAL_MNAV_REF and raw.get("evidence_alignment_state") == "VALIDATED"
              and raw.get("action_output") == "NONE" and raw.get("external_action_authority") == "NONE"
              and raw.get("external_action_performed") is False
-             and raw.get("asset_id") in ("MSTR", "ASST"))
+             and raw.get("formula_version") == FORMULA_VERSION
+             and raw.get("denominator_basis") == DENOMINATOR_BASIS
+             and raw.get("asset_id") in ("MSTR", "ASST")
+             and {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}.get(raw.get("asset_id")) == issuer)
     value = raw.get("mnav")
     if not valid or not _number(value) or value <= 0:
         _block(out, "mnav", "FORMAL_MNAV_EVIDENCE_NOT_VALIDATED")
         return out
-    cap, nav = raw.get("diluted_equity_market_cap_usd"), raw.get("asset_nav_usd")
-    if not _number(cap) or not _number(nav) or cap <= 0 or nav <= 0:
+    # Recompute from the four qualified components. An internally consistent
+    # cap / NAV ratio cannot prove that NAV means BTC holdings market value.
+    try:
+        upstream = build_diluted_equity_mnav(
+            asset_id=raw["asset_id"],
+            diluted_equity_market_cap_usd=raw.get("diluted_equity_market_cap_usd"),
+            asset_nav_usd=raw.get("asset_nav_usd"),
+            diluted_shares=raw.get("diluted_shares"),
+            equity_price_usd=raw.get("equity_price_usd"),
+            btc_holdings=raw.get("btc_holdings"),
+            btc_price_usd=raw.get("btc_price_usd"),
+            share_basis_ref=raw.get("share_basis_ref"),
+            input_evidence=raw.get("input_evidence"), as_of_ms=as_of,
+            semantic_ref=FORMAL_MNAV_REF, evidence_alignment_state="VALIDATED",
+        )
+    except (ValueError, TypeError, OverflowError):
         _block(out, "mnav", "MNAV_UPSTREAM_INPUTS_INVALID")
         return out
-    upstream = build_diluted_equity_mnav(
-        asset_id=raw["asset_id"], diluted_equity_market_cap_usd=cap,
-        asset_nav_usd=nav, semantic_ref=FORMAL_MNAV_REF,
-        evidence_alignment_state="VALIDATED",
-    )
+    if upstream["state"] != "AVAILABLE":
+        _block(out, "mnav", upstream["reason"])
+        return out
+    if meta["effective_time"] != upstream.get("effective_time"):
+        _block(out, "mnav", "MNAV_COMPONENT_EFFECTIVE_TIME_MISMATCH")
+        return out
     if not _number(upstream["mnav"]) or not math.isclose(value, upstream["mnav"], rel_tol=1e-12):
         _block(out, "mnav", "MNAV_UPSTREAM_RESULT_MISMATCH")
         return out
-    out.update(meta, mnav=float(value), semantic_ref=FORMAL_MNAV_REF,
-               asset_id=raw["asset_id"], evidence_alignment_state="VALIDATED")
+    for key in ("diluted_equity_market_cap_usd", "btc_market_value_usd", "asset_nav_usd"):
+        if (not _number(raw.get(key)) or not _number(upstream.get(key)) or
+                not math.isclose(raw[key], upstream[key], rel_tol=1e-12)):
+            _block(out, "mnav", "MNAV_UPSTREAM_RESULT_MISMATCH")
+            return out
+    out.update(deepcopy(upstream))
+    out.update(meta)
     return _finish(out, True)
 
 
@@ -522,11 +549,14 @@ def import_saylortracker_offline_csv(csv_text: str, admission_record: dict, *, r
                      "first_seen_time": first_seen, "retrieval_time": retrieval_time,
                      "provenance": admission["admission_ref"], "raw_hash": digest,
                      "coverage": admission["coverage"], "source_class": "RESEARCH_SECONDARY",
+                     "formula_version": "LEGACY_UNQUALIFIED",
+                     "formula_qualification": "UNPROVEN_COMPONENTS",
                      "source_semantic": {"identity": "STRATEGYTRACKER_DILUTED_MNAV_RESEARCH", "version": "OFFLINE_CSV_V1",
                          "effective_from": effective, "effective_to": None}})
     return {"state": "RESEARCH_SECONDARY", "sensor": admission, "raw_hash": digest,
             "retrieval_time": retrieval_time, "first_seen_time": min((row["first_seen_time"] for row in rows), default=None),
-            "coverage": admission["coverage"], "rows": rows, "trading_threshold_eligible": False}
+            "coverage": admission["coverage"], "rows": rows, "trading_threshold_eligible": False,
+            "formula_version": "LEGACY_UNQUALIFIED", "formal_history_eligible": False}
 
 
 # Historical call sites remain callable; newly imported records use the corrected
@@ -652,6 +682,22 @@ def _valuation_row(raw: Any, asset: str, as_of: int, out: dict) -> dict | None:
     if not _text(raw.get("basis_ref")) or raw.get("asset_id") != asset:
         _block(out, "mnav_history", "MNAV_ASSET_OR_BASIS_UNBOUND")
         return None
+    if (raw.get("schema_version") != MNAV_SCHEMA_VERSION
+            or raw.get("formula_version") != FORMULA_VERSION
+            or raw.get("denominator_basis") != DENOMINATOR_BASIS
+            or raw.get("semantic_ref") != FORMAL_MNAV_REF):
+        # Preserve reported history under its original explicit qualification.
+        # An unverified old denominator is never relabelled by changing a tag.
+        out["legacy_mnav_observations"].append({**meta,
+            "asset_id": asset, "basis_ref": raw["basis_ref"],
+            "reported_mnav": raw.get("mnav") if _number(raw.get("mnav")) else None,
+            "reported_schema_version": raw.get("schema_version"),
+            "reported_formula_version": raw.get("formula_version"),
+            "reported_semantic_ref": raw.get("semantic_ref"),
+            "denominator_basis": raw.get("denominator_basis", "LEGACY_UNPROVEN"),
+            "qualification": "LEGACY_RESEARCH_ONLY_NOT_CURRENT_FORMAL_MNAV"})
+        _block(out, "mnav_history", "MNAV_LEGACY_FORMULA_NOT_ADMITTED")
+        return None
     if identity == FORMAL_IDENTITY:
         if raw.get("source_class") not in OFFICIAL_CLASSES:
             _block(out, "mnav_history", "OFFICIAL_INPUTS_REQUIRED")
@@ -661,13 +707,24 @@ def _valuation_row(raw: Any, asset: str, as_of: int, out: dict) -> dict | None:
         value = price["mnav"]
         authority = "FORMAL_ACTION_CRITICAL"
     else:
+        # Same formula does not upgrade a secondary source to formal authority.
+        # Recompute its components rather than trusting a tracker ratio/tag.
+        calculated = validate_diluted_mnav_evidence(raw, as_of_ms=as_of, asset_id=asset)
         value = raw.get("mnav")
+        if calculated.get("state") != "AVAILABLE":
+            _block(out, "mnav_history", "RESEARCH_MNAV_FORMULA_COMPONENTS_UNQUALIFIED")
+            return None
         authority = "RESEARCH_SECONDARY_EVIDENCE"
     if not _number(value) or value <= 0:
         _block(out, "mnav_history", "MNAV_VALUE_INVALID")
         return None
     return {**meta, "asset_id": asset, "basis_ref": raw["basis_ref"],
-            "mnav": value, "evidence_authority": authority}
+            "mnav": value, "evidence_authority": authority,
+            **{key: deepcopy(raw.get(key)) for key in (
+                "formula_version", "denominator_basis", "semantic_ref", "share_basis_ref",
+                "schema_version", "state", "evidence_alignment_state",
+                "diluted_shares", "equity_price_usd", "btc_holdings", "btc_price_usd",
+                "btc_market_value_usd", "diluted_equity_market_cap_usd", "input_evidence")}}
 
 
 def _valuation_history(raw: Any, asset: str, as_of: int, out: dict) -> list:
@@ -681,13 +738,25 @@ def _valuation_history(raw: Any, asset: str, as_of: int, out: dict) -> list:
     if any(not isinstance(r, dict) or not _time(r.get("effective_time")) for r in visible):
         _block(out, "mnav_history", "MNAV_HISTORY_TIME_UNKNOWN")
         return []
-    counts = Counter(r["effective_time"] for r in visible)
+    groups = {}
+    for r in visible:
+        groups.setdefault(r["effective_time"], []).append(r)
     rows = []
-    for r in sorted(visible, key=lambda r: r["effective_time"]):
-        row = _valuation_row(r, asset, as_of, out)
-        if counts[r["effective_time"]] != 1:
+    for at, group in sorted(groups.items()):
+        candidates = []
+        for r in group:
+            row = _valuation_row(r, asset, as_of, out)
+            if (r.get("schema_version") == MNAV_SCHEMA_VERSION
+                    and r.get("formula_version") == FORMULA_VERSION
+                    and r.get("denominator_basis") == DENOMINATOR_BASIS
+                    and r.get("semantic_ref") == FORMAL_MNAV_REF):
+                candidates.append(row)
+        # A retained old version is not a second current-formula observation.
+        # Conflicting/duplicate current declarations still block this point;
+        # a latest legacy-only point remains a hole, never a fallback.
+        row = candidates[0] if len(candidates) == 1 else None
+        if len(candidates) > 1:
             _block(out, "mnav_history", "DUPLICATE_MNAV_TIME")
-            row = None
         rows.append(row)
     return rows
 
@@ -695,6 +764,10 @@ def _valuation_history(raw: Any, asset: str, as_of: int, out: dict) -> list:
 def _same_valuation_basis(a: dict, b: dict) -> bool:
     # The legacy label stays valid but is not silently pooled with new history.
     return (a["basis_ref"] == b["basis_ref"] and
+            all(a.get(k) == b.get(k) and a.get(k) is not None for k in (
+                "formula_version", "denominator_basis", "share_basis_ref")) and
+            a["input_evidence"]["diluted_shares"]["dilution_scope"]
+                == b["input_evidence"]["diluted_shares"]["dilution_scope"] and
             all(a["source_semantic"][k] == b["source_semantic"][k]
                 for k in ("identity", "version")))
 
@@ -776,12 +849,16 @@ def build_treasury_valuation_context(*, asset_id: str, as_of_ms: int,
         capital_decision_authority="USER_ONLY", machine_execution="FORBIDDEN",
         production="NOT_APPROVED", calculation_version=VALUATION_VERSION)
     out["history_coverage"] = history_coverage
+    out["legacy_mnav_observations"] = []
     rows = _valuation_history(mnav_history, asset_id, as_of_ms, out)
     current = rows[-1] if rows else None
     out["mnav_observations"] = rows
     out["current_observation"] = current
     out["diluted_mnav"] = current["mnav"] if current else None
     out["source_semantic"] = current["source_semantic"] if current else None
+    out["formula_version"] = current["formula_version"] if current else FORMULA_VERSION
+    out["denominator_basis"] = DENOMINATOR_BASIS
+    out["semantic_ref"] = FORMAL_MNAV_REF
     out["evidence_authority"] = current["evidence_authority"] if current else "BLOCKED"
     out["formal_action_critical_state"] = (
         "AVAILABLE" if current and current["evidence_authority"] == "FORMAL_ACTION_CRITICAL" else "BLOCKED")
@@ -879,6 +956,18 @@ def compact_treasury_valuation_context(pack: dict) -> dict:
             "evidence_authority", "formal_action_critical_state", "current_btc_per_diluted_share",
             "previous_btc_per_diluted_share", "btc_per_diluted_share_change_pct")}
         row["source_semantic"] = (context["source_semantic"] or {}).get("identity")
+        row["source_semantic_version"] = (context["source_semantic"] or {}).get("version")
+        row["formula_version"] = context.get("formula_version")
+        row["denominator_basis"] = context.get("denominator_basis")
+        row["semantic_ref"] = context.get("semantic_ref")
+        current_mnav = context["current_observation"] or {}
+        row["mnav_schema_version"] = current_mnav.get("schema_version")
+        row["mnav_evidence_alignment_state"] = current_mnav.get("evidence_alignment_state")
+        row["share_basis_ref"] = current_mnav.get("share_basis_ref")
+        row["mnav_input_evidence"] = deepcopy(current_mnav.get("input_evidence"))
+        row["mnav_calculation_inputs"] = {key: current_mnav.get(key) for key in (
+            "diluted_shares", "equity_price_usd", "btc_holdings", "btc_price_usd",
+            "diluted_equity_market_cap_usd", "btc_market_value_usd")}
         current_bps = context["btc_per_diluted_share"]["current"] or {}
         row["btc_share_basis"] = current_bps.get("basis_ref")
         row["btc_share_as_of"] = current_bps.get("effective_time")
@@ -897,5 +986,29 @@ def compact_treasury_valuation_context(pack: dict) -> dict:
         row.update(quality_state=context["state"], context_hash=digest,
             blockers=sorted({b["code"] for b in context["blockers"]
                 if b["claim"] != "btc_per_diluted_share.growth_direction"}))
+        receipt = {**current_mnav, "asset_nav_usd": current_mnav.get("btc_market_value_usd"),
+            "action_output": "NONE", "external_action_authority": "NONE",
+            "external_action_performed": False}
+        checked = validate_diluted_mnav_evidence(receipt, asset_id=asset,
+            as_of_ms=pack.get("generated_at_ms"))
+        if checked["state"] != "AVAILABLE":
+            old_value = row["diluted_mnav"]
+            if _number(old_value):
+                row["legacy_reported_valuation"] = {
+                    "reported_mnav": old_value, "formula_version": row["formula_version"] or "LEGACY_UNPROVEN",
+                    "source_semantic": row["source_semantic"], "qualification": "RESEARCH_ONLY"}
+            row.update(diluted_mnav=None, formal_action_critical_state="BLOCKED",
+                evidence_authority="LEGACY_RESEARCH_ONLY", formula_version="LEGACY_UNPROVEN",
+                own_history_empirical_cdf_pct=None, regime_empirical_cdf_pct=None,
+                benchmark_empirical_cdf_pct=None, five_week_mnav_change_pct=None)
+            row["blockers"] = sorted(set(row["blockers"] + ["MNAV_FORMULA_COMPONENTS_UNQUALIFIED"]))
+            # Old immutable packs remain readable, but missing new proof is not
+            # manufactured into a current-formula receipt or a row of null facts.
+            for key in ("mnav_input_evidence", "mnav_calculation_inputs", "mnav_schema_version",
+                        "mnav_evidence_alignment_state", "share_basis_ref"):
+                row.pop(key, None)
+            for key in ("source_semantic_version", "denominator_basis", "semantic_ref"):
+                if row.get(key) is None:
+                    row.pop(key, None)
         result[asset] = row
     return result

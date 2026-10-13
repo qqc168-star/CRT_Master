@@ -113,8 +113,8 @@ class CapitalDecisionSemanticsTests(unittest.TestCase):
         valuation = projection["market_context"]["treasury_valuation_context"]
         valuation["MSTR"].update(diluted_mnav=1.4,
             source_semantic="STRATEGYTRACKER_DILUTED_MNAV_RESEARCH", formal_action_critical_state="BLOCKED")
-        valuation["ASST"].update(diluted_mnav=1.2,
-            source_semantic="CRT_FORMAL_DILUTED_EQUITY_MNAV", formal_action_critical_state="AVAILABLE")
+        from test_diluted_equity_mnav import compact_qualified_mnav
+        valuation["ASST"].update(compact_qualified_mnav("ASST", at=NOW, ratio=1.2))
         valuation["ASST"]["preferred_funding_attribution_summary"] = {"research_only": True,
             "nested": {"source_semantic": "CRT_FORMAL_DILUTED_EQUITY_MNAV", "diluted_mnav": 99}}
         catalog = capital.semantic_evidence_catalog(projection)
@@ -124,6 +124,12 @@ class CapitalDecisionSemanticsTests(unittest.TestCase):
         self.assertEqual(catalog[formal_path]["metric_basis"], "FORMAL_DILUTED_EQUITY_MNAV")
         nested = "/market_context/treasury_valuation_context/ASST/preferred_funding_attribution_summary/nested/diluted_mnav"
         self.assertEqual(catalog[nested]["metric_basis"], "RESEARCH_SECONDARY")
+        # A formal-looking identity/state without this formula's proof is not
+        # sufficient to classify a decision metric as formal mNAV.
+        incomplete = deepcopy(projection)
+        incomplete["market_context"]["treasury_valuation_context"]["ASST"].pop("mnav_input_evidence")
+        bad_catalog = capital.semantic_evidence_catalog(incomplete)
+        self.assertEqual(bad_catalog[formal_path]["metric_basis"], "FORMAL_MNAV_UNQUALIFIED")
         rec = deepcopy(self.rec)
         target = next(row for row in rec["items"] if row["decision_scope"] == "MSTR-addition")
         target["reasoning_support"]["claim_bindings"] = [self.binding(research_path, catalog)]

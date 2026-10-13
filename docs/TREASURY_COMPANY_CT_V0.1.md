@@ -8,9 +8,10 @@
   `retrieval_time` 四座時鐘。Decision Replay 僅在 disclosure 已可得時使用；
   Audit Replay 以 retrieval 可得性重建稽核視角。任一未來可見性或時鐘倒序均為
   `BLOCKED`，不得以日後修訂資料回灌過往決策。
-- `source_semantic` 是必填且版本化的 binding（identity、version、effective_from、
-  effective_to）。CRT formal diluted-equity mNAV、SaylorTracker diluted mNAV、
-  Strategy issuer mNAV 為三條永久分線；CRT 價格狀態只接受前者，未綁定即
+- `source_semantic` 是必填且版本化的 binding（語義綁定：identity、version、effective_from、
+  effective_to）。CRT（第一顆比特幣決策研究體系）正式 Diluted mNAV（稀釋後資產淨值倍數）、
+  財庫研究平台數字與發行人自訂倍數保持來源／權威分線；公式相同不代表來源資格相同。
+  CRT（第一顆比特幣決策研究體系）價格狀態只接受目前正式版本，未綁定即
   `SOURCE_SEMANTIC_UNBOUND_BLOCKED`。
 - SaylorTracker 只可經人工核准的 Sensor Admission Record 與 supplied Offline CSV
   Import 進入 `RESEARCH_SECONDARY`。匯入保存 provenance、raw hash、retrieval、
@@ -91,10 +92,17 @@
 未證明完整覆蓋時，個別有效事實依然可用，但整體範圍標為部分。
 
 `price_financing_state` 接受既有 `build_diluted_equity_mnav` 的可用輸出，
-另附公司及來源時間資料。`semantic_ref` 必須指向
-`radar/RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md`。
-這是既有正式語義的參照，不建立另一套淨資產組成。
-上游仍負責證券與公司映射、正式淨資產組成與對齊驗真。
+另附公司及來源時間資料。`semantic_ref` 必須指向使用者於 `2026-10-13` 批准的
+`radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`，
+`formula_version = CRT_DILUTED_MNAV_BTC_MARKET_VALUE_V1`。
+唯一公式為 `(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`。
+四項元件須具來源、原始雜湊、四座時鐘及同一有效時點；稀釋股數須保存原始
+`basis_ref`、`dilution_scope` 及明確 `coverage_state = COMPLETE`，不自行補股或排除股份。
+本模組重新核驗元件及其相乘總額；只有兩個總額或一個比值不能取得正式資格。
+相容欄位 `asset_nav_usd` 只能是合格 BTC（比特幣）價格乘持幣量的派生市值。
+債務、優先股、現金與剩餘價值維持獨立公司健康證據，不增減此分母。
+原 `radar/RELEASE/CRT_V1.10_FORMAL_SEAL_20260805.md` 仍為歷史批准紀錄，
+不再單獨證明本次正式公式；舊版或未知分母值不能重新標記後升格。
 本模組只保留其價格／融資貨幣狀態，無效時 `mnav = null`；它不是第六器官。
 
 ## 證據包整合與治理
@@ -108,7 +116,7 @@
 `COMPLETE` 只表示本次證據完整，不表示公司健康。
 
 正式六層權重 `20 / 20 / 17 / 25 / 13 / 5`、燈號 `-60 / -35 / 35 / 60`、
-未加限定的稀釋後股權 `mNAV` 語義、Production（正式生產）`NOT_APPROVED`、
+未加限定的 `mNAV` 遵循上述已批准修訂；Production（正式生產）`NOT_APPROVED`、
 External Action Authority（外部行動權限）`NONE` 均維持原狀。
 本次沒有接入投資人斷層掃描、券商、實際值班部署或自動蒐集管線。
 既有接力棒的 `6 / 8` 與第七項傳輸阻塞不因本功能而改變。
