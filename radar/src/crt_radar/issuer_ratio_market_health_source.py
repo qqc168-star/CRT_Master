@@ -796,6 +796,126 @@ def _reconcile_archived_cash(rows: list[dict]) -> tuple[list[dict], list[dict]]:
             row["source_evidence"].setdefault("cash_conflict_fields", []).append(field)
     return result, conflicts
 
+def _archived_strive_capital_observations(raw, text, meta, disclosed):
+    """Retain dated reported facts without supplying a complete residual basis.
+
+    Reuse the disclosure table reader's column coordinates. In particular a
+    single-period preliminary balance sheet is never another row in AFDS's
+    same-filing comparison, and stated preferred amounts are not liquidation
+    claims. These observations cannot activate CT action calculations.
+    """
+    from .issuer_disclosure_tables import _Tables, _date, _number
+
+    labels = {
+        "Bitcoin held": ("btc_holdings", 1),
+        "Class A common stock": ("class_a_common_shares", 1),
+        "Class B common stock": ("class_b_common_shares", 1),
+        "Effective Common Shares Outstanding": ("basic_shares", 1),
+        "Assumed Fully Diluted Shares": ("diluted_shares", 1),
+        "Assumed diluted shares outstanding 1": ("diluted_shares", 1),
+        "Shares Underlying Traditional Warrants": ("traditional_warrant_shares", 1),
+        "Cash and cash equivalents (in thousands)": ("cash_and_cash_equivalents_usd", 1000),
+        "Shares of STRC held": ("strc_shares", 1),
+        "Fair value of STRC Stock (in thousands)": ("strc_fair_value_usd", 1000),
+        "SATA Stock": ("sata_shares", 1),
+        "Fair value of bitcoin held (in thousands)": ("btc_fair_value_usd", 1000),
+        "Total treasury value (in thousands)": ("total_treasury_value_usd", 1000),
+        "Debt principal balance (in thousands)": ("debt_principal_usd", 1000),
+        "SATA stated amount (in thousands)": ("preferred_stated_amount_usd", 1000),
+        "Total Debt and Preferred (in thousands)": ("reported_total_debt_and_preferred_usd", 1000),
+        "Annualized interest obligation (in thousands)": ("reported_annual_payment_obligation_usd", 1000),
+        "Market price of BTC": ("reported_btc_price_usd", 1),
+    }
+    parser = _Tables()
+    parser.feed(raw.decode("utf-8", errors="replace"))
+    observations = []
+    for table in parser.tables:
+        if table["invalid"]:
+            continue
+        rows = table["rows"]
+        table_text = " ".join(t for row in rows for _, _, t in row)
+        headers = [row for row in rows if sum(t.lower().startswith("as of ") for _, _, t in row) >= 2]
+        is_snapshot = not headers and "Balance Sheet" in table_text
+        if len(headers) == 1:
+            columns = [(a, b, _date(t)) for a, b, t in headers[0] if t.lower().startswith("as of ")]
+        elif is_snapshot:
+            columns = []
+            for row in rows:
+                for a, b, t in row:
+                    if re.fullmatch(r"\d{1,2}/\d{1,2}/20\d{2}", t):
+                        try:
+                            date = datetime.strptime(t, "%m/%d/%Y").date().isoformat()
+                        except ValueError:
+                            continue
+                        columns.append((a, b, date))
+        else:
+            continue
+        if not columns or any(date is None for _, _, date in columns) or len({d for _, _, d in columns}) != len(columns):
+            continue
+        for start, end, date in columns:
+            at = int(datetime.fromisoformat(date).replace(tzinfo=timezone.utc).timestamp() * 1000)
+            if at > disclosed:
+                continue
+            values, raw_values, conflicts = {}, {}, []
+            for row in rows:
+                for _, label_end, label in row:
+                    clean = re.sub(r"\s*\(\d+\)$", "", label).strip()
+                    if clean not in labels or label_end > start:
+                        continue
+                    key, scale = labels[clean]
+                    value = _number(row, start, end)
+                    value = value * scale if value is not None else None
+                    if key in values and values[key] != value:
+                        conflicts.append(key)
+                    values[key] = value
+                    raw_values[key] = " ".join(t for a, b, t in row if a >= start and b <= end).strip()
+            if not values:
+                continue
+            for key in conflicts:
+                values[key] = None
+            if is_snapshot:
+                # Preserve the issuer's reported zero at thousand-dollar
+                # precision only when its own debt/preferred total agrees.
+                debt_text = raw_values.get("debt_principal_usd", "").replace("$", "").strip()
+                stated = values.get("preferred_stated_amount_usd")
+                if (debt_text in {"—", "–", "-"} and stated is not None
+                        and values.get("reported_total_debt_and_preferred_usd") == stated
+                        and "debt_principal_usd" not in conflicts):
+                    values["debt_principal_usd"] = 0.0
+                common = re.search(r"As of " + DATE_RE + r", the Company had ([\d,]+) shares of Class A common stock, ([\d,]+) shares of Class B common stock, and ([\d,]+) shares of SATA Stock outstanding", text, re.I)
+                if common and _date_ms(common) == at:
+                    values.update(class_a_common_shares=_scale(common.group(4)),
+                                  class_b_common_shares=_scale(common.group(5)),
+                                  sata_shares=_scale(common.group(6)))
+                    values["basic_shares"] = values["class_a_common_shares"] + values["class_b_common_shares"]
+            settlement_note = re.search(r"\(1\)\s*(Includes shares outstanding and shares sold through .*?which will be issued on the following business day\.)", table_text, re.I)
+            row = dict(**meta(at, "ASST_REPORTED_CAPITAL_STRUCTURE:" + date),
+                claim="REPORTED_CAPITAL_STRUCTURE_SNAPSHOT", reported_fields=values,
+                reported_raw_values=raw_values, reported_date=date,
+                snapshot_kind="PRELIMINARY_TREASURY" if is_snapshot else "COMPARISON_TABLE",
+                share_basis=("REPORTED_ADSO_COMPONENTS_NOT_ALL_TRADITIONAL_WARRANTS" if is_snapshot else
+                             "AFDS_EXCLUDES_TRADITIONAL_WARRANTS" if "Traditional Warrants are excluded" in table_text else
+                             "AFDS_SCOPE_UNRESOLVED"),
+                basic_share_basis=("REPORTED_CLASS_A_PLUS_CLASS_B_OUTSTANDING_NOT_WEIGHTED_AVERAGE" if is_snapshot else
+                                   "REPORTED_EFFECTIVE_COMMON_SHARES_NOT_WEIGHTED_AVERAGE"),
+                share_settlement_scope=("ISSUER_REPORTED_OUTSTANDING_ON_SNAPSHOT_DATE" if is_snapshot else
+                                        "INCLUDES_SOLD_NOT_YET_ISSUED_SHARES" if settlement_note else "UNRESOLVED"),
+                share_settlement_source_note=(settlement_note.group(1) if settlement_note and not is_snapshot else None),
+                economic_qualification="PARTIAL_RESEARCH_ONLY", ct_binding_state="RESEARCH_OBSERVATION_ONLY",
+                active_for_calculation=False, field_conflicts=sorted(set(conflicts)),
+                preliminary_unaudited=(is_snapshot and "preliminary unaudited" in text.lower()),
+                preferred_liquidation_claims_usd=None, other_senior_claims_usd=None,
+                tax_liabilities_usd=None, cash_unrestricted=None,
+                warrant_exercise_proceeds_usd=None,
+                limitations=["OTHER_SENIOR_CLAIMS_AND_TAX_NOT_COMPLETE",
+                             "STATED_PREFERRED_AMOUNT_IS_NOT_BOUND_LIQUIDATION_CLAIM",
+                             "AGGREGATE_ANNUAL_PAYMENT_NOT_COMPONENT_CARRY",
+                             "WARRANT_EXERCISE_TERMS_AND_PROCEEDS_UNBOUND",
+                             "REPORTED_CASH_IS_NOT_PROVEN_UNRESTRICTED_OR_DEPLOYABLE"])
+            observations.append(row)
+    return observations
+
+
 def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> dict:
     """Read retained official bytes only; normalize into the existing CT contract.
 
@@ -902,6 +1022,8 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                 for field in ("usd_cash_usd", "usd_reserve_usd") if field in values}
             return row
         if asset == "ASST":
+            out["source_binding"]["observations"].extend(
+                _archived_strive_capital_observations(raw, text, meta, disclosed))
             try:
                 states = _strive_states(raw, accepted_at_ms=disclosed, source_url=expected)
                 if any(r["btc_holdings"] <= 0 or r["diluted_shares"] <= 0 for r in states):
@@ -943,11 +1065,12 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                     effective_date=rate.group(2), interpretation="FORWARD_SENSITIVITY_NOT_HISTORICAL_CARRY",
                     disclosure_time=disclosed, retrieval_time=retrieved))
         else:
-            cash = re.search(r"As of " + DATE_RE + r", the balances of the USD Reserve and USD Cash were \$([\d.]+) billion and \$([\d.]+) billion, respectively", text, re.I)
+            cash = re.search(r"As of " + DATE_RE + r", the balances of the USD Reserve and USD Cash were \$([\d.]+) (million|billion) and \$([\d.]+) (million|billion), respectively", text, re.I)
             if cash:
                 at = _date_ms(cash)
                 burdens[asset].append(cash_row(at, "MSTR_SEPARATELY_DISCLOSED_USD_CASH_RESERVE",
-                    usd_reserve_usd=float(cash.group(4)) * 1e9, usd_cash_usd=float(cash.group(5)) * 1e9,
+                    usd_reserve_usd=_scale(cash.group(4), cash.group(5)),
+                    usd_cash_usd=_scale(cash.group(6), cash.group(7)),
                     reserve_separate_from_cash=True,
                     reserve_usable_for_carry=(True if re.search(
                         r"USD Reserve.*?intended to support the payment of dividends.*?interest on its outstanding indebtedness", text) else None)))

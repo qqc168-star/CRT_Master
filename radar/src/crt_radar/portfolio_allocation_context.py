@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from .company_health import build_health_dimensions, compact_health_dimensions
+from .treasury_company_ct import validate_pit_replay
 
 SCHEMA_VERSION = "CRT_PORTFOLIO_ALLOCATION_CONTEXT_V0.1"
 HEALTH_SCHEMA_VERSION = "CRT_COMMON_EQUITY_HEALTH_V0.1"
@@ -78,6 +79,8 @@ def _latest_fact(pack: dict[str, Any], *, asset: str, fact_type: str | None = No
 
 def _residual_snapshot(
     *,
+    issuer_id: str,
+    as_of_ms: int,
     asset_engine_snapshot: dict[str, Any] | None,
     burden_snapshot: dict[str, Any] | None,
     residual_input: dict[str, Any] | None,
@@ -86,6 +89,20 @@ def _residual_snapshot(
         return _claim_blocked("TREASURY_SNAPSHOT_UNAVAILABLE")
     if not isinstance(residual_input, dict):
         return _claim_blocked("RESIDUAL_VALUE_INPUT_UNAVAILABLE")
+    if type(as_of_ms) is not int or as_of_ms <= 0:
+        return _claim_blocked("RESIDUAL_REPLAY_TIME_UNAVAILABLE")
+    # A caller's scenario assertion cannot turn separately valid dates into a
+    # single shareholder snapshot, or make future/unverified CT facts visible.
+    for snapshot in (asset_engine_snapshot, burden_snapshot):
+        validity = validate_pit_replay(
+            snapshot, issuer_id=issuer_id, replay_at=as_of_ms, mode="AUDIT_REPLAY"
+        )
+        if validity["state"] != "AVAILABLE":
+            return _claim_blocked("RESIDUAL_SNAPSHOT_NOT_LOCALLY_VALIDATED")
+        if not isinstance(snapshot.get("basis_ref"), str) or not snapshot["basis_ref"].strip():
+            return _claim_blocked("RESIDUAL_SNAPSHOT_BASIS_MISSING")
+    if asset_engine_snapshot["effective_time"] != burden_snapshot["effective_time"]:
+        return _claim_blocked("RESIDUAL_SNAPSHOT_EFFECTIVE_TIME_MISMATCH")
     btc = _number(asset_engine_snapshot.get("btc_holdings"))
     shares = _number(asset_engine_snapshot.get("diluted_shares"))
     senior = _number(burden_snapshot.get("senior_claims_usd"))
@@ -123,6 +140,21 @@ def _residual_snapshot(
     }
 
 
+def _residual_comparable(previous_asset, current_asset, previous_burden, current_burden,
+                         previous_input, current_input):
+    # Share basis and burden scope are separate economic dimensions. Each must
+    # stay comparable over time; their basis strings need not equal each other.
+    for previous, current in ((previous_asset, current_asset), (previous_burden, current_burden)):
+        if (not isinstance(previous, dict) or not isinstance(current, dict)
+                or previous.get("issuer_id") != current.get("issuer_id")
+                or previous.get("basis_ref") != current.get("basis_ref")
+                or previous.get("source_semantic") != current.get("source_semantic")
+                or previous["effective_time"] >= current["effective_time"]):
+            return False
+    return (previous_input.get("capital_structure_scenario_ref")
+            == current_input.get("capital_structure_scenario_ref"))
+
+
 def _health_row(pack: dict[str, Any], asset: str, residual_inputs: dict[str, Any] | None) -> dict[str, Any]:
     valuation_fact = _latest_fact(pack, asset=asset, fact_type="TREASURY_VALUATION_CONTEXT")
     per_share_fact = _latest_fact(pack, asset=asset, fact_type="TREASURY_COMPANY_CT", ct_section="per_share_asset_engine")
@@ -139,28 +171,32 @@ def _health_row(pack: dict[str, Any], asset: str, residual_inputs: dict[str, Any
     current_burden = burden.get("current") if isinstance(burden, dict) else None
     previous_burden = burden.get("previous") if isinstance(burden, dict) else None
 
+    issuer = {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}[asset]
     supplied = residual_inputs.get(asset, {}) if isinstance(residual_inputs, dict) else {}
+    current_input = supplied.get("current") if isinstance(supplied, dict) else None
+    previous_input = supplied.get("previous") if isinstance(supplied, dict) else None
     current_residual = _residual_snapshot(
+        issuer_id=issuer, as_of_ms=pack.get("generated_at_ms"),
         asset_engine_snapshot=current_asset,
         burden_snapshot=current_burden,
-        residual_input=supplied.get("current") if isinstance(supplied, dict) else None,
+        residual_input=current_input,
     )
     previous_residual = _residual_snapshot(
+        issuer_id=issuer, as_of_ms=pack.get("generated_at_ms"),
         asset_engine_snapshot=previous_asset,
         burden_snapshot=previous_burden,
-        residual_input=supplied.get("previous") if isinstance(supplied, dict) else None,
+        residual_input=previous_input,
     )
 
     current_bps = valuation.get("current_btc_per_diluted_share") if isinstance(valuation, dict) else None
     bps_change = valuation.get("btc_per_diluted_share_change_pct") if isinstance(valuation, dict) else None
     # CT asset facts are independently usable when formal valuation is absent.
     # Revalidate local visibility and comparison basis before projecting them.
-    from .treasury_company_ct import validate_pit_replay
-    issuer = {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}[asset]
     def ct_visible(row):
-        return isinstance(row, dict) and validate_pit_replay(
+        return (type(pack.get("generated_at_ms")) is int and pack["generated_at_ms"] > 0
+            and isinstance(row, dict) and validate_pit_replay(
             row, issuer_id=issuer, replay_at=pack.get("generated_at_ms"),
-            mode="AUDIT_REPLAY")["state"] == "AVAILABLE"
+            mode="AUDIT_REPLAY")["state"] == "AVAILABLE")
     ct_bps = (current_asset.get("btc_per_diluted_share")
               if ct_visible(current_asset) and current_asset.get("basis_ref") else None)
     ct_change = (per_share.get("btc_per_diluted_share_change_pct")
@@ -183,16 +219,32 @@ def _health_row(pack: dict[str, Any], asset: str, residual_inputs: dict[str, Any
     if current_shares is not None and previous_shares is not None:
         diluted_share_change = current_shares - previous_shares
 
-    def burden_delta(field: str) -> float | None:
-        a = _number((current_burden or {}).get(field))
-        b = _number((previous_burden or {}).get(field))
-        return None if a is None or b is None else a - b
-
-    senior_claim_change = burden_delta("senior_claims_usd")
-    annual_carry_change = burden_delta("annual_carry_usd")
-    liquidity_change = burden_delta("usable_liquidity_usd")
+    residual_comparable = (
+        current_residual["state"] == previous_residual["state"] == "AVAILABLE"
+        and _residual_comparable(previous_asset, current_asset, previous_burden, current_burden,
+                                 previous_input, current_input)
+    )
+    organs = {}
+    for section in ("per_share_asset_engine", "funding_engine", "capital_burden_resilience",
+                    "capital_conversion", "management_evidence"):
+        fact = _latest_fact(pack, asset=asset, fact_type="TREASURY_COMPANY_CT", ct_section=section)
+        if isinstance(fact, dict) and isinstance(fact.get("evidence"), dict):
+            organs[section] = fact["evidence"]
+    residual_delta = (current_residual["value"] - previous_residual["value"]
+                      if residual_comparable else None)
+    closure = build_health_dimensions(
+        organs=organs, issuer_id=issuer, as_of_ms=pack.get("generated_at_ms"),
+        residual_change=residual_delta,
+    )
+    # Legacy and compact fields must use the same qualified comparisons as the
+    # health dimensions, not subtract incompatible reported cash/claim totals.
+    carry_claims = closure["dimensions"]["senior_claims_carry"]["claims"]
+    liquidity_claims = closure["dimensions"]["liquidity_buffer"]["claims"]
+    senior_claim_change = carry_claims["senior_claims_usd"]["value"]
+    annual_carry_change = carry_claims["annual_carry_usd"]["value"]
+    liquidity_change = liquidity_claims["usable_liquidity_usd"]["value"]
     cash_coverage_context = None
-    if isinstance(current_burden, dict):
+    if ct_visible(current_burden) and current_burden.get("cash_usability_basis_ref"):
         cash_coverage_context = {
             "coverage_basis": current_burden.get("coverage_basis"),
             "carry_coverage_years": current_burden.get("carry_coverage_years"),
@@ -216,15 +268,20 @@ def _health_row(pack: dict[str, Any], asset: str, residual_inputs: dict[str, Any
         blockers.append("CASH_COVERAGE_CONTEXT_INCOMPLETE")
     if current_residual["state"] != "AVAILABLE" or previous_residual["state"] != "AVAILABLE":
         blockers.append("NET_RESIDUAL_VALUE_PER_DILUTED_SHARE_UNAVAILABLE")
+        blockers.extend(row["reason"] for row in (previous_residual, current_residual)
+                        if row["state"] != "AVAILABLE")
+    if current_residual["state"] == previous_residual["state"] == "AVAILABLE" and not residual_comparable:
+        blockers.append("RESIDUAL_VALUE_SCENARIOS_NOT_COMPARABLE")
     residual_change_pct = None
-    if not blockers or (
-        current_residual["state"] == "AVAILABLE" and previous_residual["state"] == "AVAILABLE"
-    ):
+    if residual_comparable:
         prev = previous_residual["value"]
-        if prev != 0:
+        if prev > 0:
             residual_change_pct = current_residual["value"] / prev - 1
         else:
-            blockers.append("PREVIOUS_RESIDUAL_VALUE_ZERO")
+            # A negative denominator reverses the economic meaning of percent
+            # change. Keep verified levels/absolute change for research only.
+            blockers.append("PREVIOUS_RESIDUAL_VALUE_ZERO" if prev == 0
+                            else "PREVIOUS_RESIDUAL_VALUE_NEGATIVE")
 
     health_direction = "BLOCKED"
     health_reasons: list[str] = []
@@ -251,19 +308,6 @@ def _health_row(pack: dict[str, Any], asset: str, residual_inputs: dict[str, Any
     if isinstance(conversion, dict) and isinstance(conversion.get("events"), list):
         events = deepcopy(conversion["events"])
 
-    organs = {}
-    for section in ("per_share_asset_engine", "funding_engine", "capital_burden_resilience",
-                    "capital_conversion", "management_evidence"):
-        fact = _latest_fact(pack, asset=asset, fact_type="TREASURY_COMPANY_CT", ct_section=section)
-        if isinstance(fact, dict) and isinstance(fact.get("evidence"), dict):
-            organs[section] = fact["evidence"]
-    residual_delta = None
-    if current_residual["state"] == previous_residual["state"] == "AVAILABLE":
-        residual_delta = current_residual["value"] - previous_residual["value"]
-    closure = build_health_dimensions(
-        organs=organs, issuer_id={"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}[asset],
-        as_of_ms=pack.get("generated_at_ms"), residual_change=residual_delta,
-    )
     # Opposing verified claims prevent either legacy polarity from driving a
     # relative-health tilt. Unknown claims alone do not establish opposition.
     dimensions = closure["dimensions"].values()
