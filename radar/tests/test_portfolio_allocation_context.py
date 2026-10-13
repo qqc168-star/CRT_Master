@@ -6,9 +6,13 @@ import unittest
 from crt_radar.portfolio_allocation_context import (
     build_common_equity_health,
     build_portfolio_allocation_context,
+    compact_portfolio_allocation_context_for_bridge,
 )
 
 ISSUER = {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}
+PREVIOUS_TIME = 1_700_000_000_000
+CURRENT_TIME = PREVIOUS_TIME + 86_400_000
+REPLAY_TIME = CURRENT_TIME + 1_000
 
 
 def pack_for(
@@ -91,7 +95,29 @@ def pack_for(
                 },
             },
         ])
-    return {"asset_facts": {"items": rows}}
+    for fact in rows:
+        if fact.get("fact_type") != "TREASURY_COMPANY_CT" or fact.get("ct_section") == "capital_conversion":
+            continue
+        section = fact["ct_section"]
+        basis = "synthetic:share-dilution-v1" if section == "per_share_asset_engine" else "synthetic:senior-claims-scope-v1"
+        for label, at in (("previous", PREVIOUS_TIME), ("current", CURRENT_TIME)):
+            snapshot = fact["evidence"][label]
+            snapshot.update(
+                issuer_id=fact["issuer_id"], source_ref=f"synthetic:{fact['issuer_id']}:{section}:{label}",
+                verification_state="VALIDATED", effective_time=at, disclosure_time=at + 10,
+                first_seen_time=at + 20, retrieval_time=at + 30, basis_ref=basis,
+                source_semantic={"identity": basis, "version": "V1", "effective_from": 1, "effective_to": None},
+            )
+            if section == "per_share_asset_engine":
+                snapshot["btc_per_diluted_share"] = snapshot["btc_holdings"] / snapshot["diluted_shares"]
+            else:
+                snapshot["cash_usability_basis_ref"] = "synthetic:verified-unrestricted-cash-v1"
+        if section == "per_share_asset_engine":
+            fact["evidence"]["btc_per_diluted_share_change_pct"] = (
+                fact["evidence"]["current"]["btc_per_diluted_share"]
+                / fact["evidence"]["previous"]["btc_per_diluted_share"] - 1
+            )
+    return {"generated_at_ms": REPLAY_TIME, "asset_facts": {"items": rows}}
 
 
 def residual_inputs(
@@ -290,7 +316,8 @@ class PortfolioAllocationAcceptanceTests(unittest.TestCase):
         stable = build_common_equity_health(flat_pack, flat_residual)["assets"]["MSTR"]
         self.assertEqual(stable["health_direction"], "STABLE")
 
-        bad_pack = pack_for(mstr_claims=(1_000, 3_000_000))
+        bad_pack = pack_for(mstr_btc=(120, 100), mstr_shares=(100, 110),
+                            mstr_claims=(1_000, 3_000_000), mstr_liquidity=(500, 450))
         deteriorating = build_common_equity_health(bad_pack, residual_inputs())["assets"]["MSTR"]
         self.assertEqual(deteriorating["health_direction"], "DETERIORATING")
 
@@ -744,6 +771,182 @@ class AssetStrategyDeltaPortfolioIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(result["assets"]["MSTR"]["decision_support"], "READY_FOR_ANALYST")
         self.assertEqual(result["assets"]["ASST"]["decision_support"], "READY_FOR_ANALYST")
+
+
+class ResidualSnapshotQualificationTests(unittest.TestCase):
+    @staticmethod
+    def snapshot(pack, section, label, asset="MSTR"):
+        return next(fact["evidence"][label] for fact in pack["asset_facts"]["items"]
+                    if fact.get("issuer_id") == ISSUER[asset] and fact.get("ct_section") == section)
+
+    def test_same_date_distinct_share_and_burden_bases_are_usable(self):
+        p = pack_for()
+        self.assertNotEqual(self.snapshot(p, "per_share_asset_engine", "current")["basis_ref"],
+                            self.snapshot(p, "capital_burden_resilience", "current")["basis_ref"])
+        row = build_common_equity_health(p, residual_inputs())["assets"]["MSTR"]
+        self.assertAlmostEqual(row["net_residual_value_per_diluted_share"],
+                               (120 * 83_000 + 500 - 1_000) / 110)
+        self.assertEqual(row["health_direction"], "IMPROVING")
+
+    def test_different_dates_block_residual_but_preserve_independent_btc_per_share(self):
+        p = pack_for()
+        p["asset_facts"]["items"] = [fact for fact in p["asset_facts"]["items"]
+                                     if fact.get("fact_type") != "TREASURY_VALUATION_CONTEXT"]
+        self.snapshot(p, "capital_burden_resilience", "current")["effective_time"] += 1
+        row = build_common_equity_health(p, residual_inputs())["assets"]["MSTR"]
+        self.assertIsNone(row["net_residual_value_per_diluted_share"])
+        self.assertIsNone(row["net_residual_value_per_diluted_share_change_pct"])
+        self.assertIn("RESIDUAL_SNAPSHOT_EFFECTIVE_TIME_MISMATCH", row["blockers"])
+        self.assertAlmostEqual(row["btc_per_diluted_share"], 120 / 110)
+        self.assertAlmostEqual(row["btc_per_diluted_share_change_pct"], 120 / 110 - 1)
+        self.assertEqual(row["health_direction"], "BLOCKED")
+
+    def test_cross_company_unverified_missing_source_and_invalid_clocks_block(self):
+        changes = (
+            {"issuer_id": ISSUER["ASST"]}, {"verification_state": "UNVERIFIED"},
+            {"source_ref": ""}, {"first_seen_time": None},
+            {"disclosure_time": CURRENT_TIME - 1},
+            {"first_seen_time": REPLAY_TIME + 1, "retrieval_time": REPLAY_TIME + 2},
+        )
+        for section in ("per_share_asset_engine", "capital_burden_resilience"):
+            for change in changes:
+                with self.subTest(section=section, change=change):
+                    p = pack_for()
+                    self.snapshot(p, section, "current").update(change)
+                    row = build_common_equity_health(p, residual_inputs())["assets"]["MSTR"]
+                    self.assertIsNone(row["net_residual_value_per_diluted_share"])
+                    self.assertIn("RESIDUAL_SNAPSHOT_NOT_LOCALLY_VALIDATED", row["blockers"])
+                    self.assertEqual(row["health_direction"], "BLOCKED")
+
+    def test_missing_replay_clock_cannot_promote_residual(self):
+        p = pack_for()
+        p.pop("generated_at_ms")
+        row = build_common_equity_health(p, residual_inputs())["assets"]["MSTR"]
+        self.assertIsNone(row["net_residual_value_per_diluted_share"])
+        self.assertIn("RESIDUAL_REPLAY_TIME_UNAVAILABLE", row["blockers"])
+
+    def test_changed_share_basis_or_burden_scope_blocks_only_comparison(self):
+        for section in ("per_share_asset_engine", "capital_burden_resilience"):
+            with self.subTest(section=section):
+                p = pack_for()
+                self.snapshot(p, section, "current")["basis_ref"] = "synthetic:changed-basis"
+                row = build_common_equity_health(p, residual_inputs())["assets"]["MSTR"]
+                self.assertIsNotNone(row["net_residual_value_per_diluted_share"])
+                self.assertIsNotNone(row["previous_net_residual_value_per_diluted_share"])
+                self.assertIsNone(row["net_residual_value_per_diluted_share_change_pct"])
+                self.assertIn("RESIDUAL_VALUE_SCENARIOS_NOT_COMPARABLE", row["blockers"])
+                self.assertEqual(row["health_direction"], "BLOCKED")
+
+    def test_changed_dilution_scenario_does_not_support_improvement(self):
+        r = residual_inputs()
+        r["MSTR"]["current"]["capital_structure_scenario_ref"] = "synthetic:converted-debt-scenario"
+        row = build_common_equity_health(pack_for(), r)["assets"]["MSTR"]
+        self.assertIsNotNone(row["net_residual_value_per_diluted_share"])
+        self.assertIsNone(row["net_residual_value_per_diluted_share_change_pct"])
+        self.assertIn("RESIDUAL_VALUE_SCENARIOS_NOT_COMPARABLE", row["blockers"])
+        self.assertEqual(row["health_direction"], "BLOCKED")
+
+    def test_nonincreasing_snapshot_order_cannot_support_comparison(self):
+        p = pack_for()
+        for section in ("per_share_asset_engine", "capital_burden_resilience"):
+            row = self.snapshot(p, section, "previous")
+            row.update(effective_time=CURRENT_TIME + 100, disclosure_time=CURRENT_TIME + 110,
+                       first_seen_time=CURRENT_TIME + 120, retrieval_time=CURRENT_TIME + 130)
+        row = build_common_equity_health(p, residual_inputs())["assets"]["MSTR"]
+        self.assertIsNotNone(row["net_residual_value_per_diluted_share"])
+        self.assertIsNone(row["net_residual_value_per_diluted_share_change_pct"])
+        self.assertIn("RESIDUAL_VALUE_SCENARIOS_NOT_COMPARABLE", row["blockers"])
+
+    def test_btc_accretion_and_residual_deterioration_require_analyst(self):
+        row = build_common_equity_health(pack_for(mstr_claims=(1_000, 3_000_000)),
+                                         residual_inputs())["assets"]["MSTR"]
+        self.assertGreater(row["btc_per_diluted_share_change_pct"], 0)
+        self.assertLess(row["net_residual_value_per_diluted_share_change_pct"], 0)
+        self.assertEqual(row["health_direction"], "BLOCKED")
+        self.assertIn("MULTIDIMENSIONAL_TRADE_OFF_REQUIRES_ANALYST", row["health_reasons"])
+
+    def test_negative_residual_recovery_preserves_absolute_improvement_not_percent_rank(self):
+        p = pack_for(mstr_btc=(100, 110), mstr_shares=(100, 100),
+                     mstr_claims=(1100, 610), mstr_liquidity=(0, 0))
+        row = build_common_equity_health(p, residual_inputs(mstr_prices=(1, 1)))["assets"]["MSTR"]
+        self.assertEqual(row["previous_net_residual_value_per_diluted_share"], -10)
+        self.assertEqual(row["net_residual_value_per_diluted_share"], -5)
+        self.assertIsNone(row["net_residual_value_per_diluted_share_change_pct"])
+        self.assertIn("PREVIOUS_RESIDUAL_VALUE_NEGATIVE", row["blockers"])
+        self.assertEqual(row["health_direction"], "BLOCKED")
+        self.assertNotIn("NET_RESIDUAL_VALUE_PER_DILUTED_SHARE_DECREASED", row["health_reasons"])
+        claim = row["company_health"]["dimensions"]["per_share_asset_engine"]["claims"]["net_residual_value_per_share"]
+        self.assertEqual(claim["value"], 5)
+        self.assertEqual(claim["direction"], "IMPROVING")
+
+    def test_negative_residual_loss_cannot_reverse_into_improvement(self):
+        p = pack_for(mstr_btc=(100, 110), mstr_shares=(100, 100),
+                     mstr_claims=(1100, 1610), mstr_liquidity=(0, 0))
+        row = build_common_equity_health(p, residual_inputs(mstr_prices=(1, 1)))["assets"]["MSTR"]
+        self.assertEqual(row["previous_net_residual_value_per_diluted_share"], -10)
+        self.assertEqual(row["net_residual_value_per_diluted_share"], -15)
+        self.assertIsNone(row["net_residual_value_per_diluted_share_change_pct"])
+        self.assertIn("PREVIOUS_RESIDUAL_VALUE_NEGATIVE", row["blockers"])
+        self.assertEqual(row["health_direction"], "BLOCKED")
+        self.assertNotIn("NET_RESIDUAL_VALUE_PER_DILUTED_SHARE_INCREASED", row["health_reasons"])
+        claim = row["company_health"]["dimensions"]["per_share_asset_engine"]["claims"]["net_residual_value_per_share"]
+        self.assertEqual(claim["value"], -5)
+        self.assertEqual(claim["direction"], "DETERIORATING")
+
+    def test_legacy_changes_match_qualified_dimension_claims(self):
+        p = pack_for(mstr_claims=(1000, 900), mstr_carry=(100, 90), mstr_liquidity=(450, 500))
+        health = build_common_equity_health(p, residual_inputs())
+        row = health["assets"]["MSTR"]
+        self.assertEqual(row["senior_claim_change_usd"], -100)
+        self.assertEqual(row["annual_carry_change_usd"], -10)
+        self.assertEqual(row["liquidity_change_usd"], 50)
+        self.assertEqual(row["cash_coverage_context"]["usable_liquidity_usd"], 500)
+        compact = compact_portfolio_allocation_context_for_bridge({"common_equity_health": health})
+        self.assertEqual(compact["common_equity_health"]["assets"]["MSTR"]["liquidity_change_usd"], 50)
+
+    def test_changed_burden_basis_cannot_leak_legacy_changes(self):
+        p = pack_for(mstr_claims=(1000, 900), mstr_carry=(100, 90), mstr_liquidity=(450, 500))
+        self.snapshot(p, "capital_burden_resilience", "current")["basis_ref"] = "synthetic:new-burden-scope"
+        row = build_common_equity_health(p, residual_inputs())["assets"]["MSTR"]
+        for field, blocker in (("senior_claim_change_usd", "SENIOR_CLAIM_CHANGE_UNAVAILABLE"),
+                               ("annual_carry_change_usd", "ANNUAL_CARRY_CHANGE_UNAVAILABLE"),
+                               ("liquidity_change_usd", "LIQUIDITY_CHANGE_UNAVAILABLE")):
+            self.assertIsNone(row[field])
+            self.assertIn(blocker, row["blockers"])
+
+    def test_changed_cash_coverage_scope_blocks_liquidity_only(self):
+        p = pack_for(mstr_claims=(1000, 900), mstr_carry=(100, 90), mstr_liquidity=(450, 500))
+        self.snapshot(p, "capital_burden_resilience", "previous")["coverage_basis"] = "USD_CASH_PLUS_SEPARATE_USABLE_RESERVE"
+        row = build_common_equity_health(p, residual_inputs())["assets"]["MSTR"]
+        self.assertIsNone(row["liquidity_change_usd"])
+        self.assertIn("LIQUIDITY_CHANGE_UNAVAILABLE", row["blockers"])
+        self.assertEqual(row["senior_claim_change_usd"], -100)
+        self.assertEqual(row["annual_carry_change_usd"], -10)
+        self.assertEqual(row["cash_coverage_context"]["usable_liquidity_usd"], 500)
+
+    def test_missing_current_cash_usability_keeps_reported_fact_but_blocks_context(self):
+        p = pack_for()
+        current = self.snapshot(p, "capital_burden_resilience", "current")
+        current.pop("cash_usability_basis_ref")
+        row = build_common_equity_health(p, residual_inputs())["assets"]["MSTR"]
+        self.assertIsNone(row["liquidity_change_usd"])
+        self.assertIsNone(row["cash_coverage_context"])
+        self.assertIn("LIQUIDITY_CHANGE_UNAVAILABLE", row["blockers"])
+        self.assertIn("CASH_COVERAGE_CONTEXT_INCOMPLETE", row["blockers"])
+        self.assertEqual(current["usable_liquidity_usd"], 500)
+        self.assertEqual(row["senior_claim_change_usd"], 0)
+
+    def test_compact_projection_does_not_reintroduce_unqualified_cash_delta(self):
+        p = pack_for(mstr_liquidity=(5_713_400_000, 640_500_000))
+        self.snapshot(p, "capital_burden_resilience", "previous")["coverage_basis"] = "USD_CASH_PLUS_SEPARATE_USABLE_RESERVE"
+        self.snapshot(p, "capital_burden_resilience", "current").pop("cash_usability_basis_ref")
+        health = build_common_equity_health(p, residual_inputs())
+        compact = compact_portfolio_allocation_context_for_bridge({"common_equity_health": health})
+        row = compact["common_equity_health"]["assets"]["MSTR"]
+        self.assertIsNone(row["liquidity_change_usd"])
+        self.assertIsNone(row["carry_coverage_years"])
+        self.assertIn("LIQUIDITY_CHANGE_UNAVAILABLE", row["blockers"])
+        self.assertIn("CASH_COVERAGE_CONTEXT_INCOMPLETE", row["blockers"])
 
 
 class StrategicBtcPortfolioIntegrationTests(
