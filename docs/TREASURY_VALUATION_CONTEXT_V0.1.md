@@ -15,10 +15,15 @@ All four clocks must be ordered, and retrieval must be no later than evaluation.
 Unknown numbers remain null. Invalid current observations never fall back to an
 older valid level. Duplicate effective times are blocked, not double-counted.
 
-`mnav_history` contains ONE semantic/basis series, with `asset_id`, `basis_ref`
-and `mnav`. Formal observations additionally require the existing mNAV builder
-output, validated cap/NAV inputs and a source class ISSUER, SEC or
-VERIFIED_DETERMINISTIC. The unqualified formal mNAV definition is unchanged.
+`mnav_history` contains ONE semantic/basis/formula-version series, with `asset_id`,
+`basis_ref` and `mnav`. Current unqualified mNAV means Diluted mNAV（稀釋後資產淨值倍數）
+under `radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`:
+`(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`.
+Formal observations require `CRT_DILUTED_MNAV_BTC_MARKET_VALUE_V1`, the existing
+builder's four qualified source/hash/clock-bound components, complete original
+dilution scope and a source class ISSUER, SEC or VERIFIED_DETERMINISTIC. Cap/NAV
+totals alone cannot pass. Debt, preferred claims, cash and residual value remain
+separate health/risk evidence and do not change the BTC-market-value denominator.
 StrategyTracker observations always retain RESEARCH_SECONDARY_EVIDENCE, for
 both issuers; a claimed authority on the input cannot override that assignment.
 Without official inputs `formal_action_critical_state=BLOCKED`, while research
@@ -27,7 +32,11 @@ levels remain available for qualitative comparison.
 New imports use STRATEGYTRACKER_DILUTED_MNAV_RESEARCH. Legacy
 SAYLORTRACKER_DILUTED_MNAV_RESEARCH records remain valid and the old callable
 import/admission names remain aliases. Legacy and corrected historical series
-are not silently pooled. STRATEGY_ISSUER_MNAV is not diluted-equity mNAV.
+are not silently pooled. A Strategy issuer or research tracker ratio does not
+acquire formal authority merely by matching the current formula. Legacy formal
+V0.1 or unknown/different-denominator values remain explicitly labeled legacy
+research evidence. Only verified original components can be recalculated into
+the current formula version; changing a version label is not recalculation.
 
 `asset_history` reuses CT's holdings/shares/basis algorithm, additionally requiring
 official source class and locally visible four clocks. It preserves current,
@@ -42,7 +51,7 @@ Own-history CDF = `100 * count(previous value <= current value) / count`.
 The current observation is excluded from the baseline. At least 20 distinct
 prior observations are required; this is a research availability minimum, not
 a trading or Wake threshold. Comparison requires identical issuer, semantic
-identity AND version, and basis. Baseline count, start/end, current value,
+identity AND version, formula version and basis. Baseline count, start/end, current value,
 calculation version, semantic and complete baseline remain in local evidence.
 
 Regime rank is BLOCKED/PIT_REGIME_BINDING_UNAVAILABLE: current main has candidate

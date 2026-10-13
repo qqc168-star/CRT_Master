@@ -58,7 +58,9 @@ class SeasonThreeArmyCommanderDeploymentDoctrineTests(unittest.TestCase):
         required_literals = (
             "`20 / 20 / 17 / 25 / 13 / 5`",
             "`-60 / -35 / 35 / 60`",
-            "`Diluted Equity mNAV`",
+            "`Diluted mNAV`",
+            "radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md",
+            "(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)",
             "`BLOCKED / null`",
             "`6 / 8 = 75%`",
         )

@@ -4,10 +4,14 @@ from __future__ import annotations
 import unittest
 
 from crt_radar.portfolio_allocation_context import (
+    _valuation_evidence,
     build_common_equity_health,
     build_portfolio_allocation_context,
     compact_portfolio_allocation_context_for_bridge,
 )
+from crt_radar.diluted_equity_mnav import DENOMINATOR_BASIS, FORMULA_VERSION, SEMANTIC_REF
+from crt_radar.diluted_equity_mnav import build_diluted_equity_mnav
+from test_diluted_equity_mnav import qualified_inputs
 
 ISSUER = {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}
 PREVIOUS_TIME = 1_700_000_000_000
@@ -36,6 +40,14 @@ def pack_for(
     for asset, (btc, shares, claims, carry, liquidity) in config.items():
         prev_bps = btc[0] / shares[0]
         cur_bps = btc[1] / shares[1]
+        ratio = 1.05 if asset == "MSTR" else 1.10
+        mnav_inputs = qualified_inputs(asset, at=CURRENT_TIME, ratio=ratio)
+        mnav_inputs.update(diluted_shares=shares[1], btc_holdings=btc[1],
+            equity_price_usd=ratio * btc[1] / shares[1], share_basis_ref="synthetic:complete-dilution")
+        for key in ("diluted_shares", "btc_holdings", "equity_price_usd"):
+            mnav_inputs["input_evidence"][key]["value"] = mnav_inputs[key]
+        mnav_inputs["input_evidence"]["diluted_shares"]["basis_ref"] = "synthetic:complete-dilution"
+        mnav = build_diluted_equity_mnav(**mnav_inputs)
         rows.extend([
             {
                 "issuer_id": ISSUER[asset],
@@ -87,6 +99,11 @@ def pack_for(
                     "current_btc_per_diluted_share": cur_bps,
                     "btc_per_diluted_share_change_pct": cur_bps / prev_bps - 1.0,
                     "diluted_mnav": 1.05 if asset == "MSTR" else 1.10,
+                    "formula_version": FORMULA_VERSION,
+                    "denominator_basis": DENOMINATOR_BASIS,
+                    "semantic_ref": SEMANTIC_REF,
+                    "source_semantic": {"identity": "CRT_FORMAL_DILUTED_EQUITY_MNAV", "version": "SYNTHETIC_V1"},
+                    "current_observation": mnav,
                     "own_history_empirical_cdf_pct": {"value": 40.0},
                     "five_week_mnav_change_pct": {"value": -0.04},
                     "benchmark_empirical_cdf_pct": {"value": 50.0},
@@ -225,6 +242,34 @@ def inputs(**changes):
 
 
 class PortfolioAllocationAcceptanceTests(unittest.TestCase):
+    def test_mnav_formula_metadata_reaches_allocation_without_legacy_requalification(self):
+        p = pack_for()
+        rows = _valuation_evidence(p)
+        for asset in ISSUER:
+            self.assertEqual(rows[asset]["formula_version"], FORMULA_VERSION)
+            self.assertEqual(rows[asset]["denominator_basis"], DENOMINATOR_BASIS)
+            self.assertEqual(rows[asset]["semantic_ref"], SEMANTIC_REF)
+            self.assertEqual(rows[asset]["share_basis_ref"], "synthetic:complete-dilution")
+        legacy = next(f["evidence"] for f in p["asset_facts"]["items"]
+            if f.get("fact_type") == "TREASURY_VALUATION_CONTEXT" and f.get("asset_id") == "MSTR")
+        legacy["formula_version"] = "LEGACY_NET_ASSETS_RATIO_V0"
+        rows = _valuation_evidence(p)
+        self.assertIsNone(rows["MSTR"]["diluted_mnav"])
+        self.assertIsNone(rows["MSTR"]["own_history_empirical_cdf_pct"])
+        self.assertIsNone(rows["MSTR"]["five_week_mnav_change_pct"])
+        self.assertEqual(rows["MSTR"]["formal_action_critical_state"], "BLOCKED")
+        self.assertEqual(rows["ASST"]["diluted_mnav"], 1.10)
+
+    def test_new_formula_label_without_components_cannot_enter_allocation(self):
+        p = pack_for()
+        value = next(f["evidence"] for f in p["asset_facts"]["items"]
+            if f.get("fact_type") == "TREASURY_VALUATION_CONTEXT" and f.get("asset_id") == "MSTR")
+        value["current_observation"].pop("input_evidence")
+        rows = _valuation_evidence(p)
+        self.assertIsNone(rows["MSTR"]["diluted_mnav"])
+        self.assertEqual(rows["MSTR"]["formal_action_critical_state"], "BLOCKED")
+        self.assertEqual(rows["ASST"]["diluted_mnav"], 1.10)
+
     def test_01_three_pool_math_closes(self):
         result = build_portfolio_allocation_context(
             pack=pack_for(), private_context=private_context(), inputs=inputs()

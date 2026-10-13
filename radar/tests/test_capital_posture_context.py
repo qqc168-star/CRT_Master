@@ -298,9 +298,9 @@ class CapitalPostureTests(unittest.TestCase):
             self.assertEqual(json.loads((root/"pack.json").read_text()), pack)
 
     def test_full_existing_bridge_budget_unchanged(self):
-        fixture = health_fixtures.CompanyHealthTests("test_full_portfolio_and_long_valuation_history_fit_bridge")
-        fixture.test_full_portfolio_and_long_valuation_history_fit_bridge()
-        self.assertLessEqual(fixture.bridge_payload_bytes, 15 * 1024)
+        fixture = health_fixtures.CompanyHealthTests("test_full_portfolio_and_mnav_proofs_require_full_decision_bridge")
+        fixture.test_full_portfolio_and_mnav_proofs_require_full_decision_bridge()
+        self.assertGreater(fixture.bridge_payload_bytes, 16 * 1024)
 
     def test_core_does_not_expand_winter_tactical_split(self):
         data, pack, gold = fixture(rail="WINTER_SPLIT")

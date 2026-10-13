@@ -14,6 +14,7 @@ from crt_radar.gold_research_context import (
     model_dependency_map, build_gold_research_context, main,
 )
 from crt_radar.btc_transition_replay_evidence import build_forward_200wma_context
+from crt_radar.diluted_equity_mnav import DENOMINATOR_BASIS, FORMULA_VERSION
 from crt_radar.mstr_asst_full_day_market_intake import build_btc_convexity_research
 from crt_radar.assumption_boundary_watch import evaluate_external_research_assumptions
 from crt_radar.treasury_company_ct import ISSUERS, build_treasury_valuation_context
@@ -300,6 +301,10 @@ class GoldResearchTests(unittest.TestCase):
             self.assertEqual(out["distribution"]["P90"], 3.7)
             self.assertEqual(out["bull_window"]["median"], 1.5)
             self.assertEqual(out["valuation_lane"], "HISTORICAL_GROSS_BTC_ASSET_MULTIPLE")
+            self.assertEqual(out["formula_version"], FORMULA_VERSION)
+            self.assertEqual(out["denominator_basis"], DENOMINATOR_BASIS)
+            self.assertEqual(out["formal_action_critical_state"], "BLOCKED")
+            self.assertIn("SAME_DILUTED_BTC_MARKET_VALUE_FORMULA", out["limitation"])
             if asset == "ASST":
                 self.assertIn("LOWER_CONFIDENCE", out["confidence"])
 
@@ -323,6 +328,8 @@ class GoldResearchTests(unittest.TestCase):
             self.assertEqual(out["state"], "AVAILABLE")
             self.assertAlmostEqual(out["scenarios"][0]["scenario_equity_price_usd"], 200000*(120/110)*1.5*2.5)
             self.assertEqual(out["formal_diluted_equity_mnav_lane"]["value"], ct["diluted_mnav"])
+            self.assertEqual(out["formal_diluted_equity_mnav_lane"]["formula_version"], FORMULA_VERSION)
+            self.assertEqual(out["scenarios"][0]["denominator_basis"], DENOMINATOR_BASIS)
             self.assertEqual(out["scenarios"][0]["sample_period"], [T, T+3*DAY])
 
     def test_manual_multiple_is_candidate_never_median_and_missing_history_stays_blocked(self):
@@ -415,10 +422,10 @@ class GoldResearchTests(unittest.TestCase):
             self.assertEqual(output["next_cycle_valuation"][asset]["scenarios"][0]["gross_btc_asset_multiple"], 3.25)
         self.assertEqual(output["production"], "NOT_APPROVED")
 
-    def test_existing_full_bridge_still_fits_without_gold_payload(self):
-        fixture = health_fixtures.CompanyHealthTests("test_full_portfolio_and_long_valuation_history_fit_bridge")
-        fixture.test_full_portfolio_and_long_valuation_history_fit_bridge()
-        self.assertLessEqual(fixture.bridge_payload_bytes, 15 * 1024)
+    def test_full_mnav_proofs_use_full_decision_contract_without_gold_payload(self):
+        fixture = health_fixtures.CompanyHealthTests("test_full_portfolio_and_mnav_proofs_require_full_decision_bridge")
+        fixture.test_full_portfolio_and_mnav_proofs_require_full_decision_bridge()
+        self.assertGreater(fixture.bridge_payload_bytes, 16 * 1024)
 
     def test_invalid_values_and_unverified_source_fail_closed(self):
         for value in (None, True, float("nan"), float("inf"), -1):

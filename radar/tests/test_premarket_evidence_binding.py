@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import unittest
+from crt_radar.diluted_equity_mnav import build_diluted_equity_mnav
+from test_diluted_equity_mnav import qualified_inputs
 
 from crt_radar.premarket_evidence_binding import (
     build_premarket_evidence_binding,
@@ -143,17 +145,7 @@ class PremarketEvidenceBindingTests(unittest.TestCase):
                 }
             },
             mnav_results={
-                "MSTR": {
-                    "schema_version": "CRT_DILUTED_EQUITY_MNAV_EVIDENCE_V0.1",
-                    "asset_id": "MSTR",
-                    "semantic_ref": "FORMAL_CRT",
-                    "evidence_alignment_state": "VALIDATED",
-                    "action_output": "NONE",
-                    "external_action_authority": "NONE",
-                    "external_action_performed": False,
-                    "state": "AVAILABLE",
-                    "mnav": 0.8,
-                }
+                "MSTR": build_diluted_equity_mnav(**qualified_inputs(at=2))
             },
         )
 
@@ -538,17 +530,7 @@ class PremarketEvidenceBindingTests(unittest.TestCase):
                 "end_ms": 2,
             },
             mnav_results={
-                "MSTR": {
-                    "schema_version": "CRT_DILUTED_EQUITY_MNAV_EVIDENCE_V0.1",
-                    "asset_id": "MSTR",
-                    "semantic_ref": "FORMAL_CRT",
-                    "evidence_alignment_state": "VALIDATED",
-                    "action_output": "NONE",
-                    "external_action_authority": "NONE",
-                    "external_action_performed": False,
-                    "state": "AVAILABLE",
-                    "mnav": 0.80,
-                }
+                "MSTR": build_diluted_equity_mnav(**qualified_inputs(at=2))
             },
         )
 

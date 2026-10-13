@@ -49,6 +49,14 @@ Automation（自動化）負責蒐集、驗真、標準化、計算、比較、�
 
 若本準則與 `CRT_CORE_CONTRACT.md`、`CRT_EVIDENCE_PACK_CONTRACT.md` 或後續正式批准衝突，以正式契約與較新的明確批准為準。
 
+目前未限定的 `mNAV` 僅指 Diluted mNAV（稀釋後資產淨值倍數），
+公式為 `(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`；
+以使用者批准的 `radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`
+及 `CRT_DILUTED_MNAV_BTC_MARKET_VALUE_V1` 為準。四項元件的來源、原始稀釋範圍
+及有效時點須合格，不以債務、優先股、現金或普通股剩餘價值改動分母。
+歷史封印及舊版研究值保留原限定；研究平台使用同公式也不能替代正式來源資格。
+公司健康仍須獨立分析索取權、成本、現金與剩餘價值，公式統一不證明公司風險相同。
+
 ## 3. 分析前置檢查
 
 GPT（分析主廚）在開始市場判讀前，先確認四件事：

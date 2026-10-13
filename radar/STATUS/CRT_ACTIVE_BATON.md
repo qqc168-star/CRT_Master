@@ -37,7 +37,12 @@ GPT（大廚）可以提出買入、賣出、續抱、等待、輪動或重新�
 
 本排序經使用者重新決定。它不是新增七個正式驗收項目。
 原八項實戰驗收仍為 7/8，原第八項尚未完成。
-正式六層權重、燈號、mNAV 語義及外部行動權限不變。
+該次 `2026-10-11` 排序沒有修改正式六層權重、燈號、mNAV 語義或外部行動權限。
+目前未限定 `mNAV` 以後續使用者批准的
+`radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md` 為準：
+`(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`。
+舊封印、歷史驗收及舊版資料原樣保留；未知或不同分母值不能混入新正式歷史分布。
+此項語義修訂不改 Q1～Q7 排序，也不宣告任何 Q 項或原第八項完成。
 
 ### Q1 BTC 正式季節恢復｜最高優先
 
@@ -175,7 +180,7 @@ Q1 -> Q2 -> Q3 -> Q4 -> Q5 -> Q6 -> Q7
 正式鎖：
 六層權重 20/20/17/25/13/5
 燈號 -60/-35/35/60
-mNAV = Diluted Equity mNAV
+mNAV = Diluted mNAV（稀釋後資產淨值倍數），版本 CRT_DILUTED_MNAV_BTC_MARKET_VALUE_V1
 Production = NOT_APPROVED
 External Action Authority = NONE
 Capital Decision Authority = USER_ONLY
@@ -457,7 +462,7 @@ Treasury 的官方 mNAV、歷史百分位／5W、優先股淨募集證據不足�
 
 - 六層權重：`20 / 20 / 17 / 25 / 13 / 5`
 - 燈號閾值：`-60 / -35 / 35 / 60`
-- 未加限定的 `mNAV`：`Diluted Equity mNAV`
+- 未加限定的 `mNAV`：`Diluted mNAV`（稀釋後資產淨值倍數），依 `radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`；分母只採合格 BTC（比特幣）持幣市值。
 - Production approval（正式生產批准）：不變
 - External Action Authority（外部行動權限）：`NONE`
 - 使用者保有最終資本決定權

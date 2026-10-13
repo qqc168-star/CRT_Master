@@ -39,7 +39,7 @@
 2. 歷史數字、價格、APR（年化配息率）、mNAV（資產淨值倍數）與公司狀態重新使用前必須驗真。
 3. 聊天紀錄可以作 Recovery Evidence（恢復證據），不能直接升格為正式市場事實。
 4. 不因恢復工作自行修改六層權重、燈號閾值、mNAV 語義、Production approval（正式生產批准）或 External Action Authority（外部行動權限）。
-5. 未加限定的 `mNAV` 永遠維持 `Diluted Equity mNAV`（稀釋股權資產淨值倍數）。
+5. 未加限定的 `mNAV` 只採使用者已批准的 Diluted mNAV（稀釋後資產淨值倍數），依 `radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`：`(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`。舊封印及歷史研究原樣保留；舊版或不明分母值不能混入新正式分布。
 6. 機器負責蒐集、驗真、計算與比較；GPT（大廚）負責理解、推理與決策建議；使用者保有最終資本決定權。
 7. 不得因恢復完成而建立自動交易權限。
 
@@ -55,7 +55,7 @@
 
 最低恢復範圍：
 
-- Diluted Equity mNAV（稀釋股權資產淨值倍數）。
+- Diluted mNAV（稀釋後資產淨值倍數），沿用上述正式版本與來源資格。
 - BTC holdings（比特幣持有量）。
 - BTC per diluted share（每稀釋股含幣量）。
 - Basic / diluted shares（基本／稀釋股數）。
@@ -145,7 +145,7 @@ STRC（Strategy 優先股）已有大量成熟零件，本項不重做，而是�
 
 最低恢復範圍：
 
-- Diluted Equity mNAV（稀釋股權資產淨值倍數）。
+- Diluted mNAV（稀釋後資產淨值倍數），沿用上述正式版本與來源資格。
 - BTC holdings（比特幣持有量）。
 - BTC per diluted share（每稀釋股含幣量）。
 - Basic / diluted share count（基本／稀釋股數）。
@@ -329,7 +329,7 @@ STRC（Strategy 優先股）已有大量成熟零件，本項不重做，而是�
 
 - 六層權重：`20 / 20 / 17 / 25 / 13 / 5`
 - 燈號閾值：`-60 / -35 / 35 / 60`
-- 未加限定的 `mNAV`：`Diluted Equity mNAV`
+- 未加限定的 `mNAV`：`Diluted mNAV`（稀釋後資產淨值倍數）；分母僅為合格 BTC（比特幣）持幣市值，債務、優先股、現金與剩餘價值保持獨立風險證據。
 - Production approval（正式生產批准）：不變
 - External Action Authority（外部行動權限）：`NONE`
 - Capital Decision Authority（資本決策權限）：`USER_ONLY`

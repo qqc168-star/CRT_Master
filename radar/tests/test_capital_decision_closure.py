@@ -411,6 +411,62 @@ class TransportClosureTests(unittest.TestCase):
         transport.assert_called_once()
         self.assertFalse(list((self.root / "valuation-notices").glob("*.json")))
 
+    def test_current_formula_components_can_reach_existing_buy_receipt(self):
+        from test_diluted_equity_mnav import compact_qualified_mnav
+        from crt_radar.gpt_handoff import expand_bridge_field_names, _compact_field_names
+        from test_gpt_handoff import bridge_pack, pack
+        from crt_radar.gpt_handoff import run_gpt_handoff_gate
+        from crt_radar.plain_language_notice import build_plain_language_notice
+        synthetic = bridge_pack(pack(evidence_hash="synthetic-mnav-proof", requested=True))
+        synthetic["generated_at_ms"] = NOW
+        synthetic["evidence_pack_hash"] = c.digest(synthetic)
+        handoff = run_gpt_handoff_gate(synthetic, build_plain_language_notice(synthetic),
+            ledger_path=self.root / "new-formula-ledger")
+        payload = expand_bridge_field_names(build_minimized_bridge_payload(synthetic, handoff))
+        payload["market_context"]["treasury_valuation_context"] = {
+            "MSTR": compact_qualified_mnav(at=NOW)}
+        _compact_field_names(payload)
+        payload.pop("bridge_payload_hash")
+        payload["bridge_payload_hash"] = c.digest(payload)
+        source = source_fixture(payload)
+        envelope = c.build_envelope(payload, source, at_ms=NOW)
+        rec = recommendation(item(legs=[leg(limit_price_usd=0.8)]))
+        receipt = c.validated_receipt(provider_response(rec), envelope, at_ms=NOW)
+        self.assertEqual(receipt["capital_validation"]["items"][0]["validation_state"], "VALIDATED")
+
+    def test_available_label_or_self_consistent_net_nav_cannot_bypass_buy_guard(self):
+        from test_diluted_equity_mnav import compact_qualified_mnav
+        from crt_radar.gpt_handoff import expand_bridge_field_names, _compact_field_names
+        from test_gpt_handoff import bridge_pack, pack
+        from crt_radar.gpt_handoff import run_gpt_handoff_gate
+        from crt_radar.plain_language_notice import build_plain_language_notice
+        synthetic = bridge_pack(pack(evidence_hash="synthetic-mnav-rejection", requested=True))
+        synthetic["generated_at_ms"] = NOW
+        synthetic["evidence_pack_hash"] = c.digest(synthetic)
+        handoff = run_gpt_handoff_gate(synthetic, build_plain_language_notice(synthetic),
+            ledger_path=self.root / "new-formula-rejection-ledger")
+        base = build_minimized_bridge_payload(synthetic, handoff)
+        for defect in ("legacy", "net_nav", "missing_component", "cross_asset"):
+            with self.subTest(defect=defect):
+                payload = expand_bridge_field_names(base)
+                row = compact_qualified_mnav(at=NOW)
+                if defect == "legacy":
+                    row["formula_version"] = "LEGACY_UNPROVEN_NAV"
+                elif defect == "net_nav":
+                    row["mnav_calculation_inputs"]["btc_market_value_usd"] = 90
+                    row["diluted_mnav"] = 80 / 90
+                elif defect == "missing_component":
+                    row["mnav_input_evidence"].pop("btc_holdings")
+                else:
+                    row["mnav_input_evidence"]["btc_holdings"]["asset_id"] = "ASST"
+                payload["market_context"]["treasury_valuation_context"] = {"MSTR": row}
+                _compact_field_names(payload)
+                payload.pop("bridge_payload_hash")
+                payload["bridge_payload_hash"] = c.digest(payload)
+                envelope = c.build_envelope(payload, source_fixture(payload), at_ms=NOW)
+                with self.assertRaisesRegex(ValueError, "VALUATION_EVIDENCE_UNQUALIFIED"):
+                    c.validated_receipt(provider_response(recommendation()), envelope, at_ms=NOW)
+
     def test_same_event_smoke_and_capital_share_roots_without_collisions(self):
         enqueue_bridge_payload(self.root / "shared-outbox", self.payload)
         path = self.root / "shared-outbox" / (self.payload["event"]["event_id"] + ".json")

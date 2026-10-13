@@ -13,6 +13,7 @@ import json
 import re
 
 from .broker_capital_observation import validate_broker_observation, MAX_AGE_MS
+from .diluted_equity_mnav import validate_compact_mnav_evidence
 
 VERSION = "CRT_CAPITAL_RECOMMENDATION_V0.1"
 REQUEST_VERSION = "CRT_CAPITAL_RECOMMENDATION_REQUEST_V0.1"
@@ -471,7 +472,10 @@ def semantic_evidence_catalog(projection):
                 basis = "RESEARCH_SECONDARY"
             elif (semantic == "CRT_FORMAL_DILUTED_EQUITY_MNAV"
                   and basis not in {"RESEARCH_SECONDARY", "POSTURE_RESEARCH"}):
-                basis = "FORMAL_DILUTED_EQUITY_MNAV"
+                validated = validate_compact_mnav_evidence(value, asset_id=asset,
+                    as_of_ms=projection.get("evidence_validity", {}).get("as_of_ms"))
+                basis = ("FORMAL_DILUTED_EQUITY_MNAV" if validated["state"] == "AVAILABLE"
+                         else "FORMAL_MNAV_UNQUALIFIED")
             context = value if clock(value) is not None or any(k in value for k in (
                 "formal_action_critical_state", "quality_state", "history_state", "state")) else row
             for key, child in sorted(value.items()):
@@ -613,7 +617,9 @@ INSTRUCTIONS = REFERENCE_INSTRUCTIONS + (
     "subject_asset, metric_basis and value_json. UNATTRIBUTED market changes must remain "
     "unattributed: a BTC wake, other BTC signal, or generic layer cannot make them BTC returns. "
     "Do not invent an asset, observation clock, return, risk, price or source. "
-    "CRT_FORMAL_DILUTED_EQUITY_MNAV is formal Diluted Equity mNAV; research trackers, "
+    "CRT_FORMAL_DILUTED_EQUITY_MNAV uses only (diluted shares * equity USD price) / "
+    "(BTC holdings * BTC USD price), with the current formula version and qualified original inputs; "
+    "debt, preferred claims, cash and shareholder residual value never change its denominator. Research trackers, "
     "research-only preferred funding and gross BTC research ratios are not that formal metric. "
     "Preserve BLOCKED qualifications and research semantics. STRC/SATA are not subject to the "
     "MSTR/ASST formal mNAV requirement. "
@@ -1086,7 +1092,7 @@ def validated_receipt(response, envelope, *, at_ms):
             buy_assets = {leg["asset"] for leg in item["legs"] if leg["action"] == "BUY"}
             for asset in buy_assets & {"MSTR", "ASST"}:
                 valuation = valuations.get(asset)
-                require(isinstance(valuation, dict) and valuation.get("formal_action_critical_state") == "AVAILABLE",
+                require(validate_compact_mnav_evidence(valuation, asset_id=asset, as_of_ms=at_ms)["state"] == "AVAILABLE",
                         "VALUATION_EVIDENCE_UNQUALIFIED:" + asset)
     require(all(item["validation_state"] in {"VALIDATED", "VALIDATED_NON_TRADING_WAIT"}
                 for item in validation["items"]),

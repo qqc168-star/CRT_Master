@@ -140,7 +140,7 @@ Season（季節）只能改變統帥使用這張地圖時的預設證據負擔�
 - 新增第七層或修改 L1～L6（第一層至第六層）。
 - 修改六層權重 `20 / 20 / 17 / 25 / 13 / 5`。
 - 修改燈號門檻 `-60 / -35 / 35 / 60`。
-- 修改未加限定的 `mNAV` 語義；它仍只指 `Diluted Equity mNAV`（稀釋後股權資產淨值倍數）。
+- 自行修改未加限定的 `mNAV` 語義；目前只指使用者已批准的 `Diluted mNAV`（稀釋後資產淨值倍數），依 `radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`：`(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`。本準則不改動該公式，歷史封印不回寫。
 - 修改、補完、繞過或執行 BTC Season formal router（比特幣正式季節路由器）。
 - 修改 Production（正式生產）`NOT_APPROVED`。
 - 修改 External Action Authority（外部行動權限）`NONE`。

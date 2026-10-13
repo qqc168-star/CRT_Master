@@ -51,8 +51,13 @@ real observations and documented sample scope; manual 1.5/2/2.5 and
 
 The next-cycle envelope keeps BTC price scenario, current BTC/share, factor,
 gross multiple, source, as-of, sample period, confidence and limitation separate.
-Formal Diluted Equity mNAV remains a referenced existing lane, never the name of
-the gross BTC-asset ratio. Dependency descriptions expose shared BTC price,
+Current unqualified mNAV follows the later user-approved Diluted mNAV（稀釋後資產淨值倍數）
+in `radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`:
+`(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`.
+A gross BTC-asset research ratio may share its arithmetic but does not acquire
+formal qualification without the four qualified components, complete dilution
+scope and aligned clocks. Older research labels and historical acceptance are
+preserved; they are not a second current formal mNAV definition. Dependency descriptions expose shared BTC price,
 liquidity and institutional inputs, with no averaging or independent-vote count.
 
 All supplied observations retain source/provenance, four clocks, semantic/basis,

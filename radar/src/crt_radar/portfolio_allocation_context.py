@@ -7,6 +7,8 @@ from copy import deepcopy
 from typing import Any
 
 from .company_health import build_health_dimensions, compact_health_dimensions
+from .diluted_equity_mnav import (DENOMINATOR_BASIS, FORMULA_VERSION, SEMANTIC_REF,
+                                 validate_diluted_mnav_evidence)
 from .treasury_company_ct import validate_pit_replay
 
 SCHEMA_VERSION = "CRT_PORTFOLIO_ALLOCATION_CONTEXT_V0.1"
@@ -1036,16 +1038,35 @@ def _valuation_evidence(pack: dict[str, Any]) -> dict[str, Any]:
         evidence = fact.get("evidence") if isinstance(fact, dict) else {}
         if not isinstance(evidence, dict):
             evidence = {}
+        current_formula = (evidence.get("formula_version") == FORMULA_VERSION
+            and evidence.get("denominator_basis") == DENOMINATOR_BASIS
+            and evidence.get("semantic_ref") == SEMANTIC_REF)
+        current = evidence.get("current_observation")
+        receipt = {**current, "asset_nav_usd": current.get("btc_market_value_usd"),
+            "action_output": "NONE", "external_action_authority": "NONE",
+            "external_action_performed": False} if isinstance(current, dict) else None
+        calculated = validate_diluted_mnav_evidence(receipt, asset_id=asset,
+            as_of_ms=pack.get("generated_at_ms"))
+        current_formula = (current_formula and calculated["state"] == "AVAILABLE"
+            and _number(evidence.get("diluted_mnav")) is not None
+            and math.isclose(evidence["diluted_mnav"], calculated["mnav"], rel_tol=1e-12))
         def claim_value(name: str) -> Any:
+            if not current_formula:
+                return None
             value = evidence.get(name)
             return value.get("value") if isinstance(value, dict) else value
         result[asset] = {
-            "diluted_mnav": evidence.get("diluted_mnav"),
+            "diluted_mnav": evidence.get("diluted_mnav") if current_formula else None,
+            "formula_version": evidence.get("formula_version"),
+            "denominator_basis": evidence.get("denominator_basis"),
+            "semantic_ref": evidence.get("semantic_ref"),
+            "source_semantic": deepcopy(evidence.get("source_semantic")),
+            "share_basis_ref": (evidence.get("current_observation") or {}).get("share_basis_ref"),
             "own_history_empirical_cdf_pct": claim_value("own_history_empirical_cdf_pct"),
             "five_week_mnav_change_pct": claim_value("five_week_mnav_change_pct"),
             "benchmark_empirical_cdf_pct": claim_value("benchmark_empirical_cdf_pct"),
-            "formal_action_critical_state": evidence.get("formal_action_critical_state"),
-            "evidence_authority": evidence.get("evidence_authority"),
+            "formal_action_critical_state": evidence.get("formal_action_critical_state") if current_formula else "BLOCKED",
+            "evidence_authority": evidence.get("evidence_authority") if current_formula else "BLOCKED_LEGACY_MNAV_FORMULA",
         }
     return result
 

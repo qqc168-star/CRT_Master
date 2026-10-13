@@ -88,6 +88,16 @@ For each formally tracked asset, include only facts that can change role or capi
 
 Examples include price, yield/distribution, dilution/share count, BTC holdings per share, mNAV where formally defined, company financing or repurchase events, and other approved asset-specific facts.
 
+Current unqualified `mNAV` is the user-approved Diluted mNAV（稀釋後資產淨值倍數）
+in `radar/RELEASE/CRT_DILUTED_MNAV_SEMANTIC_REVISION_20261013.md`:
+`(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`.
+Preserve `CRT_DILUTED_MNAV_BTC_MARKET_VALUE_V1`, its four qualified components,
+source hashes, aligned clocks and original dilution scope through the existing
+asset evidence and GPT projection. A self-consistent legacy ratio, an unknown
+`asset_nav_usd`, or company residual value is not formal mNAV evidence. Legacy
+and research values retain explicit scope/version and cannot satisfy a missing
+formal valuation claim or enter its historical distribution.
+
 Automation must not convert these facts directly into an autonomous BUY or SELL instruction.
 
 ### 8. Decision-Relevant Events
