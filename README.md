@@ -12,6 +12,33 @@ CRT is a read-only decision-support system for five questions:
 
 North Star: **Automation prepares evidence. GPT creates judgment. Human commits capital.**
 
+## Independent read-only observation
+
+`radar/research/readonly_observation_cycle.py --config <local-json>` runs one
+bounded collection cycle over existing registered public sources, official
+issuer adapters and, only when explicitly enabled and needed, PR #143's
+four-security historical-price adapter. It does not invoke the daily duty
+script, account capture, GPT transport, outbox processing, notifications or
+trading. Keep `CRT-Observation-History` in `ISOLATION_ONLY`.
+
+The local configuration requires `output_root` and `protected_roots` containing
+the actual duty Runtime and repository. Optional retained inputs are
+`issuer_archive`, `equity_proof`, `tracker_archive`, `private_profile`,
+`fixed_income_inputs`, `portfolio_allocation_inputs`, and an existing public
+`liquidation_snapshot`. Inputs stay read-only; no liquidation collector starts;
+outputs and the observation database are separate. Market API reads and retained
+personal-capital reads default off (`allow_market_price_capture` and
+`allow_retained_local_capital`). Neither switch authorizes live account access.
+
+The existing OS scheduler may repeat this single-cycle entry; freshness and the
+locked US calendar decide whether data need updating. A failed market request
+is recorded as `TWS_OFFLINE` or a data failure and is not blindly retried for the
+same completed session. New public dates/announcements preserve original bytes,
+first-seen identities and actual acquisition receipts. Retrospective provider
+percentiles retain their original dates and share columns, never formal mNAV
+qualification or forward-prediction authority. Local analysis inputs are not
+model responses, successful notices, formal production, or #8 acceptance.
+
 ## Boot sequence for a fresh GPT
 
 1. Treat current `main` as the only engineering truth.

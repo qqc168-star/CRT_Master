@@ -9,6 +9,9 @@ import math
 import hashlib
 import json
 import csv
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 from io import StringIO
 from collections import Counter
 from copy import deepcopy
@@ -837,10 +840,120 @@ def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms
     return _finish(out, bool(out["events"]))
 
 
+def build_retrospective_tracker_context(archive: str | Path, *, asset_id: str, as_of_ms: int) -> dict:
+    """Recompute retained provider history; never qualify it as a formal input.
+
+    Shares retain both provider columns. Effective shares are not silently
+    substituted for reported diluted shares. Dates are date labels, not an
+    attestation of exact close alignment or historical CRT visibility.
+    """
+    result = dict(state="BLOCKED", asset_id=asset_id, evaluated_at_ms=as_of_ms,
+        formula_version=FORMULA_VERSION, denominator_basis=DENOMINATOR_BASIS,
+        formal_action_critical_state="BLOCKED", evidence_authority="RETROSPECTIVE_RESEARCH_ONLY",
+        historical_visibility="NOT_PROVEN_NOT_A_FORWARD_PREDICTION", series={},
+        action_output="NONE", external_action_authority="NONE")
+    try:
+        root = Path(archive)
+        manifest = json.loads((root / "source-manifest.json").read_text(encoding="utf-8-sig"))[asset_id]
+        raw = (root / (asset_id + "-tracker-raw.json")).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != manifest["sha256"]:
+            raise ValueError("TRACKER_RAW_HASH_MISMATCH")
+        if not re.fullmatch(r"https://data\.strategytracker\.com/" + asset_id + r"\.v\d{8}T\d{6}Z\.json", manifest["url"]):
+            raise ValueError("TRACKER_ASSET_SOURCE_MISMATCH")
+        payload = json.loads(raw)
+        company = payload["companies"][asset_id]
+        currency = company.get("currencyMetadata", {})
+        if (currency.get("originalCurrency") != "USD" or currency.get("targetCurrency") != "USD"
+                or currency.get("conversionApplied") is not False or currency.get("isGbxDisplay") is not False):
+            raise ValueError("TRACKER_USD_PRICE_BASIS_UNPROVEN")
+        if payload.get("timestamp") != manifest["snapshot_timestamp"]:
+            raise ValueError("TRACKER_SNAPSHOT_TIME_MISMATCH")
+        history = company["historicalData"]
+        dates = history["dates"]
+        if (not isinstance(dates, list) or not dates or dates != sorted(set(dates))
+                or any(not isinstance(d, str) or not re.fullmatch(r"20\d{2}-\d{2}-\d{2}", d) for d in dates)):
+            raise ValueError("TRACKER_DATES_NOT_UNIQUE_AND_ORDERED")
+        if any(datetime.fromisoformat(d).date() > datetime.fromtimestamp(as_of_ms / 1000, timezone.utc).date() for d in dates):
+            raise ValueError("TRACKER_FUTURE_DATE")
+        retained = json.loads((root / "valuation-inputs.json").read_text(encoding="utf-8-sig"))[asset_id]["mnav_history"]
+        clocks = [r for r in retained if r.get("source_ref") == manifest["url"]]
+        first_seen = min(r["first_seen_time"] for r in clocks)
+        retrieved = min(r["retrieval_time"] for r in clocks)
+        if not 0 < first_seen <= retrieved <= as_of_ms:
+            raise ValueError("TRACKER_RETAINED_VISIBILITY_CLOCK_INVALID")
+        provider_time = int(datetime.fromisoformat(payload["timestamp"].replace("Z", "+00:00")).timestamp()*1000)
+        if not 0 < provider_time <= retrieved:
+            raise ValueError("TRACKER_SNAPSHOT_NOT_VISIBLE")
+        result.update(raw_sha256=manifest["sha256"], source_url=manifest["url"],
+            original_first_seen_time=first_seen, original_retrieval_time=retrieved,
+            provider_snapshot_timestamp=manifest["snapshot_timestamp"],
+            observed_period=[dates[0], dates[-1]], current_observation_date=dates[-1],
+            limitation="PROVIDER_REPORTED_DILUTION_SCOPE_AND_CLOSE_ALIGNMENT_UNPROVEN; HISTORICAL_SAMPLE_NOT_CURRENT_VALUATION",
+            original_history_exclusion=manifest["history_exclusion"])
+        result["sample_scope"] = "PROVIDER_DATE_LABELS_INCLUDING_NONTRADING_DAYS; PRICE_ADJUSTMENT_AND_DILUTION_SCOPE_NOT_FORMALLY_PROVEN"
+        for share_column in ("diluted_shares_outstanding", "effective_diluted_shares"):
+            fields = (share_column, "stock_prices", "btc_balance", "btc_prices")
+            if any(not isinstance(history.get(k), list) or len(history[k]) != len(dates) for k in fields):
+                raise ValueError("TRACKER_COMPONENT_ARRAY_LENGTH_MISMATCH")
+            rows, excluded = [], []
+            for index, day in enumerate(dates):
+                inputs = [history[k][index] for k in fields]
+                if any(not _number(v) or v <= 0 for v in inputs):
+                    excluded.append(day)
+                    continue
+                shares, price, btc, btc_price = inputs
+                try:
+                    value = shares*price/(btc*btc_price)
+                except (ZeroDivisionError, OverflowError):
+                    value = None
+                if not _number(value) or value <= 0:
+                    excluded.append(day)
+                    continue
+                rows.append(dict(effective_time=int(datetime.fromisoformat(day).replace(tzinfo=timezone.utc).timestamp()*1000),
+                    observation_date=day, mnav=value,
+                    source_semantic=dict(identity=RESEARCH_IDENTITY, version=FORMULA_VERSION),
+                    diluted_shares=shares, equity_price_usd=price, btc_holdings=btc, btc_price_usd=btc_price,
+                    share_basis_ref=share_column))
+            # Missing last-day components are not replaced by older values.
+            current = rows[-1] if rows and rows[-1]["observation_date"] == dates[-1] else None
+            baseline = [r for r in rows if current and r["effective_time"] < current["effective_time"]]
+            rank = _cdf(current, baseline)
+            if rank["state"] == "AVAILABLE":
+                rank.update(state="RESEARCH_AVAILABLE", reason="RETROSPECTIVE_PROVIDER_SAMPLE_NOT_PIT")
+            rank.pop("baseline", None)
+            five = _five_week_change(current, baseline, _section())
+            if five["state"] == "AVAILABLE":
+                five["state"] = "RESEARCH_AVAILABLE"
+            result["series"][share_column] = dict(current=current, own_history_empirical_cdf_pct=rank,
+                five_week_mnav_change_pct=five, sample_count=len(rows), excluded_dates=excluded,
+                dilution_scope="PROVIDER_COLUMN_ONLY_NOT_FORMALLY_COMPLETE")
+        result["state"] = "RESEARCH_AVAILABLE" if any(
+            r["current"] is not None for r in result["series"].values()) else "BLOCKED"
+    except (ValueError, KeyError, TypeError, OSError, OverflowError) as exc:
+        result.update(state="BLOCKED", reason=str(exc), series={})
+    result["context_hash"] = _digest(result)
+    return result
+
+
+def _five_week_change(current, baseline, out):
+    five = _claim("FIVE_WEEK_COMPARABLE_OBSERVATION_UNAVAILABLE")
+    five["policy"] = "NEAREST_35D_PLUS_MINUS_3D_TIE_EARLIER_NO_INTERPOLATION"
+    if current:
+        target = current["effective_time"] - 35 * DAY_MS
+        candidates = [r for r in baseline if abs(r["effective_time"] - target) <= 3 * DAY_MS]
+        if candidates:
+            prior = min(candidates, key=lambda r: (abs(r["effective_time"] - target), r["effective_time"]))
+            delta = _calc(out, "five_week_mnav_change_pct", [current["mnav"], prior["mnav"]], lambda a, b: a / b - 1)
+            if delta is not None:
+                five.update(state="AVAILABLE", value=delta, reason="COMPARABLE_OBSERVATIONS",
+                    previous=prior, current=current, observation_span_ms=current["effective_time"] - prior["effective_time"])
+    return five
+
+
 def build_treasury_valuation_context(*, asset_id: str, as_of_ms: int,
         mnav_history: Any = None, asset_history: Any = None,
         preferred_funding_events: Any = None, benchmark: Any = None,
-        history_coverage: str = "UNSPECIFIED") -> dict:
+        history_coverage: str = "UNSPECIFIED", retrospective_research: dict | None = None) -> dict:
     if asset_id not in ISSUERS or not _time(as_of_ms):
         raise ValueError("MSTR/ASST and positive as-of required")
     out = _section()
@@ -876,17 +989,7 @@ def build_treasury_valuation_context(*, asset_id: str, as_of_ms: int,
               and _same_valuation_basis(r, current)]
     out["benchmark_empirical_cdf_pct"] = {**_cdf(current, b_rows,
         reason="COMPARABLE_BENCHMARK_HISTORY_UNAVAILABLE"), "benchmark_identity": benchmark_id}
-    five = _claim("FIVE_WEEK_COMPARABLE_OBSERVATION_UNAVAILABLE")
-    five["policy"] = "NEAREST_35D_PLUS_MINUS_3D_TIE_EARLIER_NO_INTERPOLATION"
-    if current:
-        target = current["effective_time"] - 35 * DAY_MS
-        candidates = [r for r in baseline if abs(r["effective_time"] - target) <= 3 * DAY_MS]
-        if candidates:
-            prior = min(candidates, key=lambda r: (abs(r["effective_time"] - target), r["effective_time"]))
-            delta = _calc(out, "five_week_mnav_change_pct", [current["mnav"], prior["mnav"]], lambda a, b: a / b - 1)
-            if delta is not None:
-                five.update(state="AVAILABLE", value=delta, reason="COMPARABLE_OBSERVATIONS",
-                    previous=prior, current=current, observation_span_ms=current["effective_time"] - prior["effective_time"])
+    five = _five_week_change(current, baseline, out)
     out["five_week_mnav_change_pct"] = five
     # Reuse CT's ratio and comparison algorithm. Research rows cannot provide
     # official holdings/shares; invalid visible rows remain holes, not fallbacks.
@@ -918,6 +1021,19 @@ def build_treasury_valuation_context(*, asset_id: str, as_of_ms: int,
                           ("preferred_funding_attribution", out["preferred_funding_attribution"])):
         out["blockers"].extend({**b, "claim": name + "." + b["claim"]} for b in section["blockers"])
     _finish(out, current is not None or out["current_btc_per_diluted_share"] is not None)
+    if retrospective_research is not None:
+        if (retrospective_research.get("asset_id") != asset_id
+                or retrospective_research.get("evaluated_at_ms") != as_of_ms
+                or retrospective_research.get("formal_action_critical_state") != "BLOCKED"
+                or retrospective_research.get("evidence_authority") != "RETROSPECTIVE_RESEARCH_ONLY"
+                or retrospective_research.get("formula_version") != FORMULA_VERSION
+                or retrospective_research.get("denominator_basis") != DENOMINATOR_BASIS
+                or retrospective_research.get("action_output") != "NONE"
+                or retrospective_research.get("external_action_authority") != "NONE"
+                or retrospective_research.get("context_hash") != _digest({
+                    k: v for k, v in retrospective_research.items() if k != "context_hash"})):
+            raise ValueError("RETROSPECTIVE_RESEARCH_CONTRACT_INVALID")
+        out["retrospective_research"] = deepcopy(retrospective_research)
     out["context_hash"] = _digest(out)
     return out
 
@@ -979,6 +1095,8 @@ def compact_treasury_valuation_context(pack: dict) -> dict:
             row["baseline_counts"][label] = context[name]["baseline_count"]
         row["benchmark_identity"] = context["benchmark_empirical_cdf_pct"]["benchmark_identity"]
         row["five_week_mnav_change_pct"] = context["five_week_mnav_change_pct"]["value"]
+        if "retrospective_research" in context:
+            row["retrospective_research"] = deepcopy(context["retrospective_research"])
         funding = context["preferred_funding_attribution"]
         row["preferred_funding_attribution_summary"] = {"state": funding["state"], "research_only": True,
             "events": [{k: e[k] for k in ("event_id", "components", "effective_preferred_funding_cost",
