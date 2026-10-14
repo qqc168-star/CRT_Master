@@ -902,8 +902,15 @@ def build_retrospective_tracker_context(archive: str | Path, *, asset_id: str, a
                     excluded.append(day)
                     continue
                 shares, price, btc, btc_price = inputs
+                try:
+                    value = shares*price/(btc*btc_price)
+                except (ZeroDivisionError, OverflowError):
+                    value = None
+                if not _number(value) or value <= 0:
+                    excluded.append(day)
+                    continue
                 rows.append(dict(effective_time=int(datetime.fromisoformat(day).replace(tzinfo=timezone.utc).timestamp()*1000),
-                    observation_date=day, mnav=shares*price/(btc*btc_price),
+                    observation_date=day, mnav=value,
                     source_semantic=dict(identity=RESEARCH_IDENTITY, version=FORMULA_VERSION),
                     diluted_shares=shares, equity_price_usd=price, btc_holdings=btc, btc_price_usd=btc_price,
                     share_basis_ref=share_column))

@@ -24,7 +24,8 @@ trading. Keep `CRT-Observation-History` in `ISOLATION_ONLY`.
 The local configuration requires `output_root` and `protected_roots` containing
 the actual duty Runtime and repository. Optional retained inputs are
 `issuer_archive`, `equity_proof`, `tracker_archive`, `private_profile`,
-`fixed_income_inputs`, and `portfolio_allocation_inputs`. Inputs stay read-only;
+`fixed_income_inputs`, `portfolio_allocation_inputs`, and an existing public
+`liquidation_snapshot`. Inputs stay read-only; no liquidation collector starts;
 outputs and the observation database are separate. Market API reads and retained
 personal-capital reads default off (`allow_market_price_capture` and
 `allow_retained_local_capital`). Neither switch authorizes live account access.

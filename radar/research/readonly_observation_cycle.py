@@ -34,6 +34,7 @@ from crt_radar.ibkr_market_health_sources import (
     latest_completed_equity_session, _four_asset_market_calendar,
 )
 from crt_radar.private_profile import load_private_profile
+from crt_radar.liquidation_aggregator import verify_snapshot
 from crt_radar.source_gate_runner import FetchResult, default_registry_path
 from crt_radar.source_registry import SourceRegistry
 from crt_radar.treasury_company_ct import build_retrospective_tracker_context
@@ -51,7 +52,7 @@ def safe_root(config):
     protected = [RADAR.parent.resolve(), *(Path(p).resolve() for p in config["protected_roots"])]
     protected += [Path(config[k]).resolve() for k in (
         "issuer_archive", "equity_proof", "tracker_archive", "private_profile",
-        "fixed_income_inputs", "portfolio_allocation_inputs") if config.get(k)]
+        "fixed_income_inputs", "portfolio_allocation_inputs", "liquidation_snapshot") if config.get(k)]
     if any(root == p or root.is_relative_to(p) or p.is_relative_to(root) for p in protected):
         raise ValueError("OUTPUT_OVERLAPS_PROTECTED_OR_INPUT_PATH")
     if root == Path(root.anchor) or not config["protected_roots"]:
@@ -324,6 +325,40 @@ def collect_close_mark(capture, equities, now):
         return dict(state="BLOCKED", reason=str(exc), source_url=url)
 
 
+def retained_liquidations(config, root, registry, now):
+    """Read an existing public collector output; do not start any collector."""
+    if not config.get("liquidation_snapshot"):
+        return None, None, None
+    try:
+        raw = Path(config["liquidation_snapshot"]).read_bytes()
+        spec = registry.by_input_family("LIQUIDATION_AGGREGATES")
+        digest = hashlib.sha256(raw).hexdigest()
+        identity = "READ_LOCAL_PUBLIC_L4_SNAPSHOT:" + digest
+        record_path = root / acquisition._identity_relpath(dict(
+            source_contract_id=spec.source_id, request_identity=identity, sha256=digest))
+        first_seen = now
+        if record_path.exists():
+            stored = read_json(record_path)
+            if stored.get("record_sha256") != acquisition._record_hash(stored):
+                raise ValueError("LOCAL_MARKET_IDENTITY_HASH_MISMATCH")
+            first_seen = stored["artifact"]["first_seen_at_ms"]
+        artifact = acquisition.archive_artifact(root, raw,
+            source_contract_id=spec.source_id, request_identity=identity,
+            retrieved_at_ms=now, first_seen_at_ms=first_seen,
+            available_at_coverage_start_ms=first_seen, available_at_coverage_end_ms=first_seen,
+            integrity_proof_type="LOCAL_SHA256", provider_checksum=None,
+            license_classification="TERMS_REVIEW_REQUIRED_LOCAL_RESEARCH_ONLY",
+            source_authority_hash=registry.hash, evidence_class="CURRENT_FIRST_SEEN_CAPTURE",
+            replay_eligible=False, content_type="application/json",
+            availability_proof_type="ACTUAL_FIRST_LOCAL_ARCHIVE_READ", revision_of_sha256=None)
+        payload = json.loads(raw)
+        verify_snapshot(payload)
+        return payload, dict(source_url="LOCAL_EXISTING_PUBLIC_L4_SNAPSHOT", artifact=artifact,
+                             actual_read_at_ms=now), None
+    except (OSError, ValueError, KeyError) as exc:
+        return None, None, dict(input="liquidation_snapshot", reason=str(exc))
+
+
 def run_cycle(config, *, fetcher=fetch_official_bytes, equity_collector=collect_ibkr_equity_daily_proof):
     root = safe_root(config)
     root.mkdir(parents=True, exist_ok=True)
@@ -388,6 +423,9 @@ def run_cycle(config, *, fetcher=fetch_official_bytes, equity_collector=collect_
                 research[asset] = build_retrospective_tracker_context(config["tracker_archive"], asset_id=asset, as_of_ms=now)
         source_archives = [dict(source_url=url, artifact=value[1]) for url, value in capture.in_cycle.items()
                            if not isinstance(value, Exception)]
+        liquidation, local_market_artifact, local_market_gap = retained_liquidations(config, root, registry, now)
+        if local_market_artifact is not None:
+            source_archives.append(local_market_artifact)
         private = None
         private_gap = None
         if config.get("private_profile") and config.get("allow_retained_local_capital") is True:
@@ -402,7 +440,7 @@ def run_cycle(config, *, fetcher=fetch_official_bytes, equity_collector=collect_
         else:
             private_gap = "LOCAL_PERSONAL_CAPITAL_NOT_READ"
         optional = {}
-        input_gaps = []
+        input_gaps = [local_market_gap] if local_market_gap is not None else []
         for key in ("fixed_income_inputs", "portfolio_allocation_inputs"):
             if config.get(key):
                 try:
@@ -414,6 +452,7 @@ def run_cycle(config, *, fetcher=fetch_official_bytes, equity_collector=collect_
             generated_at_ms=now, now_ms=now, treasury_company_ct_inputs=ct,
             treasury_valuation_inputs={a: {"retrospective_research": r} for a, r in research.items()},
             qualified_equity_daily_source=equities, private_context=private,
+            liquidation_aggregate_payload=liquidation,
             issuer_ratio_observation=ratio_observation,
             issuer_announcement_wake=issuer_wake, **optional)
         folder = root / "cycles" / (str(now) + "-" + uuid.uuid4().hex[:8])

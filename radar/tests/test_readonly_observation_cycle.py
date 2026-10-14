@@ -186,6 +186,18 @@ class ReadonlyObservationCycleTests(unittest.TestCase):
         with patch.object(cycle,'run_cycle',return_value=result),patch.object(cycle.sys,'stdout',None):
             self.assertEqual(cycle.main(['--config',str(config)]),0)
 
+    def test_corrupt_retained_public_l4_is_recorded_without_repairing_original(self):
+        path=self.root/'public-l4.json';path.write_bytes(b'{"bad":"snapshot"}')
+        before=path.read_bytes()
+        payload,artifact,gap=cycle.retained_liquidations(dict(liquidation_snapshot=str(path)),self.root,self.registry,self.clock)
+        self.assertIsNone(payload)
+        self.assertEqual(gap['input'],'liquidation_snapshot')
+        self.assertEqual(path.read_bytes(),before)
+        self.assertTrue(list((self.root/'artifacts').rglob('*')))
+
+    def test_no_l4_input_does_not_touch_a_default_runtime(self):
+        self.assertEqual(cycle.retained_liquidations({},self.root,self.registry,self.clock),(None,None,None))
+
     def test_real_pack_cycle_is_isolated_without_any_delivery_or_account_refresh(self):
         protected = self.root / "real-runtime"
         protected.mkdir()
@@ -255,6 +267,15 @@ class RetrospectiveTrackerTests(unittest.TestCase):
         result=self.build()
         self.assertEqual(result["state"], "BLOCKED")
         self.assertTrue(all(r["current"] is None for r in result["series"].values()))
+
+    def test_overflow_and_underflow_are_not_valid_research_ratios(self):
+        self.history["stock_prices"][-1]=1e308
+        self.store()
+        self.assertEqual(self.build()["state"],"BLOCKED")
+        self.history["stock_prices"][-1]=1e-308
+        self.history["btc_prices"][-1]=1e308
+        self.store()
+        self.assertEqual(self.build()["state"],"BLOCKED")
 
     def test_hash_mismatch_blocks_only_research(self):
         (self.root / "MSTR-tracker-raw.json").write_bytes(b"tampered")
