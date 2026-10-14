@@ -38,6 +38,27 @@ V0.1 or unknown/different-denominator values remain explicitly labeled legacy
 research evidence. Only verified original components can be recalculated into
 the current formula version; changing a version label is not recalculation.
 
+### Retained provider history for retrospective research
+
+`build_retrospective_tracker_context()` reads retained `source-manifest.json`,
+the original per-issuer response and its original `valuation-inputs.json`
+visibility records. It verifies raw SHA-256, source/asset identity, ordered
+unique dates, component-array lengths and positive values. No network or
+formal qualification is performed. Missing final components remain null.
+
+The original `diluted_shares_outstanding` and `effective_diluted_shares` columns
+are computed separately with the approved BTC-market-value formula. Own-sample
+ranks reuse the existing empirical CDF (LE, minimum 20 prior observations), and
+five-week changes reuse the existing 35-day +/-3-day policy. Provider date labels
+may include nontrading days; exact-close alignment, dilution completeness,
+adjustment comparability and historical CRT visibility remain unproven.
+
+Outputs are `RESEARCH_AVAILABLE`, preserve the original observed period and
+local acquisition clocks, and keep `formal_action_critical_state=BLOCKED`.
+The optional `retrospective_research` field travels inside the existing Treasury
+context and market projection, with its hash, source and limitations. It never
+enters the qualified current mNAV pool, regime-conditioned ranks or trade gate.
+
 `asset_history` reuses CT's holdings/shares/basis algorithm, additionally requiring
 official source class and locally visible four clocks. It preserves current,
 previous, direction, observation span, holdings, diluted shares and basis.

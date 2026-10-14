@@ -197,6 +197,24 @@ def _four_asset_market_calendar() -> dict[str, Any]:
     return calendar
 
 
+def latest_completed_equity_session(at_ms: int, *, calendar=None) -> str:
+    """Reuse the retained US calendar without requiring any price or broker call."""
+    from datetime import timedelta
+    from .mstr_asst_full_day_market_intake import NEW_YORK, _session_close_ms
+    calendar = _four_asset_market_calendar() if calendar is None else calendar
+    start, end = date.fromisoformat(calendar["valid_from"]), date.fromisoformat(calendar["valid_through"])
+    day = datetime.fromtimestamp(at_ms / 1000, NEW_YORK).date()
+    if not start <= day <= end:
+        raise ValueError("MARKET_CALENDAR_OUT_OF_RANGE")
+    while day >= start:
+        text = day.isoformat()
+        if (day.weekday() in calendar["weekday_sessions"] and text not in calendar["full_close_dates"]
+                and _session_close_ms(text, early_close_dates=frozenset(calendar["early_close_dates"])) <= at_ms):
+            return text
+        day -= timedelta(days=1)
+    raise ValueError("NO_COMPLETED_SESSION_IN_CALENDAR")
+
+
 def build_four_asset_daily_proof(
     capture: Any,
     *,
@@ -438,14 +456,7 @@ def validate_four_asset_daily_proof(raw: Any, *, at_ms: int) -> dict[str, Any]:
             return day.weekday() in weekdays and day.isoformat() not in closed
 
         def latest_completed(clock: int) -> str:
-            day = local_day(clock)
-            require(start <= day <= end, "MARKET_CALENDAR_OUT_OF_RANGE")
-            while day >= start:
-                text = day.isoformat()
-                if is_session(day) and _session_close_ms(text, early_close_dates=early) <= clock:
-                    return text
-                day -= timedelta(days=1)
-            raise ValueError("NO_COMPLETED_SESSION_IN_CALENDAR")
+            return latest_completed_equity_session(clock, calendar=calendar)
 
         required_day = latest_completed(at_ms)
         captured_day = latest_completed(cutoff)
