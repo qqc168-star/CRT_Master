@@ -27,6 +27,61 @@ North Star: **Automation prepares evidence. GPT creates judgment. Human commits 
 
 Never reconstruct missing formal implementation from old chats or memory. If the formal basis is absent, report `BLOCKED`.
 
+## 零號任務｜N.S. 分析完整性與跨聊天室驗收（Q0）
+
+這是既有 `CRT_GPT_ANALYSIS_DOCTRINE_V0.1.md` 的執行責任，不新增正式模型、
+正式季節、六層權重、交易權限，也不修改原八項驗收分母。
+
+- 任一新聊天室開始 CRT 市場／資本分析前，先讀 current `main`、正式契約、
+  當次可取得的 Evidence Pack（證據包），再讀 `radar/STATUS/CRT_ACTIVE_BATON.md`。
+- 不得由使用者逐項提醒才恢復 BTC 週期與 L0～L6、正式／研究季節與 Q1、
+  MSTR／ASST 正式 mNAV 與歷史研究落點、每股 BTC、公司健康、
+  STRC／SATA 雙釵現金流／可逆輪動、個人資本與 BTC 購買力。
+- 完整分析要主動涵蓋 CRT 原有的八項分析義務與四表，附來源、時鐘、
+  證據資格、因果、反證、資本影響與下一觸發。局部問答可縮小範圍，
+  但不得把局部內容宣稱為 `CRT 360°` 完整分析。
+- 逐項分清 `SOURCE_BOUND`（來源存在但不代表正式資格）、`RESEARCH_ONLY`（研究）、
+  `BLOCKED`（已檢查但證據不合格）、`NOT_RUN`（根本未執行）；後兩者不可偷換。
+  正式季節、正式 mNAV 等仍由原有專屬驗證器裁決。
+- 若宣稱完整 360° 分析，須先有實際報告、原始 Evidence Pack 與對應
+  coverage manifest（覆蓋清單），使用 `crt_radar.analysis_coverage_gate`
+  執行結構審查。審查結果只證明已審查哪些器官，不證明因果推理合理，
+  也不會批准交易；因此報告不得將結構檢查冒充 Q5 實質推理品質驗收。
+- 未取得報告／當次證據／覆蓋清單，明說無法宣稱完整；不得把缺項隱藏，
+  更不得給出無根據股價、倉位或季節結論。
+
+### Q0｜完整 CRT 360° 分析的實際發布接線（本機離線）
+
+完整報告 **不可** 僅憑 GPT 聊天回答、單一市場觀測、十一項覆蓋測試、
+或既有資本建議回執，就宣稱 `CRT 360° 完整合格`。
+
+如需驗收 360° 覆蓋，先由 CRT 原有的 `capital_decision_closure.validated_receipt`
+完成來源綁定的資本建議回執，另準備當次原始 `Evidence Pack`（證據包），
+以及逐器官 `analysis_coverage_gate` 覆蓋清單，執行：
+
+`python -m crt_radar.analysis_360_delivery --report <coverage.json> --evidence-pack <pack.json> --capital-receipt <capital-receipt.json> --output <new-review.json>`
+
+由當次原資本回執先自動建立未執行骨架（避免 GPT 或使用者漏列器官）：
+
+`python -m crt_radar.analysis_360_delivery --initialize-report --evidence-pack <pack.json> --capital-receipt <capital-receipt.json> --output <manifest-template.json>`
+
+骨架內所有器官都是 `NOT_RUN`（尚未分析），不提供任何虛假市場結論；
+由 N.S. 實際分析後完成覆蓋清單，再用上述發布關卡驗收。
+
+報告覆蓋清單必須額外具備 `event_id`、`capital_receipt_hash`、
+`action_scopes`（每個 `decision_scope` 的 asset/action，包含「原持倉 HOLD、
+新增部位 WAIT」這種同資產多範圍分離的情形）。發布器逐項核對與正式
+回執完全一致，驗證雜湊、來源、時間、四檔資產及覆蓋狀態。
+
+`REJECTED`：只保留拒收紀錄；`REVIEWED_WITH_BLOCKERS_Q5_PENDING`：
+保留部分合格研究與特定資料阻塞；`COVERAGE_READY_Q5_PENDING`：
+可送既有 Q5 實質推理審查。以上任何狀態均 **不是** Q5 審查已完成，
+也不授予正式季節或交易權限。未提供完整資料就維持未驗收，不補造清單。
+
+這是 **離線人工發布入口**，不自動接管既有通知／交易路徑，不改寫歷史
+`capital_validation` 或 `receipt_hash`，也不宣告定時觀測會自行喚醒 GPT。
+對一般局部問答保留原有路徑，但絕不能稱其為完整 CRT 360°。
+
 ## 永久使用者語言規則｜User-facing Language Rule（對使用者語言規則）
 
 - CRT（第一顆比特幣決策研究體系）對使用者輸出中，每次出現 English term or acronym（英文術語或縮寫）時，都必須立即附上繁體中文註解。

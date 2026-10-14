@@ -29,6 +29,58 @@ Automation（自動化）負責蒐集、驗真、標準化、計算、比較、�
 
 本身份鎖只約束 project-level analysis routing（專案層分析路由），不新增第七層，不修改正式六層權重、燈號閾值、`mNAV` 語義、Season Router（季節路由器）、Production approval（正式生產批准）或 External Action Authority（外部行動權限）。
 
+### 1.2 Q0｜N.S. 零號工作紀律與交付責任（跨聊天室）
+
+既有 Doctrine（分析準則）的缺陷不在文字不足，而在可能跳過分析器官、
+未做因果裁決，卻把局部市場觀測包裝成完整 CRT 判斷。因此所有
+**宣稱 CRT 360° 的完整分析**，必須於交付前主動完成下列工作：
+
+1. 從 current main（目前主分支）與實際 Evidence Pack（證據包）辨識 BTC
+   正式／研究季節、Q1 控制轉移、L0～L6、Gold（長期研究）的分析資格；
+   缺少任一器官不得默默省略。
+2. 對 MSTR／ASST 分開分析正式 Diluted mNAV（稀釋後資產淨值倍數）、
+   歷史研究百分位、每股 BTC 增厚、融資／稀釋、公司健康及市場健康；
+   研究同公式不得升格正式來源資格。
+3. 對 STRC／SATA 分開審查配息已入帳／應收／預估、六個月淨收益、
+   發行人請求權及償付風險、價格與雙釵回程 `R_cap`（資本保全比）；
+   未入帳的配息不能用作目前可投資現金。
+4. 回到用戶當次已確認持倉、可用現金、四季資本軌道與 BTC 購買力；
+   至少提出有根據的 BUY／SELL／HOLD／WAIT／ROTATE 支援及失效條件。
+5. 因果、持續性、接受度、競爭假說、證據獨立性、最強反證、機會成本與
+   不對稱性，必須在結論之前主動檢查。不得只將數字排成表格。
+6. 限定每一項實際狀態：`SOURCE_BOUND` 只表示找得到原始證據，
+   `RESEARCH_ONLY` 不得冒充正式資格，`BLOCKED` 必須給具體原因，
+   `NOT_RUN` 表示沒有執行，不得偽裝成 `BLOCKED` 或藏掉。
+
+對宣稱完整的分析，使用 `radar/src/crt_radar/analysis_coverage_gate.py`
+及對應的本地當次證據、報告覆蓋清單做機械覆蓋稽核。此工具不得授予
+正式季節、公司估值、交易或因果推理權限；它永遠回傳
+`reasoning_state = NOT_YET_PROVEN`，完整投資推理品質仍依既有 Q5 獨立驗收。
+
+**拒收原則：** 缺必要器官、虛假的來源綁定、只有標題沒有判斷、
+將 `NOT_RUN` 當 `BLOCKED`、沒有四檔資本裁決或無法驗明時鐘者，
+不得宣稱完整 CRT 360°。不得因任何一項正式來源受阻便放棄其他
+已可支持的窄範圍研究裁決，也不得因此發明交易資格。
+
+### 1.3 Q0｜真實交付與資本回執的雙重驗收接線
+
+不得把 `analysis_coverage_gate` 的單機測試當成 CRT 市場報告已通過。
+完整 360° 報告採 **獨立覆蓋清單 + 當次原始 Evidence Pack + 已經由
+CRT 原資本驗證器批准的 `validated_receipt`** 三方接線，
+由 `crt_radar.analysis_360_delivery` 產生只讀審查回執：
+
+- Evidence Pack（證據包）雜湊、資本來源雜湊與事件 ID 必須一致，
+  報告不得早於資本評估時間；雜湊一致只證明本機紀錄自洽，非來源真偽。
+- 報告完整列示四檔所有 `decision_scope`、asset/action，逐一對照原
+  recommendation（建議）及 validation（驗證）；原持倉 HOLD 與加碼 WAIT
+  不得被壓成單一動作。任何來源矛盾、漏器官、漏動作或錯誤時鐘都 `REJECTED`。
+- `REVIEWED_WITH_BLOCKERS_Q5_PENDING` 與 `COVERAGE_READY_Q5_PENDING`
+  只表示可追溯的結構覆蓋審查，**不得**宣稱 GPT 因果、投資推理或 Q5 完成。
+- 不修改既有資本建議回執、通知、交易權限、季節或六層權重；
+  不以本地發佈器取代 `capital_decision_closure` 的原正式驗證。
+- 局部有效分析仍可使用原有路徑，但須標示局部；任何一份 360°
+  完整合格主張都需要本發布關卡與另行完成的 Q5 判讀驗收。
+
 ## 2. 權限與正式邊界
 
 本準則不得：
