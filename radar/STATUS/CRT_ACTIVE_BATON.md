@@ -89,6 +89,13 @@ radar/scripts/windows/run_observation_history_windows.ps1
 
 ### Q3 MSTR／ASST 經濟價值閉合
 
+量化交付接線：既有 `common_equity_health.quantitative_inspection` 提供逐格數值、
+來源、四鐘、口徑、資格及可比較差額，並保留一張觀測圖的可繪製資料；
+重用 CT、剩餘價值與正式 mNAV 驗證，不新增健康分數或固定配置。
+期末回收追平情境須保留兩家公司期末 price/residual（股價／剩餘資產）倍數，
+不得混為自身保本或正式 mNAV。缺資料只封鎖受影響主張，未執行保持 `NOT_RUN`。
+本交付不等於 Q3 全項、Q5 投資因果、Q0 360° 或原第八項完成；Q1～Q7 排序與 7/8 不變。
+
 目標：評估普通股股東的真實經濟價值，
 不是只列 BTC 增長或稀釋百分比。
 

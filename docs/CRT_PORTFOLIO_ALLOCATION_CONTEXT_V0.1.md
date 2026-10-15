@@ -127,6 +127,72 @@ GPT bridge（GPT 橋）只傳送 compact projection（精簡投影），避免�
 
 ## Governance locks（治理鎖）
 
+### MSTR／ASST quantitative inspection（雙標的量化透視體檢）
+
+`common_equity_health.quantitative_inspection` is a read-only derived view（唯讀衍生顯示層）;
+it adds no Evidence Pack（證據包）top-level section, source collector（來源採集器）,
+health score（健康總分）, allocation rule（配置規則）or trading permission（交易權限）.
+`build_quantitative_equity_inspection()` reuses CT（公司斷層掃描）PIT（當時可見性）
+validation, `_residual_snapshot()` and the existing formal mNAV（稀釋後資產淨值倍數）
+admission/history/CDF（來源准入／歷史／經驗百分位）algorithms. Each numerical cell
+retains value, unit, source references, hashes, four clocks, basis and qualification.
+The table's difference is MSTR minus ASST in the stated unit, not an investment ranking.
+Different effective windows or bases block that difference while retaining usable levels.
+
+The three efficiency lenses（資金效率視角）are issuer funding（公司募資與轉換）,
+per-share capital（每股資本）and investor capital（投資人資本與 BTC 購買力）.
+Conversion components remain event-scoped, never summed across overlapping events or
+called causal ROI（因果投資報酬率）. Conversion amount is not settled net proceeds
+or an extra deployable budget. Reported cash and designated reserves are separate;
+usable liquidity needs the existing cash-usability basis. Incomplete senior claims,
+unproven convertible/warrant treatment or unbound residual scenarios block exact residual
+claims without erasing independent BTC/share or cash facts.
+
+Qualification（資格）is claim-specific: `QUALIFIED` for formal values admitted by
+the original validator; `RESEARCH_ONLY` for traceable descriptive/research quantities;
+`BLOCKED` for checked but unsupported claims; `NOT_RUN` for analyses without an
+available bound-input path. A source hash is integrity evidence, not proof of external
+financial truth. Historical replay never means current data or contemporaneous prediction.
+Price return excludes dividends, fees and taxes; it is not total return（總報酬）.
+BTC purchasing-power change（比特幣購買力變化）is
+`(1 + equity_return) / (1 + btc_return) - 1` on the same comparable window.
+
+The single chart-data projection（圖表可繪製資料）indexes observed BTC per diluted
+share at common dates to 100 (blue MSTR, green ASST). It requires at least two distinct
+common dates and stable source/share semantics; there is no interpolation or forward fill.
+Missing observations suppress only the chart, not table facts. The full table stays local:
+the existing compact GPT bridge（精簡分析模型橋接）continues carrying its established
+per-share/residual/health fields, without duplicating this table or changing the Smoke
+Contract（冒煙契約）16 KiB budget. Q0/Q5（分析完整性／實質推理驗收）and the final
+capital validator remain independent; this table is not a complete 360° analysis receipt.
+
+`residual_recovery_scenario()` implements the explicitly assumed research scenario（研究情境）:
+
+```text
+a_i = initial residual assets per share / initial share price
+G_i = terminal residual assets per share / initial residual assets per share
+v_i = terminal share price / terminal residual assets per share
+G_A_required = (a_M / a_A) * (v_M / v_A) * G_M
+ASST break-even G_A = 1 / (a_A * v_A)
+ASST positive return requires G_A > break-even G_A
+```
+
+This catches up to MSTR's terminal capital recovery, which can still be below the
+initial investment. `v_i` is **not** formal mNAV（正式稀釋後資產淨值倍數）.
+Only equal terminal `v` permits omitting their ratio. Positive finite quantities,
+complete coherent capital-structure assumptions and comparable definitions/adjustments
+are prerequisites; zero/negative residuals, zero crossings or unknown full claims cannot
+produce a precise growth threshold. The API（程式介面）always labels successful
+arithmetic `RESEARCH_ONLY`, with an explicit assumption reference; it does not certify
+live financial facts. Verified residual levels and absolute changes remain independently
+usable. Neither a financing-cost/BTC-value ratio nor a claims/BTC-value ratio alone
+establishes efficiency improvement: BTC appreciation changes the denominator.
+
+No fixed 60/40 allocation or catch-up multiple is installed. H1 `VALIDATION_PENDING`
+does not become formal season, health clearance or a trade signal. If its lineage is
+absent from the input pack, this view does not invent a Q1 binding. Seasonal anchors,
+growth-bucket limits, user-confirmed rails and all governance locks remain unchanged.
+
 保持不變：
 
 - 六層權重 `20 / 20 / 17 / 25 / 13 / 5`

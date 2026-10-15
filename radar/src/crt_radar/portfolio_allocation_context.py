@@ -356,12 +356,318 @@ def build_common_equity_health(pack: dict[str, Any], residual_inputs: dict[str, 
         "schema_version": HEALTH_SCHEMA_VERSION,
         "state": aggregate_state,
         "assets": rows,
+        "quantitative_inspection": build_quantitative_equity_inspection(pack, residual_inputs),
         "action_output": "NONE",
         "external_action_authority": "NONE",
         "capital_decision_authority": "USER_ONLY",
         "machine_execution": "FORBIDDEN",
         "production": "NOT_APPROVED",
     }
+
+
+def residual_recovery_scenario(*, a_m, a_a, g_m, v_m, v_a, assumption_ref,
+                               comparable_scope=False) -> dict:
+    """Research sensitivity only. v is price/residual, NEVER formal mNAV.
+
+    The caller describes a scenario, not a verified current financial snapshot.
+    Equal investment at inception; distributions, fees and tax are excluded.
+    """
+    try:
+        values = [_number(v) for v in (a_m, a_a, g_m, v_m, v_a)]
+    except OverflowError:
+        values = [None]
+    blocked = {"qualification": "BLOCKED", "catch_up_growth_multiple": None,
+               "asst_break_even_growth_multiple": None, "action_output": "NONE"}
+    if (comparable_scope is not True or not isinstance(assumption_ref, str) or not assumption_ref.strip()
+            or any(v is None or v <= 0 for v in values)):
+        return {**blocked, "reason": "POSITIVE_COMPLETE_COMPARABLE_RESIDUAL_SCENARIO_REQUIRED"}
+    am, aa, gm, vm, va = values
+    try:
+        catch_up, break_even = (am / aa) * (vm / va) * gm, 1 / (aa * va)
+        m_recovery = am * gm * vm
+    except (ZeroDivisionError, OverflowError):
+        return {**blocked, "reason": "NONFINITE_SCENARIO"}
+    if not all(math.isfinite(v) and v > 0 for v in (catch_up, break_even, m_recovery)):
+        return {**blocked, "reason": "NONFINITE_SCENARIO"}
+    return {"qualification": "RESEARCH_ONLY", "assumption_ref": assumption_ref,
+            "catch_up_growth_multiple": catch_up,
+            "asst_break_even_growth_multiple": break_even,
+            "mstr_terminal_recovery_per_initial_dollar": m_recovery,
+            "asst_return_at_catch_up": m_recovery - 1,
+            "asst_positive_return_condition": "G_A > asst_break_even_growth_multiple",
+            "formula": "(a_M/a_A)*(v_M/v_A)*G_M", "v_basis": "PRICE_PER_RESIDUAL_NOT_MNAV",
+            "limitations": ["ASSUMPTIONS_NOT_CURRENT_FACTS", "NO_DISTRIBUTIONS_FEES_OR_TAX",
+                            "NO_ZERO_CROSSING_OR_UNKNOWN_SENIOR_CLAIMS"], "action_output": "NONE"}
+
+
+def build_quantitative_equity_inspection(pack, residual_inputs=None) -> dict:
+    """Read-only numerical view of existing CT/valuation organs, no new model.
+
+    CT levels are research facts, not valuation clearance. Recheck existing PIT
+    contracts and retain source clocks; formal mNAV uses its original validator.
+    Missing adapters are NOT_RUN, checked but unusable inputs are BLOCKED.
+    This full local view is deliberately excluded from the bounded Smoke bridge.
+    """
+    from .treasury_company_ct import build_treasury_valuation_context, _same_valuation_basis
+
+    as_of = pack.get("generated_at_ms")
+    issuers = {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}
+    clocks = ("effective_time", "disclosure_time", "first_seen_time", "retrieval_time")
+    sources, sections, valuations = {}, {}, {}
+
+    def missing(reason, state="BLOCKED"):
+        return {"value": None, "qualification": state, "reason": reason,
+                "source_ref": [], "clocks": [], "basis": None}
+
+    def cell(value, records, basis):
+        value = _number(value)
+        if value is None or not records:
+            return missing("NUMERIC_SOURCE_UNAVAILABLE")
+        records = [component for r in records for component in
+                   ([r] + list(r.get("input_evidence", {}).values()))]
+        return {"value": value, "qualification": "RESEARCH_ONLY",
+                "reason": "VALIDATED_CT_FACT_NOT_ACTION_CLEARANCE", "basis": basis,
+                "source_ref": [r["source_ref"] for r in records],
+                "clocks": [{k: r.get(k) for k in clocks} for r in records],
+                "raw_sha256": [r.get("raw_sha256", (r.get("source_evidence") or {}).get("raw_sha256"))
+                               for r in records]}
+
+    def valid(record, asset):
+        return (isinstance(record, dict) and type(as_of) is int and as_of > 0
+                and validate_pit_replay(record, issuer_id=issuers[asset], replay_at=as_of,
+                                        mode="AUDIT_REPLAY")["state"] == "AVAILABLE")
+
+    def fact(asset, kind, section=None):
+        rows = [r for r in _asset_facts(pack, asset=asset, fact_type=kind, ct_section=section)
+                if r.get("issuer_id") in (None, issuers[asset])]
+        # A second competing organ is not resolved by list order.
+        return rows[0].get("evidence", {}) if len(rows) == 1 else {}
+
+    for asset in SUPPORTED_ASSETS:
+        sections[asset] = {name: fact(asset, "TREASURY_COMPANY_CT", name) for name in
+                           ("per_share_asset_engine", "capital_burden_resilience", "capital_conversion")}
+        sources[asset] = fact(asset, "ISSUER_CT_SOURCE_BINDING").get("observations", [])
+        valuation = fact(asset, "TREASURY_VALUATION_CONTEXT")
+        # The existing context stores normalized observations, not original
+        # receipt envelopes. Restore only deterministic aliases/authority fields
+        # (as _valuation_evidence already does); all four source components,
+        # original clocks and dilution scope still undergo the original checks.
+        history = []
+        for r in valuation.get("mnav_observations", []):
+            if isinstance(r, dict) and r.get("evidence_authority") in {
+                    "FORMAL_ACTION_CRITICAL", "RESEARCH_SECONDARY_EVIDENCE"}:
+                r = {**r, "asset_nav_usd": r.get("btc_market_value_usd"),
+                     "source_class": ("VERIFIED_DETERMINISTIC" if r["evidence_authority"] == "FORMAL_ACTION_CRITICAL"
+                                      else "RESEARCH_SECONDARY"),
+                     "action_output": "NONE", "external_action_authority": "NONE",
+                     "external_action_performed": False}
+            history.append(r)
+        # Reuse the original history admission/CDF, never trust a copied rank.
+        valuations[asset] = build_treasury_valuation_context(asset_id=asset, as_of_ms=as_of,
+            mnav_history=history) if type(as_of) is int and as_of > 0 else {}
+
+    def level(asset, section, field, *, label="current"):
+        r = sections[asset][section].get(label)
+        if field == "usable_liquidity_usd" and (not isinstance(r, dict) or not r.get("cash_usability_basis_ref")):
+            return missing("CASH_BALANCE_IS_NOT_VERIFIED_USABLE_LIQUIDITY")
+        if valid(r, asset) and r.get("basis_ref") and _number(r.get(field)) is not None:
+            return cell(r[field], [r], r["basis_ref"])
+        # Preserve narrower, source-bound official components; these never feed
+        # residuals/available cash merely because a reported number exists.
+        if label == "current":
+            reported = [r for r in sources[asset] if valid(r, asset) and _number(r.get(field)) is not None]
+            if reported:
+                latest = max(r["effective_time"] for r in reported)
+                reported = [r for r in reported if r["effective_time"] == latest]
+                if len({r[field] for r in reported}) == 1:
+                    return cell(reported[0][field], reported, "REPORTED_COMPONENT_ONLY")
+        return missing("SOURCE_TIME_BASIS_OR_COMPONENT_UNAVAILABLE")
+
+    def change(asset, field):
+        a = level(asset, "per_share_asset_engine", field, label="previous")
+        b = level(asset, "per_share_asset_engine", field)
+        if (a["value"] is None or b["value"] is None or a["value"] <= 0 or a["basis"] != b["basis"]
+                or a["clocks"][-1]["effective_time"] >= b["clocks"][-1]["effective_time"]):
+            return missing("COMPARABLE_POSITIVE_HISTORY_REQUIRED")
+        r = sections[asset]["per_share_asset_engine"]
+        if r["previous"].get("source_semantic") != r["current"].get("source_semantic"):
+            return missing("HISTORICAL_SEMANTIC_MISMATCH")
+        return cell(100 * (b["value"] / a["value"] - 1), [r["previous"], r["current"]], b["basis"])
+
+    def mnav(asset, metric):
+        v = valuations[asset]
+        current = v.get("current_observation")
+        if not current:
+            return missing("FORMAL_MNAV_COMPONENTS_OR_COMPARABLE_HISTORY_UNAVAILABLE")
+        value = v.get(metric)
+        if isinstance(value, dict):
+            value = value.get("value") if value.get("state") == "AVAILABLE" else None
+        result = cell(value, [current], current["basis_ref"])
+        if result["value"] is not None:
+            result["qualification"] = ("QUALIFIED" if v["formal_action_critical_state"] == "AVAILABLE"
+                                       else "RESEARCH_ONLY")
+            result["reason"] = "ORIGINAL_VALUATION_CONTRACT_RECOMPUTED"
+        return result
+
+    def residual(asset):
+        a = sections[asset]["per_share_asset_engine"].get("current")
+        b = sections[asset]["capital_burden_resilience"].get("current")
+        supplied = (residual_inputs or {}).get(asset, {}).get("current")
+        result = _residual_snapshot(issuer_id=issuers[asset], as_of_ms=as_of,
+            asset_engine_snapshot=a, burden_snapshot=b, residual_input=supplied)
+        if result["state"] != "AVAILABLE":
+            return missing(result["reason"])
+        # Existing scenario assertions alone do not establish full claims or
+        # eliminate warrants/convertible double counting. Require bound scenario
+        # evidence on the same PIT date before displaying an exact residual.
+        if (not b.get("cash_usability_basis_ref") or not valid(supplied, asset)
+                or supplied.get("effective_time") != a["effective_time"]
+                or supplied.get("basis_ref") != a.get("basis_ref")):
+            return missing("SOURCE_BOUND_COHERENT_CAPITAL_STRUCTURE_REQUIRED")
+        return cell(result["value"], [a, b, supplied], supplied["capital_structure_scenario_ref"])
+
+    def ratio(asset, numerator, denominator, scale=1):
+        a, b = numerator(asset), denominator(asset)
+        if (a["value"] is None or b["value"] is None or b["value"] <= 0
+                or a["clocks"][-1]["effective_time"] != b["clocks"][-1]["effective_time"]):
+            return missing("SAME_DATE_QUALIFIED_COMPONENTS_REQUIRED")
+        value = _number(scale * a["value"] / b["value"])
+        if value is None:
+            return missing("NONFINITE_COMPARISON")
+        return {**a, "value": value,
+                "basis": a["basis"] + "/" + b["basis"],
+                "source_ref": a["source_ref"] + b["source_ref"],
+                "clocks": a["clocks"] + b["clocks"],
+                "raw_sha256": a.get("raw_sha256", []) + b.get("raw_sha256", [])}
+
+    def price(asset):
+        current = valuations[asset].get("current_observation")
+        return (cell(current["equity_price_usd"], [current], current["share_basis_ref"])
+                if current else missing("ALIGNED_PRICE_UNAVAILABLE"))
+
+    def performance(asset, btc_power=False):
+        history = valuations[asset].get("mnav_observations", [])
+        if not history:
+            return missing("ALIGNED_PRICE_HISTORY_NOT_ANALYSED", "NOT_RUN")
+        if (len(history) < 2 or any(not isinstance(r, dict) for r in history)
+                or any(not _same_valuation_basis(history[0], r) for r in history[1:])):
+            return missing("COMPARABLE_PRICE_ADJUSTMENT_AND_SCOPE_REQUIRED")
+        a, b = history[0], history[-1]
+        growth = b["equity_price_usd"] / a["equity_price_usd"]
+        if btc_power:
+            growth /= b["btc_price_usd"] / a["btc_price_usd"]
+        result = cell(100 * (growth - 1), [a, b], a["basis_ref"])
+        result["reason"] = "PRICE_ONLY_NO_DIVIDENDS_FEES_TAX_NOT_TOTAL_RETURN"
+        return result
+
+    def conversion(asset, field):
+        events = sections[asset]["capital_conversion"].get("events", [])
+        ids = [r.get("event_id") for r in events]
+        valid_events = [r for r in events if valid(r, asset) and r.get("active_for_calculation") is True
+                        and r.get("consequence_basis_ref") and r.get("event_id")
+                        and ids.count(r["event_id"]) == 1]
+        if not valid_events:
+            return missing("BOUND_ACTIVE_CONVERSION_EVENT_REQUIRED")
+        latest = max(r["effective_time"] for r in valid_events)
+        selected = [r for r in valid_events if r["effective_time"] == latest]
+        if len(selected) != 1:
+            return missing("OVERLAPPING_EVENTS_NOT_SUMMED")
+        return cell(selected[0].get(field), selected, selected[0]["consequence_basis_ref"])
+
+    def burden(field):
+        return lambda asset: level(asset, "capital_burden_resilience", field)
+
+    def asset_level(field):
+        return lambda asset: level(asset, "per_share_asset_engine", field)
+
+    specs = [
+        ("equity_price_return", "%", "HISTORICAL_PERFORMANCE", lambda a: performance(a)),
+        ("btc_purchasing_power_return", "%", "HISTORICAL_PERFORMANCE", lambda a: performance(a, True)),
+        ("btc_holdings", "BTC", "PER_SHARE_ASSETS", asset_level("btc_holdings")),
+        ("diluted_shares", "shares", "PER_SHARE_ASSETS", asset_level("diluted_shares")),
+        ("btc_per_diluted_share", "BTC/share", "PER_SHARE_ASSETS", asset_level("btc_per_diluted_share")),
+        ("btc_per_share_growth", "%", "PER_SHARE_ASSETS", lambda a: change(a, "btc_per_diluted_share")),
+        ("diluted_share_growth", "%", "PER_SHARE_ASSETS", lambda a: change(a, "diluted_shares")),
+        ("diluted_mnav", "x", "FORMAL_VALUATION", lambda a: mnav(a, "diluted_mnav")),
+        ("own_history_percentile", "%", "FORMAL_VALUATION", lambda a: mnav(a, "own_history_empirical_cdf_pct")),
+        ("residual_per_diluted_share", "USD/share", "SHAREHOLDER_RESIDUAL", residual),
+        ("residual_per_dollar", "USD/USD", "SHAREHOLDER_RESIDUAL", lambda a: ratio(a, residual, price)),
+        ("raw_btc_exposure_per_10000_usd", "USD", "CAPITAL_COMPETITIVENESS",
+         lambda a: ({**mnav(a, "diluted_mnav"), "value": 10000 / mnav(a, "diluted_mnav")["value"]}
+                    if mnav(a, "diluted_mnav")["value"] else missing("FORMAL_MNAV_REQUIRED"))),
+        ("conversion_amount_not_net_settled", "USD", "FUNDING_EFFICIENCY", lambda a: conversion(a, "amount_usd")),
+        ("conversion_new_shares", "shares", "FUNDING_EFFICIENCY", lambda a: conversion(a, "diluted_share_change")),
+        ("conversion_btc_change", "BTC", "FUNDING_EFFICIENCY", lambda a: conversion(a, "btc_change")),
+        ("debt_principal", "USD", "FINANCING_BURDEN", burden("debt_principal_usd")),
+        ("preferred_claims", "USD", "FINANCING_BURDEN", burden("preferred_liquidation_claims_usd")),
+        ("annual_carry", "USD/year", "FINANCING_BURDEN", burden("annual_carry_usd")),
+        ("usable_cash", "USD", "CASH_HEALTH", burden("usable_liquidity_usd")),
+        ("reported_cash", "USD", "CASH_HEALTH", burden("usd_cash_usd")),
+        ("designated_reserve", "USD", "CASH_HEALTH", burden("usd_reserve_usd")),
+        ("cash_carry_coverage", "years", "CASH_HEALTH",
+         lambda a: ratio(a, burden("usable_liquidity_usd"), burden("annual_carry_usd"))),
+    ]
+    rows = []
+    for metric, unit, category, calculate in specs:
+        cells = {a: calculate(a) for a in SUPPORTED_ASSETS}
+        a, b = cells.values()
+        comparable = (a["value"] is not None and b["value"] is not None and a["basis"] == b["basis"]
+                      and [r["effective_time"] for r in a["clocks"]] == [r["effective_time"] for r in b["clocks"]])
+        rows.append({"metric": metric, "unit": unit, "category": category, **cells,
+                     "relative_delta": a["value"] - b["value"] if comparable else None,
+                     "delta_basis": "MSTR_MINUS_ASST_NOT_INVESTMENT_ADVANTAGE",
+                     "comparison_state": "COMPARABLE" if comparable else "BLOCKED",
+                     "capital_implication": "DESCRIPTIVE_FACT_NOT_ALLOCATION_OR_TRADE_CLEARANCE"})
+    # No new historical-price, financing or operating-cash-flow intake contract.
+    for metric, unit, category in (
+        ("funding_gross_net_settled", "USD", "FUNDING_EFFICIENCY"), ("funding_new_shares", "shares", "FUNDING_EFFICIENCY"),
+        ("funding_btc_bought", "BTC", "FUNDING_EFFICIENCY"), ("operating_cash_flow", "USD/period", "CASH_HEALTH"),
+        ("maximum_drawdown", "%", "MARKET_RISK")):
+        rows.append({"metric": metric, "unit": unit, "category": category,
+                     **{a: missing("COMPARABLE_BOUND_INPUT_NOT_AVAILABLE", "NOT_RUN") for a in SUPPORTED_ASSETS},
+                     "relative_delta": None, "comparison_state": "NOT_RUN",
+                     "capital_implication": "NO_CAUSAL_OR_PRECISE_ALLOCATION_CONCLUSION"})
+    # One chart: aligned observed BTC/share growth, with no interpolation or
+    # forward-filled share counts. A singleton is not a time-series chart.
+    series = {}
+    for asset in SUPPORTED_ASSETS:
+        observations = sections[asset]["per_share_asset_engine"].get("observations", [])
+        series[asset] = [r for r in observations if valid(r, asset) and r.get("basis_ref")
+                         and _number(r.get("btc_per_diluted_share")) is not None
+                         and r["btc_per_diluted_share"] > 0]
+    dates = sorted(set(r["effective_time"] for r in series["MSTR"])
+                   & set(r["effective_time"] for r in series["ASST"]))
+    chart = {"metric": "btc_per_diluted_share_index", "qualification": "BLOCKED", "points": [],
+             "reason": "ALIGNED_COMPARABLE_OBSERVATIONS_REQUIRED", "interpolation": "NONE",
+             "colors": {"MSTR": "blue", "ASST": "green"}}
+    if len(dates) >= 2 and all(len({r["basis_ref"] for r in rs}) == 1
+                              and len({r["effective_time"] for r in rs}) == len(rs)
+                              and all(r["source_semantic"] == rs[0]["source_semantic"] for r in rs)
+                              for rs in series.values()):
+        for asset, rs in series.items():
+            lookup = {r["effective_time"]: r for r in rs}
+            first = lookup[dates[0]]["btc_per_diluted_share"]
+            chart[asset] = [{"effective_time": d, "value": 100 * lookup[d]["btc_per_diluted_share"] / first,
+                             "source_ref": lookup[d]["source_ref"],
+                             "clocks": {k: lookup[d][k] for k in clocks}} for d in dates]
+        chart.update(qualification="RESEARCH_ONLY", reason="OBSERVED_COMMON_DATES_BASE_100",
+                     points=dates, metric="btc_per_diluted_share_index")
+    return {"schema_version": "CRT_QUANTITATIVE_EQUITY_INSPECTION_V0.1", "as_of_ms": as_of,
+            "rows": rows, "chart_data": chart,
+            "inventory": {"ALREADY_AVAILABLE": ["CT", "SIX_HEALTH_DIMENSIONS", "FORMAL_MNAV", "RESIDUAL_SNAPSHOT"],
+                          "NEEDS_COMPOSITION": ["NUMERICAL_COMPARISON_VIEW", "RESIDUAL_RECOVERY_SENSITIVITY"],
+                          "MISSING_REQUIRED_EVIDENCE": [r["metric"] for r in rows if r["comparison_state"] != "COMPARABLE"]},
+            "capital_summary": {"state": "ANALYST_REQUIRED", "target_weights": None,
+                "reason": "HEALTH_VALUATION_CYCLE_AND_PERSONAL_CAPITAL_REMAIN_SEPARATE",
+                "q1_state_inferred": False, "formal_season": None,
+                "strongest_counterevidence": "INCOMPLETE_SENIOR_CLAIMS_SCOPE_OR_ASYNCHRONOUS_SNAPSHOTS_BLOCK_PRECISE_ADVANTAGE"},
+            "efficiency_lenses": {
+                "issuer_funding": ["conversion_amount_not_net_settled", "conversion_new_shares", "conversion_btc_change"],
+                "per_share_capital": ["btc_per_share_growth", "diluted_share_growth", "residual_per_diluted_share"],
+                "investor_capital": ["equity_price_return", "btc_purchasing_power_return", "residual_per_dollar"],
+                "causal_return": "NOT_PROVEN", "funding_proceeds_are_additional_budget": False},
+            "action_output": "NONE", "production": "NOT_APPROVED", "external_action_authority": "NONE",
+            "capital_decision_authority": "USER_ONLY"}
 
 
 def _season_destination(pack: dict[str, Any], season_context: Any) -> tuple[dict[str, Any] | None, list[str]]:
