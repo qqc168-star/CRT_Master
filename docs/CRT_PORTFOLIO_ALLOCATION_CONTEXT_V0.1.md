@@ -138,6 +138,11 @@ admission/history/CDF（來源准入／歷史／經驗百分位）algorithms. Ea
 retains value, unit, source references, hashes, four clocks, basis and qualification.
 The table's difference is MSTR minus ASST in the stated unit, not an investment ranking.
 Different effective windows or bases block that difference while retaining usable levels.
+The view reuses CT admission to recompute BTC/share from holdings and diluted shares,
+including growth and chart points; a copied ratio cannot replace missing components.
+`residual_per_dollar` additionally requires the residual and price evidence to bind
+the same documented share basis and consistent same-date diluted-share count. Missing
+or conflicting proof blocks only this ratio, not independently valid residual or mNAV facts.
 
 The three efficiency lenses（資金效率視角）are issuer funding（公司募資與轉換）,
 per-share capital（每股資本）and investor capital（投資人資本與 BTC 購買力）.

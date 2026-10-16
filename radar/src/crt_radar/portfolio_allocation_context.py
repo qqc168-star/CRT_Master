@@ -408,7 +408,7 @@ def build_quantitative_equity_inspection(pack, residual_inputs=None) -> dict:
     Missing adapters are NOT_RUN, checked but unusable inputs are BLOCKED.
     This full local view is deliberately excluded from the bounded Smoke bridge.
     """
-    from .treasury_company_ct import build_treasury_valuation_context, _same_valuation_basis
+    from .treasury_company_ct import build_treasury_valuation_context, _same_valuation_basis, _asset
 
     as_of = pack.get("generated_at_ms")
     issuers = {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}
@@ -436,6 +436,12 @@ def build_quantitative_equity_inspection(pack, residual_inputs=None) -> dict:
         return (isinstance(record, dict) and type(as_of) is int and as_of > 0
                 and validate_pit_replay(record, issuer_id=issuers[asset], replay_at=as_of,
                                         mode="AUDIT_REPLAY")["state"] == "AVAILABLE")
+
+    def ct_asset_record(record, asset):
+        # Reuse CT's source/PIT/numeric checks and holdings/shares arithmetic;
+        # a copied derived ratio is not another independent source fact.
+        return (_asset([record], issuers[asset], as_of)["current"]
+                if isinstance(record, dict) and type(as_of) is int and as_of > 0 else None)
 
     def fact(asset, kind, section=None):
         rows = [r for r in _asset_facts(pack, asset=asset, fact_type=kind, ct_section=section)
@@ -468,6 +474,8 @@ def build_quantitative_equity_inspection(pack, residual_inputs=None) -> dict:
 
     def level(asset, section, field, *, label="current"):
         r = sections[asset][section].get(label)
+        if section == "per_share_asset_engine":
+            r = ct_asset_record(r, asset)
         if field == "usable_liquidity_usd" and (not isinstance(r, dict) or not r.get("cash_usability_basis_ref")):
             return missing("CASH_BALANCE_IS_NOT_VERIFIED_USABLE_LIQUIDITY")
         if valid(r, asset) and r.get("basis_ref") and _number(r.get(field)) is not None:
@@ -475,7 +483,10 @@ def build_quantitative_equity_inspection(pack, residual_inputs=None) -> dict:
         # Preserve narrower, source-bound official components; these never feed
         # residuals/available cash merely because a reported number exists.
         if label == "current":
-            reported = [r for r in sources[asset] if valid(r, asset) and _number(r.get(field)) is not None]
+            candidates = sources[asset]
+            if field == "btc_per_diluted_share":
+                candidates = [ct_asset_record(r, asset) for r in candidates]
+            reported = [r for r in candidates if valid(r, asset) and _number(r.get(field)) is not None]
             if reported:
                 latest = max(r["effective_time"] for r in reported)
                 reported = [r for r in reported if r["effective_time"] == latest]
@@ -524,13 +535,18 @@ def build_quantitative_equity_inspection(pack, residual_inputs=None) -> dict:
                 or supplied.get("effective_time") != a["effective_time"]
                 or supplied.get("basis_ref") != a.get("basis_ref")):
             return missing("SOURCE_BOUND_COHERENT_CAPITAL_STRUCTURE_REQUIRED")
-        return cell(result["value"], [a, b, supplied], supplied["capital_structure_scenario_ref"])
+        return {**cell(result["value"], [a, b, supplied], supplied["capital_structure_scenario_ref"]),
+                "share_basis_ref": a["basis_ref"], "diluted_shares": result["components"]["diluted_shares"]}
 
-    def ratio(asset, numerator, denominator, scale=1):
+    def ratio(asset, numerator, denominator, scale=1, *, compatible_shares=False):
         a, b = numerator(asset), denominator(asset)
         if (a["value"] is None or b["value"] is None or b["value"] <= 0
                 or a["clocks"][-1]["effective_time"] != b["clocks"][-1]["effective_time"]):
             return missing("SAME_DATE_QUALIFIED_COMPONENTS_REQUIRED")
+        if compatible_shares and (not a.get("share_basis_ref")
+                or a["share_basis_ref"] != b.get("share_basis_ref")
+                or not math.isclose(a["diluted_shares"], b["diluted_shares"], rel_tol=1e-12)):
+            return missing("RESIDUAL_PRICE_SHARE_BASIS_UNPROVEN_OR_INCONSISTENT")
         value = _number(scale * a["value"] / b["value"])
         if value is None:
             return missing("NONFINITE_COMPARISON")
@@ -542,7 +558,8 @@ def build_quantitative_equity_inspection(pack, residual_inputs=None) -> dict:
 
     def price(asset):
         current = valuations[asset].get("current_observation")
-        return (cell(current["equity_price_usd"], [current], current["share_basis_ref"])
+        return ({**cell(current["equity_price_usd"], [current], current["share_basis_ref"]),
+                 "share_basis_ref": current["share_basis_ref"], "diluted_shares": current["diluted_shares"]}
                 if current else missing("ALIGNED_PRICE_UNAVAILABLE"))
 
     def performance(asset, btc_power=False):
@@ -591,7 +608,7 @@ def build_quantitative_equity_inspection(pack, residual_inputs=None) -> dict:
         ("diluted_mnav", "x", "FORMAL_VALUATION", lambda a: mnav(a, "diluted_mnav")),
         ("own_history_percentile", "%", "FORMAL_VALUATION", lambda a: mnav(a, "own_history_empirical_cdf_pct")),
         ("residual_per_diluted_share", "USD/share", "SHAREHOLDER_RESIDUAL", residual),
-        ("residual_per_dollar", "USD/USD", "SHAREHOLDER_RESIDUAL", lambda a: ratio(a, residual, price)),
+        ("residual_per_dollar", "USD/USD", "SHAREHOLDER_RESIDUAL", lambda a: ratio(a, residual, price, compatible_shares=True)),
         ("raw_btc_exposure_per_10000_usd", "USD", "CAPITAL_COMPETITIVENESS",
          lambda a: ({**mnav(a, "diluted_mnav"), "value": 10000 / mnav(a, "diluted_mnav")["value"]}
                     if mnav(a, "diluted_mnav")["value"] else missing("FORMAL_MNAV_REQUIRED"))),
@@ -632,7 +649,7 @@ def build_quantitative_equity_inspection(pack, residual_inputs=None) -> dict:
     series = {}
     for asset in SUPPORTED_ASSETS:
         observations = sections[asset]["per_share_asset_engine"].get("observations", [])
-        series[asset] = [r for r in observations if valid(r, asset) and r.get("basis_ref")
+        series[asset] = [r for r in (ct_asset_record(r, asset) for r in observations) if valid(r, asset) and r.get("basis_ref")
                          and _number(r.get("btc_per_diluted_share")) is not None
                          and r["btc_per_diluted_share"] > 0]
     dates = sorted(set(r["effective_time"] for r in series["MSTR"])
