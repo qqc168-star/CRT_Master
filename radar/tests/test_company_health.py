@@ -81,6 +81,38 @@ def aggregate(data, asset_id):
 
 
 class CompanyHealthTests(unittest.TestCase):
+    def test_verified_obligation_survives_absent_burden_through_compact_projection(self):
+        from test_treasury_company_ct import DAY
+        data = scenario()
+        data["burden_current"] = None
+        payment = evidence(source_class="SEC", payment_reference="synthetic-debt:next-payment",
+            due_at_ms=T2+20*DAY, amount_usd=120, obligation_kind="DEBT_PRINCIPAL",
+            recognition="CONFIRMED", amount_basis_ref="synthetic-contract")
+        data["fixed_obligations"] = [payment]
+        data["coverage"]["fixed_obligations"] = evidence(coverage_state="COMPLETE",
+            scope_ref="ALL_FIXED_OBLIGATIONS", covered_until_ms=T2+180*DAY)
+        ct = build_treasury_company_ct(**data)
+        original = ct["organs"]["capital_burden_resilience"]["fixed_obligation_windows"]
+        self.assertEqual(original["confirmed"][0]["amount_usd"], 120)
+        result = health(data)
+        self.assertIn("fixed_obligation_windows", result["dimensions"]["liquidity_buffer"])
+        retained = result["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"]
+        self.assertEqual(retained["confirmed"], original["confirmed"])
+        self.assertIn(payment["source_ref"], result["provenance"])
+        compact = compact_health_dimensions(result)["dimensions"]["liquidity_buffer"]
+        self.assertEqual(compact["state"], "BLOCKED")
+        windows = compact["fixed_obligation_windows"]
+        self.assertEqual(windows["state"], "PARTIAL")
+        self.assertTrue(windows["schedule_complete"])
+        self.assertFalse(windows["liquidity_complete"])
+        self.assertIsNone(windows["qualified_usable_liquidity_usd"])
+        self.assertIsNone(windows["first_proven_shortfall_date_ms"])
+        for row in windows["windows"]:
+            self.assertEqual(row["confirmed_total_usd"], 120)
+            self.assertIsNone(row["proven_minimum_shortfall_usd"])
+            self.assertIsNone(row["complete_schedule_balance_usd"])
+        self.assertIn("CURRENT_USABLE_LIQUIDITY_REQUIRED", {b["code"] for b in windows["blockers"]})
+
     def test_funding_lifecycle_and_fixed_dues_reach_health_without_changing_six_directions(self):
         from test_treasury_company_ct import DAY
         data = scenario()

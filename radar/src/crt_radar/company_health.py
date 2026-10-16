@@ -247,7 +247,7 @@ def build_health_dimensions(*, organs, issuer_id, as_of_ms, residual_change=None
         migration["funding_lifecycle"] = [deepcopy(r) for r in attribution.get("events", []) if valid(r)]
     windows = burden.get("fixed_obligation_windows")
     if (isinstance(windows, dict) and windows.get("as_of_ms") == as_of_ms
-            and valid(windows.get("liquidity_evidence"))
+            and (windows.get("liquidity_evidence") is None or valid(windows["liquidity_evidence"]))
             and all(valid(r) for r in windows.get("confirmed", []) + windows.get("undeclared_terms_scenarios", []))):
         dimensions["liquidity_buffer"]["fixed_obligation_windows"] = deepcopy(windows)
     result = {

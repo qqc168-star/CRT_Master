@@ -854,8 +854,9 @@ def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms
             row["calculation_inputs"][field] = row["components"][label]
         proceeds = raw.get("verified_net_proceeds_usd")
         annual = raw.get("annual_preferred_distributions_usd")
-        if (raw.get("net_proceeds_verification_state") == "VALIDATED"
-                and _text(raw.get("net_proceeds_basis_ref"))
+        net_proceeds_qualified = (raw.get("net_proceeds_verification_state") == "VALIDATED"
+            and _text(raw.get("net_proceeds_basis_ref")))
+        if (net_proceeds_qualified
                 and _text(raw.get("cost_basis_ref"))
                 and _number(proceeds) and proceeds > 0 and _number(annual) and annual >= 0):
             row["effective_preferred_funding_cost"] = _calc(out, key + ".cost",
@@ -879,7 +880,7 @@ def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms
                 "btc_purchase_usd", "other_asset_deployment_usd", "old_claim_retirement_cash_usd",
                 "undeployed_cash_usd")
             values = {f: accounting.get(f) for f in fields} if isinstance(accounting, dict) else {}
-            bound = (isinstance(accounting, dict) and _text(accounting.get("funding_round_id"))
+            bound = (net_proceeds_qualified and isinstance(accounting, dict) and _text(accounting.get("funding_round_id"))
                 and _text(accounting.get("attribution_basis_ref"))
                 and all(_number(values.get(f)) and values[f] >= 0 for f in fields)
                 and _number(proceeds) and proceeds > 0)
