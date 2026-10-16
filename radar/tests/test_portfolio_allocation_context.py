@@ -1190,5 +1190,254 @@ class StrategicBtcPortfolioIntegrationTests(
         )
 
 
+class QuantitativeEquityInspectionTests(unittest.TestCase):
+    """Only the new composition/sensitivity boundary; reuse existing fixtures."""
+
+    def view(self, p=None, residual=None):
+        from crt_radar.portfolio_allocation_context import build_quantitative_equity_inspection
+        return build_quantitative_equity_inspection(p if p is not None else pack_for(), residual)
+
+    def rows(self, p=None, residual=None):
+        return {r["metric"]: r for r in self.view(p, residual)["rows"]}
+
+    def test_numeric_comparison_is_deterministic_without_mutation(self):
+        from copy import deepcopy
+        p = pack_for()
+        original = deepcopy(p)
+        a, b = self.view(p), self.view(p)
+        self.assertEqual(a, b)
+        self.assertEqual(p, original)
+        row = self.rows(p)["btc_per_diluted_share"]
+        self.assertAlmostEqual(row["relative_delta"], 120 / 110 - 110 / 110)
+        self.assertEqual(row["unit"], "BTC/share")
+        self.assertEqual(row["MSTR"]["qualification"], "RESEARCH_ONLY")
+        self.assertTrue(row["MSTR"]["source_ref"])
+        self.assertEqual(row["MSTR"]["clocks"][0]["effective_time"], CURRENT_TIME)
+
+    def test_missing_shares_preserve_cash_and_other_issuer(self):
+        p = pack_for()
+        for f in p["asset_facts"]["items"]:
+            if f.get("asset_id") == "MSTR" or f.get("issuer_id") == ISSUER["MSTR"]:
+                if f.get("ct_section") == "per_share_asset_engine":
+                    f["evidence"]["current"].update(diluted_shares=None, btc_per_diluted_share=None)
+        rows = self.rows(p)
+        self.assertIsNone(rows["btc_per_diluted_share"]["MSTR"]["value"])
+        self.assertEqual(rows["usable_cash"]["MSTR"]["value"], 500)
+        self.assertIsNotNone(rows["btc_per_diluted_share"]["ASST"]["value"])
+        self.assertEqual(rows["maximum_drawdown"]["MSTR"]["qualification"], "NOT_RUN")
+
+    def test_wrong_issuer_future_and_duplicate_organs_are_not_comparable(self):
+        from copy import deepcopy
+        for change in ("issuer", "future", "duplicate", "basis"):
+            with self.subTest(change=change):
+                p = pack_for()
+                f = p["asset_facts"]["items"][0]
+                if change == "issuer":
+                    f["asset_id"] = "MSTR"
+                    f["issuer_id"] = ISSUER["ASST"]
+                elif change == "future":
+                    f["evidence"]["current"]["retrieval_time"] = REPLAY_TIME + 1
+                elif change == "basis":
+                    f["evidence"]["current"]["basis_ref"] = "warrants-excluded-different-scope"
+                else:
+                    p["asset_facts"]["items"].append(deepcopy(f))
+                self.assertIsNone(self.rows(p)["btc_per_diluted_share"]["relative_delta"])
+
+    def test_asserted_residual_scenario_is_not_financial_evidence(self):
+        for issue in ("double_convertible", "warrants", "preferred_unknown", "unsettled"):
+            p, ri = pack_for(), residual_inputs()
+            if issue in ("double_convertible", "warrants"):
+                ri["MSTR"]["current"]["capital_structure_coherence_state"] = "BLOCKED"
+            elif issue == "preferred_unknown":
+                p["asset_facts"]["items"][1]["evidence"]["current"]["senior_claims_usd"] = None
+            # An unbound scenario, including claimed proceeds not settled, is
+            # never admitted merely because the old scalar helper could run.
+            row = self.rows(p, ri)["residual_per_diluted_share"]
+            self.assertIsNone(row["MSTR"]["value"], issue)
+            self.assertIsNotNone(self.rows(p, ri)["btc_holdings"]["MSTR"]["value"])
+
+    def test_zero_negative_residual_levels_survive_without_percentage_advantage(self):
+        from copy import deepcopy
+        p, ri = pack_for(), residual_inputs()
+        asset_row = p["asset_facts"]["items"][0]["evidence"]["current"]
+        for value in (0, -500):
+            with self.subTest(value=value):
+                ri["MSTR"]["current"].update(deepcopy(asset_row))
+                ri["MSTR"]["current"].update(residual_inputs()["MSTR"]["current"])
+                burden = p["asset_facts"]["items"][1]["evidence"]["current"]
+                burden["senior_claims_usd"] = 120 * 83000 + 500 - value * 110
+                self.assertAlmostEqual(self.rows(p, ri)["residual_per_diluted_share"]["MSTR"]["value"], value)
+
+    def test_catch_up_does_not_mean_break_even_or_positive_return(self):
+        from crt_radar.portfolio_allocation_context import residual_recovery_scenario
+        r = residual_recovery_scenario(a_m=.896, a_a=.652, g_m=1, v_m=1, v_a=1,
+                                      assumption_ref="synthetic:equal-terminal-multiple", comparable_scope=True)
+        self.assertAlmostEqual(r["catch_up_growth_multiple"], 1.3742331288)
+        self.assertAlmostEqual(r["asst_break_even_growth_multiple"], 1.5337423313)
+        self.assertAlmostEqual(r["asst_return_at_catch_up"], -.104)
+        self.assertEqual(r["qualification"], "RESEARCH_ONLY")
+        self.assertEqual(r["action_output"], "NONE")
+
+    def test_reported_cash_without_use_attestation_is_not_usable_cash(self):
+        p = pack_for()
+        p["asset_facts"]["items"][1]["evidence"]["current"].pop("cash_usability_basis_ref")
+        rows = self.rows(p)
+        self.assertIsNone(rows["usable_cash"]["MSTR"]["value"])
+        self.assertIsNone(rows["cash_carry_coverage"]["MSTR"]["value"])
+        self.assertEqual(rows["btc_holdings"]["MSTR"]["value"], 120)
+
+    def test_terminal_valuation_ratio_changes_catch_up_requirement(self):
+        from crt_radar.portfolio_allocation_context import residual_recovery_scenario
+        for ratio, expected in ((.8, 1.717791411), (1, 1.374233129), (1.2, 1.145194274)):
+            r = residual_recovery_scenario(a_m=.896, a_a=.652, g_m=1, v_m=1, v_a=ratio,
+                                          assumption_ref="synthetic:sensitivity", comparable_scope=True)
+            self.assertAlmostEqual(r["catch_up_growth_multiple"], expected, places=8)
+
+    def test_nonpositive_nonfinite_or_unknown_scenario_cannot_create_threshold(self):
+        from crt_radar.portfolio_allocation_context import residual_recovery_scenario
+        args = dict(a_m=.896, a_a=.652, g_m=1, v_m=1, v_a=1,
+                    assumption_ref="synthetic", comparable_scope=True)
+        for field in ("a_m", "a_a", "g_m", "v_m", "v_a"):
+            for value in (0, -1, None, True, float("inf"), float("nan"), 10**1000):
+                with self.subTest(field=field, kind=type(value).__name__):
+                    self.assertEqual(residual_recovery_scenario(**{**args, field: value})["qualification"], "BLOCKED")
+        self.assertEqual(residual_recovery_scenario(**{**args, "comparable_scope": False})["qualification"], "BLOCKED")
+
+    def test_formal_mnav_and_percentile_reuse_original_validator(self):
+        from test_treasury_valuation_context import inputs, NOW
+        from crt_radar.treasury_company_ct import build_treasury_valuation_context, ISSUERS
+        p = {"generated_at_ms": NOW, "asset_facts": {"items": []}}
+        for asset in ("MSTR", "ASST"):
+            v = build_treasury_valuation_context(asset_id=asset, as_of_ms=NOW, **inputs(asset))
+            v["own_history_empirical_cdf_pct"]["value"] = 123456  # copied scalar must not be trusted
+            p["asset_facts"]["items"].append(dict(asset_id=asset, issuer_id=ISSUERS[asset],
+                fact_type="TREASURY_VALUATION_CONTEXT", evidence=v))
+        rows = self.rows(p)
+        self.assertEqual(rows["diluted_mnav"]["MSTR"]["qualification"], "QUALIFIED")
+        self.assertLessEqual(rows["own_history_percentile"]["MSTR"]["value"], 100)
+        self.assertAlmostEqual(rows["btc_purchasing_power_return"]["MSTR"]["value"], 50)
+        self.assertIn("NOT_TOTAL_RETURN", rows["equity_price_return"]["MSTR"]["reason"])
+        p["asset_facts"]["items"][0]["evidence"]["mnav_observations"][-1]["input_evidence"]["btc_price_usd"]["currency"] = "USDT"
+        self.assertIsNone(self.rows(p)["diluted_mnav"]["MSTR"]["value"])
+
+    def test_no_chart_from_missing_or_noncomparable_history(self):
+        p = pack_for()
+        self.assertEqual(self.view(p)["chart_data"]["points"], [])
+        for f in p["asset_facts"]["items"]:
+            if f.get("ct_section") == "per_share_asset_engine":
+                e = f["evidence"]
+                e["observations"] = [e["previous"], e["current"]]
+        chart = self.view(p)["chart_data"]
+        self.assertEqual(chart["qualification"], "RESEARCH_ONLY")
+        self.assertEqual(len(chart["MSTR"]), 2)
+        self.assertEqual(chart["MSTR"][0]["value"], 100)
+        p["asset_facts"]["items"][0]["evidence"]["observations"][0]["basis_ref"] = "old-share-scope"
+        self.assertEqual(self.view(p)["chart_data"]["points"], [])
+
+    def test_h1_pending_never_becomes_season_health_clearance_or_allocation(self):
+        p = pack_for()
+        p["btc_control_transfer_validation_evidence"] = {"research_state": "VALIDATION_PENDING"}
+        v = self.view(p)
+        self.assertIsNone(v["capital_summary"]["formal_season"])
+        self.assertIsNone(v["capital_summary"]["target_weights"])
+        self.assertFalse(v["capital_summary"]["q1_state_inferred"])
+        self.assertEqual(v["action_output"], "NONE")
+        p["common_equity_health"] = build_common_equity_health(p)
+        compact = compact_portfolio_allocation_context_for_bridge(p)
+        self.assertIn("quantitative_inspection", p["common_equity_health"])
+        self.assertNotIn("quantitative_inspection", compact["common_equity_health"])
+
+    def test_ct_recomputes_instead_of_accepting_a_copied_btc_per_share(self):
+        from copy import deepcopy
+        from crt_radar.treasury_company_ct import build_treasury_company_ct
+        p = pack_for()
+        source = p["asset_facts"]["items"][0]["evidence"]
+        history = [deepcopy(source[label]) for label in ("previous", "current")]
+        history[-1]["btc_per_diluted_share"] = 999
+        ct = build_treasury_company_ct(issuer_id=ISSUER["MSTR"], as_of_ms=REPLAY_TIME,
+                                       asset_history=history)
+        self.assertAlmostEqual(ct["organs"]["per_share_asset_engine"]["current"]
+                               ["btc_per_diluted_share"], 120 / 110)
+
+    def test_inspection_rechecks_btc_per_share_levels_growth_and_chart(self):
+        p = pack_for()
+        section = p["asset_facts"]["items"][0]["evidence"]
+        section["previous"]["btc_per_diluted_share"] = 99
+        section["current"]["btc_per_diluted_share"] = 999
+        section["observations"] = [section["previous"], section["current"]]
+        other = p["asset_facts"]["items"][4]["evidence"]
+        other["observations"] = [other["previous"], other["current"]]
+        rows = self.rows(p)
+        self.assertAlmostEqual(rows["btc_per_diluted_share"]["MSTR"]["value"], 120 / 110)
+        self.assertAlmostEqual(rows["btc_per_share_growth"]["MSTR"]["value"], 100 * (120 / 110 - 1))
+        self.assertAlmostEqual(self.view(p)["chart_data"]["MSTR"][-1]["value"], 100 * 120 / 110)
+
+    def test_reported_derived_ratio_cannot_bypass_missing_or_invalid_components(self):
+        from copy import deepcopy
+        for field, value in (("diluted_shares", None), ("diluted_shares", 0),
+                             ("diluted_shares", -1), ("btc_holdings", None)):
+            with self.subTest(field=field, value=value):
+                p = pack_for()
+                row = p["asset_facts"]["items"][0]["evidence"]["current"]
+                row[field] = value
+                row["btc_per_diluted_share"] = 999
+                p["asset_facts"]["items"].append({"issuer_id": ISSUER["MSTR"],
+                    "fact_type": "ISSUER_CT_SOURCE_BINDING", "evidence": {"observations": [deepcopy(row)]}})
+                rows = self.rows(p)
+                self.assertIsNone(rows["btc_per_diluted_share"]["MSTR"]["value"])
+                self.assertEqual(rows["btc_per_diluted_share"]["MSTR"]["qualification"], "BLOCKED")
+                self.assertIsNotNone(rows["usable_cash"]["MSTR"]["value"])
+                self.assertIsNotNone(rows["btc_per_diluted_share"]["ASST"]["value"])
+
+    def residual_price_case(self, *, price_basis=None, price_shares=None):
+        from copy import deepcopy
+        from test_treasury_valuation_context import metadata
+        from crt_radar.treasury_company_ct import build_treasury_valuation_context
+        p, ri = pack_for(), residual_inputs(mstr_prices=(1, 1))
+        a = p["asset_facts"]["items"][0]["evidence"]["current"]
+        p["asset_facts"]["items"][1]["evidence"]["current"]["senior_claims_usd"] = 0
+        ri["MSTR"]["current"].update(deepcopy(a))
+        ri["MSTR"]["current"].update(residual_inputs(mstr_prices=(1, 1))["MSTR"]["current"])
+        v = p["asset_facts"]["items"][3]["evidence"]
+        raw = {**deepcopy(v["current_observation"]), **metadata("MSTR", CURRENT_TIME),
+               "basis_ref": "synthetic:valuation-scope"}
+        raw["share_basis_ref"] = a["basis_ref"] if price_basis is None else price_basis
+        raw["input_evidence"]["diluted_shares"]["basis_ref"] = raw["share_basis_ref"]
+        if price_shares is not None:
+            # An independently coherent mNAV can still use shares inconsistent
+            # with the CT residual; its own validation must not be weakened.
+            raw["diluted_shares"] = price_shares
+            raw["input_evidence"]["diluted_shares"]["value"] = price_shares
+            raw["diluted_equity_market_cap_usd"] = price_shares * raw["equity_price_usd"]
+            raw["mnav"] = raw["diluted_equity_market_cap_usd"] / raw["btc_market_value_usd"]
+        p["asset_facts"]["items"][3]["evidence"] = build_treasury_valuation_context(
+            asset_id="MSTR", as_of_ms=REPLAY_TIME, mnav_history=[raw])
+        return p, ri
+
+    def test_residual_per_dollar_same_share_basis_positive_control(self):
+        p, ri = self.residual_price_case()
+        rows = self.rows(p, ri)
+        residual = (120 + 500) / 110
+        self.assertAlmostEqual(rows["residual_per_diluted_share"]["MSTR"]["value"], residual)
+        self.assertAlmostEqual(rows["residual_per_dollar"]["MSTR"]["value"], residual / (1.05 * 120 / 110))
+
+    def test_residual_per_dollar_cannot_mix_share_basis_or_share_count(self):
+        for changes in ({"price_basis": "synthetic:different-dilution-or-split-scope"},
+                        {"price_shares": 220}):
+            with self.subTest(changes=changes):
+                p, ri = self.residual_price_case(**changes)
+                rows = self.rows(p, ri)
+                self.assertIsNotNone(rows["residual_per_diluted_share"]["MSTR"]["value"])
+                self.assertEqual(rows["diluted_mnav"]["MSTR"]["qualification"], "QUALIFIED")
+                self.assertIsNone(rows["residual_per_dollar"]["MSTR"]["value"])
+
+    def test_missing_residual_share_basis_is_already_blocked(self):
+        p, ri = self.residual_price_case()
+        p["asset_facts"]["items"][0]["evidence"]["current"].pop("basis_ref")
+        rows = self.rows(p, ri)
+        self.assertIsNone(rows["residual_per_dollar"]["MSTR"]["value"])
+        self.assertEqual(rows["diluted_mnav"]["MSTR"]["qualification"], "QUALIFIED")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
