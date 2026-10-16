@@ -167,6 +167,26 @@ as-of semantics. Missing/ambiguous periods block the funding-use claim.
 MSTR ADSO effective time remains unproven; ASST stock-count changes and future
 SATA dividend terms alone do not establish funding proceeds or usable capacity.
 
+### Independent Strategy period facts（Strategy 獨立期間事實）
+
+MSTR 的 SEC 主文件明確引用附件時，可在同一封存 manifest（資料清單）中加入
+附件項目及 `parent_document`（主文件的 `primary`、`raw_sha256`、`retrieved_at_ms`）。
+附件原文使用 `MSTR-<accession>-<primary>.html`，主文件原路徑不變。讀取器驗證
+同一 accession、CIK、原始主文件連結、兩份原文雜湊、接受時間及實際本機可見時間。
+未引用、竄改或尚未取得的附件不能提供事實；不把附件 bytes（位元組）拼接成主文件。
+
+ATM（市價增資）購幣、ATM 回購 STRC、USD Cash（美元現金）購幣與現金回購 STRC
+分別讀取，不依賴另一用途或餘額截面存在。新增普通股及已披露淨募集額、BTC 購入
+總數／成本、STRC 回購股數／支付總額留在既有 `source_binding`，標示期間、原文
+來源、數值口徑與重疊關係。來源淨款、用途分項與購買總額不能重複相加；四捨五入
+總成本也不能重算或取代發行人平均價。未披露的回購資金來源、消滅請求權、年度
+負擔變化及每筆購幣的 BTC 數量分配仍未知。
+
+原有保護保持：`execution_time = None`、不提供行動用 `effective_time`、
+`active_for_calculation = false`；期間末或公告時鐘都不是執行／交割時間。
+USD Reserve（美元儲備）與 USD Cash 分離；期間事實不自動成為可用資本、
+Company Health（公司健康）放行、ADSO 生效證明或完整每股剩餘價值。
+
 ### Strive financing lifecycle and dated fixed obligations（Strive 融資階段與定期義務）
 
 既有 Strive 發行人接入器的 `SATS_TERMS` 模式使用已核驗的 Strive CIK
