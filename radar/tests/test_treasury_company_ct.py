@@ -15,6 +15,7 @@ from crt_radar.evidence_pack import build_evidence_pack
 from crt_radar.treasury_company_ct import (FORMAL_MNAV_REF, admit_saylortracker_sensor,
     build_net_bps_attribution, build_treasury_company_ct, import_saylortracker_offline_csv,
     validate_pit_replay)
+from crt_radar.treasury_company_ct import build_fixed_obligation_windows
 from test_first_evidence_slice import gate
 from test_reflexivity_overlay import empty_section
 
@@ -97,6 +98,84 @@ def kwargs():
 
 
 class TreasuryCompanyCtTests(unittest.TestCase):
+    def windows(self, **changes):
+        args = dict(issuer_id=ISSUER, as_of_ms=T2,
+            burden=burden(usd_cash_usable_for_carry=True, cash_usability_basis_ref="unrestricted",
+                liquidity_coverage_state="COMPLETE", liquidity_scope_ref="ALL_USABLE_LIQUIDITY",
+                liquidity_valid_until_ms=T2+DAY, liquidity_validity_basis_ref="current-cash-proof"),
+            obligations=[evidence(source_class="SEC", payment_reference="debt-1:payment-1", due_at_ms=T2+20*DAY,
+                amount_usd=120, obligation_kind="DEBT_PRINCIPAL", recognition="CONFIRMED", amount_basis_ref="contract")],
+            coverage=evidence(coverage_state="COMPLETE", scope_ref="ALL_FIXED_OBLIGATIONS", covered_until_ms=T2+180*DAY))
+        args.update(changes)
+        return build_fixed_obligation_windows(**args)
+
+    def test_fixed_dates_prove_shortfall_without_survival_forecast(self):
+        result = self.windows()
+        self.assertEqual([r["days"] for r in result["windows"]], [30, 90, 180])
+        self.assertEqual(result["qualified_usable_liquidity_usd"], 100)
+        self.assertEqual(result["windows"][0]["proven_minimum_shortfall_usd"], 20)
+        self.assertEqual(result["first_proven_shortfall_date_ms"], T2+20*DAY)
+
+    def test_existing_maturity_is_reused_but_duplicate_principal_is_not_added_twice(self):
+        maturity = evidence(source_class="SEC", maturity_id="bond", payment_reference="bond:final-principal",
+            due_at_ms=T2+50*DAY, principal_due_usd=150, basis_ref="bond-contract")
+        result = self.windows(obligations=[], maturities=[maturity])
+        self.assertEqual(result["windows"][1]["confirmed_total_usd"], 150)
+        duplicate = {**maturity, "amount_usd": 150, "amount_basis_ref": "bond-contract",
+            "recognition": "CONFIRMED", "obligation_kind": "DEBT_PRINCIPAL"}
+        result = self.windows(obligations=[duplicate], maturities=[maturity])
+        self.assertFalse(result["schedule_complete"])
+        self.assertEqual(result["confirmed"], [])
+        self.assertFalse(self.windows(obligations=[], maturities={})["schedule_complete"])
+
+    def test_incomplete_schedule_preserves_known_due_but_cannot_claim_funded(self):
+        result = self.windows(coverage=None)
+        self.assertEqual(result["windows"][0]["known_confirmed_subtotal_usd"], 120)
+        self.assertIsNone(result["windows"][0]["confirmed_total_usd"])
+        self.assertIsNone(result["windows"][0]["complete_schedule_balance_usd"])
+        self.assertEqual(result["windows"][0]["proven_minimum_shortfall_usd"], 20)
+
+    def test_undeclared_dividend_scenario_not_confirmed_obligation(self):
+        dividend = evidence(source_class="SEC", payment_reference="SATA:future", due_at_ms=T2+60*DAY,
+            amount_usd=30, obligation_kind="PREFERRED_DIVIDEND", recognition="UNDECLARED_TERMS_SCENARIO",
+            security_outstanding_at_ms=T1, security_id="SATA", amount_basis_ref="future-terms-scenario")
+        result = self.windows(obligations=[dividend])
+        self.assertEqual(result["windows"][1]["confirmed_total_usd"], 0)
+        self.assertEqual(result["windows"][1]["undeclared_terms_scenario_usd"], 30)
+        dividend["security_outstanding_at_ms"] = T2+DAY
+        self.assertFalse(self.windows(obligations=[dividend])["schedule_complete"])
+
+    def test_unknown_cash_and_stale_cash_do_not_become_zero(self):
+        for cash in (burden(), burden(usd_cash_usable_for_carry=True, cash_usability_basis_ref="cash",
+                liquidity_valid_until_ms=T2-1, liquidity_validity_basis_ref="expired")):
+            result = self.windows(burden=cash)
+            self.assertIsNone(result["qualified_usable_liquidity_usd"])
+            self.assertIsNone(result["windows"][0]["proven_minimum_shortfall_usd"])
+
+    def test_known_cash_insufficiency_not_company_shortfall_without_complete_liquidity(self):
+        cash = burden(usd_cash_usable_for_carry=True, cash_usability_basis_ref="cash",
+                liquidity_valid_until_ms=T2+DAY, liquidity_validity_basis_ref="current")
+        result = self.windows(burden=cash)
+        self.assertEqual(result["windows"][0]["known_cash_only_gap_usd"], 20)
+        self.assertIsNone(result["windows"][0]["proven_minimum_shortfall_usd"])
+        self.assertIsNone(result["first_proven_shortfall_date_ms"])
+
+    def test_duplicate_payments_or_future_visibility_cannot_fill_schedule(self):
+        row = evidence(source_class="SEC", payment_reference="one-payment", due_at_ms=T2+DAY,
+            amount_usd=10, obligation_kind="DEBT_INTEREST", recognition="CONFIRMED", amount_basis_ref="contract")
+        result = self.windows(obligations=[row, deepcopy(row)])
+        self.assertEqual(result["confirmed"], [])
+        self.assertFalse(result["schedule_complete"])
+        row["retrieval_time"] = T2+1
+        self.assertEqual(self.windows(obligations=[row])["confirmed"], [])
+
+    def test_priced_funding_cannot_enter_conversion_health_route(self):
+        raw = conversion(funding_stage="PRICED")
+        data = kwargs()
+        data["capital_conversion_events"] = [raw]
+        result = build_treasury_company_ct(**data)
+        self.assertEqual(result["organs"]["capital_conversion"]["events"], [])
+
     def test_v011_pit_semantics_and_future_leakage_are_fail_closed(self):
         row = evidence(T1, disclosure_time=T1 + 1, first_seen_time=T1 + 2, retrieval_time=T1 + 3)
         self.assertEqual(validate_pit_replay(row, issuer_id=ISSUER, replay_at=T1, mode="DECISION_REPLAY")["state"], "BLOCKED")

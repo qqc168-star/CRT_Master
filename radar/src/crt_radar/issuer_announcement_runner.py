@@ -704,7 +704,7 @@ def _normalized_official_facts(
             build_strive_capital_reflexivity_input,
         )
 
-        for mode in ("ASST_CAPITAL", "SATA_TERMS"):
+        for mode in ("ASST_CAPITAL", "SATA_TERMS", "SATS_TERMS"):
             try:
                 result = build_strive_capital_reflexivity_input(
                     raw,
@@ -712,6 +712,7 @@ def _normalized_official_facts(
                     document_id=str(event["event_id"]),
                     accepted_at_ms=accepted_at_ms,
                     retrieved_at_ms=observed_at_ms,
+                    issuer_id="CIK-0001920406",
                 )
             except StriveCapitalFactError:
                 continue

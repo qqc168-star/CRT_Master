@@ -10,6 +10,14 @@ from crt_radar.strive_capital_fact_adapter import (
 
 ACCEPTED = 1787788800000
 
+# Synthetic wording shaped like the official pricing sheet, not live acceptance.
+SATS_TERMS = """Strive, Inc. PRICING TERM SHEET 15.00% Series A Perpetual SATS Preferred Stock
+Amount Offered 7,000,000 shares of SATS Stock. Public Offering Price $90.00 per share of SATS Stock.
+Trade Date October 16, 2026. Settlement Date October 20, 2026. Stated Amount $100 per share of SATS Stock.
+Ranking senior to Common Stock; junior to indebtedness. Liquidation Preference Initially, $100 per share.
+Regular Dividends rate per annum equal to 15.00% on the Stated Amount.
+CUSIP / ISIN Numbers for SATS Stock 862945 409 / US8629454096"""
+
 
 def fact_map(result):
     return {
@@ -26,6 +34,42 @@ def blocker_codes(result):
 
 
 class StriveCapitalFactAdapterTests(unittest.TestCase):
+    def sats(self, text=SATS_TERMS, **changes):
+        args = dict(mode="SATS_TERMS", issuer_id="CIK-0001920406", document_id="synthetic-sats",
+                    accepted_at_ms=1792156800000, retrieved_at_ms=1792156801000)
+        args.update(changes)
+        return build_strive_capital_reflexivity_input(text, **args)
+
+    def test_sats_pricing_is_not_settlement_or_listing(self):
+        result = self.sats()
+        terms = fact_map(result)["SATS_OFFERING_TERMS"]["value"]
+        self.assertEqual(terms["offering_stage"], "PRICED")
+        self.assertEqual(terms["conditional_gross_proceeds_usd"], 630_000_000)
+        self.assertEqual(terms["conditional_initial_claims_usd"], 700_000_000)
+        self.assertEqual(terms["conditional_annual_dividends_usd"], 105_000_000)
+        self.assertEqual(terms["cusip"], "862945409")
+        self.assertIsNone(terms["settled_net_proceeds_usd"])
+        self.assertIsNone(terms["actual_outstanding_shares"])
+        self.assertEqual(terms["listing_qualification"], "NOT_PROVEN")
+        # Even after the scheduled date the original pricing document cannot close itself.
+        later = self.sats(accepted_at_ms=1793000000000, retrieved_at_ms=1793000001000)
+        self.assertEqual(fact_map(later)["SATS_OFFERING_TERMS"]["value"]["offering_stage"], "PRICED")
+
+    def test_sats_identity_and_missing_visibility_fail_closed(self):
+        for args in (dict(issuer_id="CIK-0001415404"), dict(issuer_id=None), dict(accepted_at_ms=None),
+                     dict(retrieved_at_ms=1)):
+            self.assertEqual(self.sats(**args)["issuer_facts"]["items"], [])
+        self.assertEqual(self.sats(SATS_TERMS.replace("Strive, Inc.", "EchoStar Corporation"))["issuer_facts"]["items"], [])
+
+    def test_sats_stage_and_ambiguous_price_are_not_inferred(self):
+        proposed = self.sats("Strive, Inc. Proposed Initial Public Offering of 15.00% Series A Perpetual SATS Preferred Stock")
+        self.assertEqual(fact_map(proposed)["SATS_OFFERING_TERMS"]["value"]["offering_stage"], "ANNOUNCED")
+        ambiguous = self.sats(SATS_TERMS + " Public Offering Price $85.00 per share of SATS Stock.")
+        self.assertIsNone(fact_map(ambiguous)["SATS_OFFERING_TERMS"]["value"]["offering_price_usd"])
+        closed = self.sats(SATS_TERMS + " The issuance and sale of the SATS Stock was completed on October 15, 2026.")
+        self.assertEqual(fact_map(closed)["SATS_OFFERING_TERMS"]["value"]["offering_stage"], "SETTLED")
+        self.assertIsNone(fact_map(closed)["SATS_OFFERING_TERMS"]["value"]["settled_net_proceeds_usd"])
+
     def test_asst_complete_capital_document(self):
         raw = """
         Strive holds 21,356 bitcoins.

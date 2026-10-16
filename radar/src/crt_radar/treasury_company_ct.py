@@ -405,6 +405,12 @@ def _events(raw: Any, issuer: str, as_of: int, coverage: Any, *, management: boo
             _block(out, claim, "EVENT_IDENTITY_OR_ROUTE_INVALID")
             continue
         row.update(event_id=key, **{f: record[f] for f in fields})
+        if "funding_stage" in record and not (
+                record["funding_stage"] == "SETTLED" and _time(record.get("settlement_time"))
+                and record["settlement_time"] <= record["effective_time"]
+                and _text(record.get("settlement_basis_ref"))):
+            _block(out, claim, "UNSETTLED_FUNDING_NOT_REALIZED_CONVERSION")
+            continue
         # Superseded actions remain traceable but never enter active calculations.
         active = record.get("active_for_calculation")
         row["active_for_calculation"] = active is True
@@ -570,7 +576,8 @@ def build_treasury_company_ct(*, issuer_id: str, as_of_ms: int,
         burden_current: Any = None, burden_previous: Any = None,
         maturities: Any = None, capital_conversion_events: Any = None,
         management_events: Any = None, price_financing_state: Any = None,
-        coverage: Any = None, source_binding: Any = None) -> dict:
+        coverage: Any = None, source_binding: Any = None,
+        preferred_funding_events: Any = None, fixed_obligations: Any = None) -> dict:
     """Synthesize five independent organs. `_pct` changes are fractions (0.1 = 10%)."""
     if not _text(issuer_id) or not _time(as_of_ms):
         raise ValueError("issuer_id and positive integer as_of_ms are required")
@@ -583,6 +590,20 @@ def build_treasury_company_ct(*, issuer_id: str, as_of_ms: int,
         "capital_conversion": _events(capital_conversion_events, issuer_id, as_of_ms, coverage.get("capital_conversion"), management=False),
         "management_evidence": _events(management_events, issuer_id, as_of_ms, coverage.get("management"), management=True),
     }
+    if preferred_funding_events is not None:
+        organs["funding_engine"]["preferred_funding_attribution"] = build_preferred_funding_attribution(
+            events=preferred_funding_events, issuer_id=issuer_id, as_of_ms=as_of_ms)
+    if fixed_obligations is not None:
+        organs["capital_burden_resilience"]["fixed_obligation_windows"] = build_fixed_obligation_windows(
+            burden=burden_current, obligations=fixed_obligations, issuer_id=issuer_id,
+            as_of_ms=as_of_ms, coverage=coverage.get("fixed_obligations"), maturities=maturities)
+    for organ, field in (("funding_engine", "preferred_funding_attribution"),
+                         ("capital_burden_resilience", "fixed_obligation_windows")):
+        section = organs[organ]
+        if field in section and section[field]["blockers"]:
+            section["blockers"].extend({**b, "claim": field + "." + b["claim"]} for b in section[field]["blockers"])
+            if section["state"] == "AVAILABLE":
+                section["state"] = "PARTIAL"
     price = _price(price_financing_state, issuer_id, as_of_ms)
     sections = {**organs, "price_financing_state": price}
     blockers = [{"section": name, **blocker} for name, section in sections.items() for blocker in section["blockers"]]
@@ -801,13 +822,31 @@ def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms
         key = raw.get("event_id")
         if (not _text(key) or ids[key] != 1 or raw.get("source_class") not in OFFICIAL_CLASSES
                 or meta["source_semantic"]["identity"] in {RESEARCH_IDENTITY, LEGACY_RESEARCH_IDENTITY}
-                or raw.get("active_for_calculation") is not True
+                or (raw.get("active_for_calculation") is not True and raw.get("funding_stage") not in {"ANNOUNCED", "PRICED"})
                 or not _text(raw.get("consequence_basis_ref"))):
             _block(out, "preferred_event", "PREFERRED_EVENT_UNBOUND")
             continue
         row = {**meta, "event_id": key, "basis_ref": raw["consequence_basis_ref"],
                "calculation_inputs": {}, "effective_preferred_funding_cost": None,
                "claim_adjusted_reserve_delta_usd": None, "components": {}}
+        stage = raw.get("funding_stage", "LEGACY_UNSPECIFIED")
+        row["funding_stage"] = stage
+        row["settlement_time"] = raw.get("settlement_time")
+        if stage != "LEGACY_UNSPECIFIED":
+            row["conditional_terms"] = deepcopy(raw.get("conditional_terms"))
+            settled = (stage == "SETTLED" and _time(raw.get("settlement_time"))
+                and raw["settlement_time"] <= raw["effective_time"]
+                and _text(raw.get("settlement_basis_ref")))
+            row["realized_accounting_state"] = "AVAILABLE" if settled else "BLOCKED"
+            if not settled:
+                row["components"] = {k: None for k in (
+                    "ASSET_ACTION", "CLAIM_ACTION", "CARRY", "RESERVE_ACTION", "SHARE_DENOMINATOR")}
+                _block(out, key + ".settlement", "SETTLED_SOURCE_REQUIRED" if stage in {
+                    "ANNOUNCED", "PRICED", "SETTLED"} else "FUNDING_STAGE_UNKNOWN")
+                out["events"].append(row)
+                continue
+        else:
+            row["realized_accounting_state"] = "LEGACY_NOT_SETTLEMENT_PROOF"
         for label, field in (("ASSET_ACTION", "btc_change"), ("CLAIM_ACTION", "senior_claim_change_usd"),
                 ("CARRY", "annual_carry_change_usd"), ("RESERVE_ACTION", "liquidity_change_usd"),
                 ("SHARE_DENOMINATOR", "diluted_share_change")):
@@ -833,8 +872,114 @@ def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms
                 [row["components"]["RESERVE_ACTION"], row["components"]["CLAIM_ACTION"]], lambda a, b: a - b)
         else:
             _block(out, key + ".reserve", "REALIZED_RESERVE_CHANGE_REQUIRED")
+        if stage == "SETTLED":
+            accounting = raw.get("round_accounting")
+            row["round_accounting"] = deepcopy(accounting) if isinstance(accounting, dict) else None
+            fields = ("gross_proceeds_usd", "fees_usd", "new_claims_usd", "extinguished_claims_usd",
+                "btc_purchase_usd", "other_asset_deployment_usd", "old_claim_retirement_cash_usd",
+                "undeployed_cash_usd")
+            values = {f: accounting.get(f) for f in fields} if isinstance(accounting, dict) else {}
+            bound = (isinstance(accounting, dict) and _text(accounting.get("funding_round_id"))
+                and _text(accounting.get("attribution_basis_ref"))
+                and all(_number(values.get(f)) and values[f] >= 0 for f in fields)
+                and _number(proceeds) and proceeds > 0)
+            reconciled = bool(bound and math.isclose(values["gross_proceeds_usd"]-values["fees_usd"], proceeds, abs_tol=.01)
+                and math.isclose(sum(values[f] for f in ("btc_purchase_usd", "other_asset_deployment_usd",
+                    "old_claim_retirement_cash_usd", "undeployed_cash_usd")), proceeds, abs_tol=.01)
+                and _number(row["components"]["CLAIM_ACTION"])
+                and math.isclose(values["new_claims_usd"]-values["extinguished_claims_usd"],
+                    row["components"]["CLAIM_ACTION"], abs_tol=.01))
+            row["deployment_attribution_state"] = "SOURCE_BOUND_RECONCILED" if reconciled else "BLOCKED"
+            if not reconciled:
+                _block(out, key + ".deployment", "ROUND_NET_USES_CLAIMS_AND_ATTRIBUTION_REQUIRED")
         out["events"].append(row)
     return _finish(out, bool(out["events"]))
+
+
+def build_fixed_obligation_windows(*, burden: Any, obligations: Any, issuer_id: str,
+        as_of_ms: int, coverage: Any = None, maturities: Any = None) -> dict:
+    """Dated known obligations vs qualified cash, not a survival forecast.
+
+    A complete schedule is needed to claim sufficiency. A known subtotal may
+    establish a minimum shortfall, never a complete funded/no-gap conclusion.
+    Annual undeclared carry is not silently prorated into confirmed payments.
+    """
+    out = _section()
+    out.update(as_of_ms=as_of_ms, confirmed=[], undeclared_terms_scenarios=[], windows=[],
+        first_proven_shortfall_date_ms=None, action_output="NONE")
+    cash = _burden_snapshot(burden, out, "liquidity", issuer_id, as_of_ms)
+    usable = None
+    if (cash and cash["retrieval_time"] <= as_of_ms and cash.get("cash_usability_basis_ref") and isinstance(burden, dict)
+            and _time(burden.get("liquidity_valid_until_ms"))
+            and burden["liquidity_valid_until_ms"] >= as_of_ms
+            and _text(burden.get("liquidity_validity_basis_ref"))):
+        usable = cash["usable_liquidity_usd"]
+    if usable is None:
+        _block(out, "liquidity", "CURRENT_USABLE_LIQUIDITY_REQUIRED")
+    out["qualified_usable_liquidity_usd"] = usable
+    out["liquidity_evidence"] = cash
+    liquidity_complete = bool(usable is not None and burden.get("liquidity_coverage_state") == "COMPLETE"
+        and burden.get("liquidity_scope_ref") == "ALL_USABLE_LIQUIDITY"
+        and not any(b["claim"].endswith((".reserve", ".liquidity")) for b in out["blockers"]))
+    out["liquidity_complete"] = liquidity_complete
+    if not liquidity_complete:
+        _block(out, "liquidity", "COMPLETE_USABLE_LIQUIDITY_SCOPE_REQUIRED_FOR_COMPANY_SHORTFALL")
+    cover = _metadata(coverage, out, "coverage", issuer_id, as_of_ms, "AUDIT_REPLAY")
+    complete = bool(cover and coverage.get("coverage_state") == "COMPLETE"
+        and coverage.get("scope_ref") == "ALL_FIXED_OBLIGATIONS"
+        and _time(coverage.get("covered_until_ms")) and coverage["covered_until_ms"] >= as_of_ms+180*DAY_MS)
+    raw_rows = list(obligations) if isinstance(obligations, list) else []
+    if maturities is not None and not isinstance(maturities, list):
+        complete = False
+    # Reuse the existing maturity records. A shared economic payment reference
+    # prevents an interest/dividend schedule from counting the same principal twice.
+    for raw in maturities if isinstance(maturities, list) else []:
+        raw_rows.append({**raw, "amount_usd": raw.get("principal_due_usd"),
+            "amount_basis_ref": raw.get("amount_basis_ref", raw.get("basis_ref")),
+            "obligation_kind": "DEBT_PRINCIPAL", "recognition": "CONFIRMED"} if isinstance(raw, dict) else raw)
+    ids = Counter(r.get("payment_reference") for r in raw_rows if isinstance(r, dict) and _text(r.get("payment_reference")))
+    for raw in raw_rows:
+        row = _metadata(raw, out, "obligation", issuer_id, as_of_ms, "AUDIT_REPLAY")
+        if not row:
+            complete = False
+            continue
+        key, due, amount = raw.get("payment_reference"), raw.get("due_at_ms"), raw.get("amount_usd")
+        state, kind = raw.get("recognition"), raw.get("obligation_kind")
+        if (not _text(key) or ids[key] != 1 or not _time(due) or due <= as_of_ms
+                or not _number(amount) or amount < 0 or not _text(raw.get("amount_basis_ref"))
+                or raw.get("source_class") not in OFFICIAL_CLASSES
+                or kind not in {"PREFERRED_DIVIDEND", "DEBT_INTEREST", "DEBT_PRINCIPAL"}
+                or state not in {"CONFIRMED", "UNDECLARED_TERMS_SCENARIO"}
+                or (kind == "PREFERRED_DIVIDEND" and not (
+                    _time(raw.get("security_outstanding_at_ms")) and raw["security_outstanding_at_ms"] <= as_of_ms))):
+            _block(out, "obligation", "PAYMENT_ID_TIME_AMOUNT_OR_ISSUANCE_UNQUALIFIED")
+            complete = False
+            continue
+        row.update(payment_reference=key, due_at_ms=due, amount_usd=amount,
+            obligation_kind=kind, recognition=state, security_id=raw.get("security_id"))
+        out["confirmed" if state == "CONFIRMED" else "undeclared_terms_scenarios"].append(row)
+    if not isinstance(obligations, list):
+        complete = False
+    out["schedule_complete"] = complete
+    if not complete:
+        _block(out, "coverage", "COMPLETE_DATED_FIXED_OBLIGATION_SCHEDULE_REQUIRED")
+    cumulative = 0
+    for due in sorted({r["due_at_ms"] for r in out["confirmed"]}):
+        cumulative += sum(r["amount_usd"] for r in out["confirmed"] if r["due_at_ms"] == due)
+        if liquidity_complete and cumulative > usable:
+            out["first_proven_shortfall_date_ms"] = due
+            break
+    for days in (30, 90, 180):
+        end = as_of_ms+days*DAY_MS
+        subtotal = sum(r["amount_usd"] for r in out["confirmed"] if r["due_at_ms"] <= end)
+        scenario = sum(r["amount_usd"] for r in out["undeclared_terms_scenarios"] if r["due_at_ms"] <= end)
+        out["windows"].append(dict(days=days, known_confirmed_subtotal_usd=subtotal,
+            confirmed_total_usd=subtotal if complete else None,
+            undeclared_terms_scenario_usd=scenario,
+            known_cash_only_gap_usd=max(0, subtotal-usable) if usable is not None else None,
+            proven_minimum_shortfall_usd=max(0, subtotal-usable) if liquidity_complete else None,
+            complete_schedule_balance_usd=usable-subtotal if liquidity_complete and complete else None))
+    return _finish(out, bool(out["confirmed"] or out["undeclared_terms_scenarios"] or usable is not None))
 
 
 def build_treasury_valuation_context(*, asset_id: str, as_of_ms: int,
@@ -983,6 +1128,11 @@ def compact_treasury_valuation_context(pack: dict) -> dict:
         row["preferred_funding_attribution_summary"] = {"state": funding["state"], "research_only": True,
             "events": [{k: e[k] for k in ("event_id", "components", "effective_preferred_funding_cost",
                 "claim_adjusted_reserve_delta_usd")} for e in funding["events"]]}
+        for compact, event in zip(row["preferred_funding_attribution_summary"]["events"], funding["events"]):
+            for field in ("funding_stage", "settlement_time", "realized_accounting_state", "conditional_terms",
+                          "deployment_attribution_state", "round_accounting"):
+                if field in event:
+                    compact[field] = deepcopy(event[field])
         row.update(quality_state=context["state"], context_hash=digest,
             blockers=sorted({b["code"] for b in context["blockers"]
                 if b["claim"] != "btc_per_diluted_share.growth_direction"}))
