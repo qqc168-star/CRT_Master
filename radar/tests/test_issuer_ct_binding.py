@@ -28,7 +28,127 @@ $10.0 million in net proceeds from MSTR Stock sales were used to fund bitcoin pu
 used $2.0 million of USD Cash to fund repurchases of STRC Stock
 """
 
+# Synthetic period with the real disclosure's column shapes; not live acceptance.
+MSTR_PERIOD = """0001050446 TEST ONLY
+During Period September 21, 2026 to September 27, 2026
+$21.0 million in bitcoin purchases were made using net proceeds from MSTR Stock sales
+and $0.5 million in bitcoin purchases were made using USD Cash.
+Strategy used $0.5 million of USD Cash to fund bitcoin purchases.
+Net proceeds are presented net of sales commission.
+Aggregate and average purchase prices are inclusive of fees and expenses.
+<table><tr><td>During Period September 21, 2026 to September 27, 2026</td></tr>
+<tr><td>Security Shares Sold Net Proceeds (in millions)</td></tr>
+<tr><td>MSTR Stock</td><td>125,183</td><td>$ -</td><td>$ 21.0 (3)</td><td>$ 18,807.6</td></tr></table>
+<table><tr><td>During Period September 21, 2026 to September 27, 2026</td></tr>
+<tr><td>BTC Purchased Aggregate BTC Holdings</td></tr>
+<tr><td>250</td><td>$ 21.5</td><td>$ 86,194</td><td>848,250</td><td>$ 64.00</td><td>$ 75,444</td></tr></table>
+<table><tr><td>During Period September 21, 2026 to September 27, 2026</td></tr>
+<tr><td>Security Shares Repurchased Aggregate Purchase Price (in millions)</td></tr>
+<tr><td>STRC Stock (1)</td><td>1,932,145</td><td>$ 192.4</td></tr></table>
+USD Reserve is intended to support the payment of dividends and interest on its outstanding indebtedness.
+As of September 27, 2026, the balances of the USD Reserve and USD Cash were $4.88 billion and $640.5 million, respectively.
+"""
+
 class IssuerCtBindingTests(unittest.TestCase):
+    def test_independent_btc_funding_uses_survive_missing_strc_or_cash_snapshot(self):
+        self.items = []
+        self.add('MSTR', '0001050446 TEST ONLY During Period September 21, 2026 to September 27, 2026 '
+            '$21.0 million in net proceeds from MSTR Stock sales were used to fund bitcoin purchases. '
+            'Strategy used $0.5 million of USD Cash to fund bitcoin purchases.', 30)
+        rows = self.periods(self.inputs()['MSTR'])
+        self.assertEqual({(r['source'], r['destination'], r['amount_usd']) for r in rows},
+            {('MSTR_COMMON_ISSUANCE', 'BTC_PURCHASE', 21e6), ('USD_CASH', 'BTC_PURCHASE', .5e6)})
+        self.assertTrue(all(r['execution_time'] is None for r in rows))
+
+    def test_period_tables_keep_issuance_purchase_and_repurchase_without_inferred_claims(self):
+        self.items = []
+        item = self.add('MSTR', MSTR_PERIOD, 31)
+        data = self.inputs()['MSTR']
+        rows = {r['observation_id'].split(':')[-1]: r for r in self.periods(data)}
+        self.assertEqual(len(rows), 5)  # Repeated cash wording is one source fact.
+        self.assertEqual(rows['common-issuance']['new_common_shares_sold'], 125183)
+        self.assertEqual(rows['common-issuance']['amount_usd'], 21e6)
+        self.assertEqual(rows['btc-purchase-total']['btc_change'], 250)
+        self.assertEqual(rows['btc-purchase-total']['amount_usd'], 21.5e6)
+        self.assertEqual(rows['btc-purchase-total']['reported_average_price_usd'], 86194)
+        self.assertIsNone(rows['btc-purchase'].get('btc_change'))
+        repurchase = rows['strc-repurchase-total']
+        self.assertEqual((repurchase['shares_repurchased'], repurchase['amount_usd']), (1932145, 192.4e6))
+        self.assertEqual(repurchase['source'], 'FUNDING_SOURCE_UNRESOLVED')
+        self.assertTrue(all(r.get('senior_claim_change_usd') is None and r.get('annual_carry_change_usd') is None for r in rows.values()))
+        self.assertTrue(all(r.get('effective_time') is None and r['execution_time'] is None for r in rows.values()))
+        self.assertTrue(all(r['raw_sha256'] == item['raw_sha256'] for r in rows.values()))
+        self.assertEqual(data['funding_instruments'][0]['observed_funding_use_usd'], 21e6)
+        self.assertEqual(rows['btc-purchase-total']['aggregation_role'], 'OVERLAPPING_TOTAL_NOT_ADDITIVE')
+
+    def add_period_exhibit(self):
+        parent = self.add('MSTR', '0001050446 TEST ONLY <a href="mstr-ex99_1.htm">Exhibit 99.1</a>', 32)
+        raw = MSTR_PERIOD.replace('0001050446 TEST ONLY', 'TEST ONLY').encode()
+        child = dict(parent, primary='mstr-ex99_1.htm', raw_sha256=hashlib.sha256(raw).hexdigest(),
+            source_url=_document_url(ASSETS['MSTR']['cik'], parent['accession'], 'mstr-ex99_1.htm'),
+            parent_document={k:parent[k] for k in ('primary','raw_sha256','retrieved_at_ms')})
+        (self.root/'sec-disclosures'/f"MSTR-{child['accession']}-{child['primary']}.html").write_bytes(raw)
+        self.items.append(child)
+        return parent, child
+
+    def test_linked_sec_exhibit_retains_own_hash_and_actual_local_visibility(self):
+        self.items = []
+        parent, child = self.add_period_exhibit()
+        child['retrieved_at_ms'] = NOW
+        data = self.inputs()['MSTR']
+        rows = self.periods(data)
+        self.assertEqual(len(rows), 5)
+        for row in rows:
+            self.assertEqual(row['raw_sha256'], child['raw_sha256'])
+            self.assertEqual(row['source_ref'], child['source_url']+'#sha256='+child['raw_sha256'])
+            self.assertEqual(row['source_evidence']['parent_document']['raw_sha256'], parent['raw_sha256'])
+            self.assertEqual(row['first_seen_time'], NOW)
+            self.assertEqual(row['retrieval_time'], NOW)
+            self.assertNotIn('effective_time', row)
+        self.assertEqual(self.periods(self.inputs(NOW-1)['MSTR']), [])
+
+    def test_exhibit_needs_valid_parent_hash_link_cik_and_clock(self):
+        for mode in ('hash', 'link', 'cik', 'future', 'accepted'):
+            with self.subTest(mode=mode):
+                self.items = []
+                parent, child = self.add_period_exhibit()
+                parent_path = self.root/'sec-disclosures'/f"MSTR-{parent['accession']}.html"
+                if mode == 'hash':
+                    child['parent_document']['raw_sha256'] = '0'*64
+                elif mode in ('link','cik'):
+                    raw = parent_path.read_bytes().replace(b'mstr-ex99_1.htm', b'unlinked.htm') if mode == 'link' else parent_path.read_bytes().replace(b'0001050446', b'0001920406')
+                    parent_path.write_bytes(raw)
+                    parent['raw_sha256'] = child['parent_document']['raw_sha256'] = hashlib.sha256(raw).hexdigest()
+                elif mode == 'future':
+                    parent['retrieved_at_ms'] = child['parent_document']['retrieved_at_ms'] = NOW+1
+                else:
+                    child['accepted'] = '2026-09-28T11:59:00Z'
+                self.assertEqual(self.periods(self.inputs()['MSTR']), [])
+
+    def test_missing_or_ambiguous_table_does_not_erase_independent_funding_fact(self):
+        self.items = []
+        table = '<table><tr><td>During Period Shares Repurchased Aggregate Purchase Price (in millions)</td></tr><tr><td>STRC Stock (1) 2 $ 3.0</td></tr></table>'
+        self.add('MSTR', MSTR_PERIOD+table, 33)
+        data = self.inputs()['MSTR']
+        rows = self.periods(data)
+        self.assertTrue(any(r['observation_id'].endswith(':btc-purchase') for r in rows))
+        self.assertFalse(any(r['observation_id'].endswith(':strc-repurchase-total') for r in rows))
+        self.assertIn('ISSUER_PERIOD_TABLE_AMBIGUOUS', str(data['source_binding']['blockers']))
+
+    def test_period_source_facts_reach_pack_but_not_executed_health_routes(self):
+        self.items = []
+        self.add('MSTR', MSTR_PERIOD, 34)
+        with patch('crt_radar.daily_evidence_runner.run_source_gate', return_value=gate(0)):
+            pack = run_daily_evidence(None, observation_db=self.root/'period.sqlite3',
+                issuer_ct_archive=self.root, now_ms=NOW, generated_at_ms=NOW)
+        fact = next(f for f in pack['asset_facts']['items'] if f.get('fact_type') == 'ISSUER_CT_SOURCE_BINDING'
+                    and f.get('issuer_id') == 'CIK-0001050446')
+        self.assertEqual(len(self.periods({'source_binding':fact['evidence']})), 5)
+        health = _bridge_market_context(pack)['common_equity_health']['assets']['MSTR']
+        self.assertEqual(health['health_direction'], 'BLOCKED')
+        self.assertIsNone(health['net_residual_value_per_diluted_share'])
+        self.assertEqual(health['company_health']['capital_engine']['current_route_count'], 0)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
