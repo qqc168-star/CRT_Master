@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
+from datetime import datetime, timezone
 from html.parser import HTMLParser
 from typing import Any
 
@@ -16,6 +18,81 @@ ASST_SECURITY_ID = "ASST"
 SATA_SECURITY_ID = "SATA"
 EXTERNAL_ACTION_AUTHORITY = "NONE"
 EMPTY_REASON = "VERIFIED_NO_MATCH"
+
+
+def _sats_offering(text, source_ref, accepted, retrieved, issuer_id):
+    """Read Strive's offering disclosure, never infer closing from a due date.
+
+    Numeric terms describe the offer, not circulating shares or received cash.
+    Identity is supplied by the existing CIK-verified issuer ingestion boundary.
+    """
+    blockers, facts = [], []
+    def block(code):
+        blockers.append(_blocker(code, ["SATS_OFFERING_TERMS"], code))
+    if (issuer_id != ISSUER_ID or not re.search(r"Strive,?\s+Inc\.", text, re.I)
+            or not re.search(r"Series A Perpetual SATS Preferred Stock", text, re.I)):
+        block("SATS_STRIVE_SECURITY_IDENTITY_UNVERIFIED")
+    if not accepted or not retrieved or retrieved < accepted:
+        block("SATS_DISCLOSURE_VISIBILITY_UNVERIFIED")
+    if blockers:
+        return _result(facts=facts, blockers=blockers, security_id="SATS", source_ref=source_ref, mode="SATS_TERMS")
+
+    def number(pattern):
+        values = {float(v.replace(",", "")) for v in re.findall(pattern, text, re.I)}
+        value = next(iter(values)) if len(values) == 1 else None
+        return value if value is not None and math.isfinite(value) and value > 0 else None
+    def date(pattern):
+        values = set(re.findall(pattern, text, re.I))
+        if len(values) != 1:
+            return None
+        try:
+            return int(datetime.strptime(next(iter(values)), "%B %d, %Y").replace(tzinfo=timezone.utc).timestamp()*1000)
+        except ValueError:
+            return None
+
+    shares = number(r"Amount Offered\s+([\d,]+) shares of SATS Stock")
+    price = number(r"Public Offering Price\s+\$([\d,.]+) per share of SATS Stock")
+    if shares is None and "Amount Offered" not in text:
+        shares = number(r"underwritten offering.{0,35}?of ([\d,]+) shares")
+    if price is None and "Public Offering Price $" not in text:
+        price = number(r"public offering price of \$([\d,.]+) per share")
+    stated = number(r"Stated Amount\s+\$([\d,.]+) per share of SATS Stock")
+    rate = number(r"rate per annum equal to ([\d.]+)% on the Stated Amount")
+    initial_claim = number(r"Liquidation Preference\s+Initially,\s*\$([\d,.]+) per share")
+    expected_close = date(r"Settlement Date\s+([A-Za-z]+ \d{1,2}, \d{4})")
+    trade_date = date(r"Trade Date\s+([A-Za-z]+ \d{1,2}, \d{4})")
+    closed = date(r"issuance and sale of the SATS Stock (?:was|were) completed on ([A-Za-z]+ \d{1,2}, \d{4})")
+    stage = ("SETTLED" if closed and closed <= accepted else "PRICED" if price is not None and shares is not None
+        else "ANNOUNCED" if re.search(r"SUBJECT TO COMPLETION|Proposed Initial Public Offering", text, re.I)
+        else "UNRESOLVED")
+    ranking = re.search(r"Ranking\s+(.*?)\s+Liquidation Preference", text, re.I)
+    cusip = re.search(r"CUSIP / ISIN Numbers for SATS Stock\s+([\d ]{9,11})\s*/\s*(US\w+)", text)
+    listing = date(r"SATS Stock (?:began|commenced) trading on Nasdaq on ([A-Za-z]+ \d{1,2}, \d{4})")
+    terms = dict(issuer_id=ISSUER_ID, security_id="SATS", offering_stage=stage,
+        stated_amount_usd=stated, initial_liquidation_preference_usd=initial_claim,
+        offered_shares=shares, offering_price_usd=price, annual_dividend_rate_pct=rate,
+        conditional_gross_proceeds_usd=shares*price if shares is not None and price is not None else None,
+        conditional_initial_claims_usd=shares*initial_claim if shares is not None and initial_claim is not None else None,
+        conditional_annual_dividends_usd=shares*stated*rate/100 if None not in (shares, stated, rate) else None,
+        scheduled_settlement_date_ms=expected_close, reported_settlement_date_ms=closed,
+        proposed_trade_date_ms=trade_date, listing_effective_date_ms=listing,
+        listing_qualification="REPORTED_LISTED" if listing and listing <= accepted else "NOT_PROVEN",
+        cusip=cusip.group(1).replace(" ", "") if cusip else None,
+        isin=cusip.group(2) if cusip else None,
+        ranking_source_text=ranking.group(1) if ranking else None,
+        # No regex or offer price can prove net cash, actual outstanding or deployment.
+        settled_net_proceeds_usd=None, actual_outstanding_shares=None,
+        actual_deployment_usd=None, evidence_authority="REPORTED_TERMS_ONLY",
+        disclosure_time=accepted, first_seen_time=retrieved, retrieval_time=retrieved,
+        source_ref=source_ref, date_precision="UTC_DATE_NOT_INTRADAY_EFFECTIVE_TIME")
+    for field in ("offered_shares", "offering_price_usd", "stated_amount_usd", "annual_dividend_rate_pct",
+                  "initial_liquidation_preference_usd", "ranking_source_text", "cusip"):
+        if terms[field] is None:
+            block("SATS_" + field.upper() + "_UNRESOLVED")
+    block("SATS_SETTLED_ACCOUNTING_AND_DEPLOYMENT_NOT_BOUND")
+    facts.append(_fact(fact_type="SATS_OFFERING_TERMS", value=terms, unit="STRUCTURED_REPORTED_TERMS",
+        security_id="SATS", accepted_at_ms=accepted, source_ref=source_ref))
+    return _result(facts=facts, blockers=blockers, security_id="SATS", source_ref=source_ref, mode="SATS_TERMS")
 
 
 class StriveCapitalFactError(ValueError):
@@ -385,13 +462,14 @@ def build_strive_capital_reflexivity_input(
     accepted_at_ms: int | None = None,
     retrieved_at_ms: int | None = None,
     require_atm: bool = False,
+    issuer_id: str | None = None,
 ) -> dict[str, Any]:
     _validate_timestamp(accepted_at_ms, "accepted_at_ms")
     _validate_timestamp(retrieved_at_ms, "retrieved_at_ms")
 
-    if mode not in {"ASST_CAPITAL", "SATA_TERMS"}:
+    if mode not in {"ASST_CAPITAL", "SATA_TERMS", "SATS_TERMS"}:
         raise StriveCapitalFactError(
-            "mode must be ASST_CAPITAL or SATA_TERMS"
+            "mode must be ASST_CAPITAL, SATA_TERMS or SATS_TERMS"
         )
 
     text, raw_bytes = _plain(raw_document)
@@ -406,6 +484,9 @@ def build_strive_capital_reflexivity_input(
         accepted_at_ms=accepted_at_ms,
         retrieved_at_ms=retrieved_at_ms,
     )
+
+    if mode == "SATS_TERMS":
+        return _sats_offering(text, source_ref, accepted_at_ms, retrieved_at_ms, issuer_id)
 
     blockers: list[dict[str, Any]] = []
     facts: list[dict[str, Any]] = []

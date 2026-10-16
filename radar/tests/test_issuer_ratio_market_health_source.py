@@ -201,6 +201,42 @@ class ArchivedCapitalFactsTests(unittest.TestCase):
         self.assertEqual(row["source_evidence"]["effective_date"], "2026-10-04")
         self.assertNotIn("cash_unrestricted", row)
 
+    def test_sats_priced_terms_flow_through_cik_and_hash_verified_ct_archive(self):
+        from test_strive_capital_fact_adapter import SATS_TERMS
+        self.add("ASST", "0001920406 " + SATS_TERMS)
+        data = self.inputs()["ASST"]
+        event = data["preferred_funding_events"][0]
+        self.assertEqual(event["funding_stage"], "PRICED")
+        self.assertFalse(event["active_for_calculation"])
+        self.assertEqual(event["conditional_terms"]["conditional_gross_proceeds_usd"], 630_000_000)
+        self.assertIn(self.manifest[0]["raw_sha256"], event["source_ref"])
+        self.assertNotIn("verified_net_proceeds_usd", event)
+        from crt_radar.treasury_company_ct import build_treasury_company_ct
+        ct = build_treasury_company_ct(**data)
+        attribution = ct["organs"]["funding_engine"]["preferred_funding_attribution"]
+        self.assertEqual(attribution["events"][0]["realized_accounting_state"], "BLOCKED")
+        self.assertEqual(ct["organs"]["capital_conversion"]["events"], [])
+
+    def test_fwp_without_embedded_cik_needs_matching_official_submission_index(self):
+        from test_strive_capital_fact_adapter import SATS_TERMS
+        item = self.add("ASST", SATS_TERMS)
+        self.assertNotIn("preferred_funding_events", self.inputs()["ASST"])
+        raw = json.dumps(dict(cik=1920406, name="Strive, Inc.", filings={"recent": dict(
+            accessionNumber=[item["accession"]], form=["FWP"], filingDate=["2026-10-05"],
+            primaryDocument=[item["primary"]], acceptanceDateTime=[item["accepted"]])})).encode()
+        index = self.root/"sec-disclosures"/"ASST-submissions.json"
+        index.write_bytes(raw)
+        item.update(issuer_index_raw_sha256=hashlib.sha256(raw).hexdigest(),
+                    issuer_index_retrieved_at_ms=self.NOW-1000)
+        self.assertEqual(self.inputs()["ASST"]["preferred_funding_events"][0]["conditional_terms"]["cusip"], "862945409")
+        for corrupted in (b'[]', b'{"filings": []}', raw.replace(b'1920406', b'1415404'), raw.replace(b'Strive, Inc.', b'EchoStar Corporation'),
+                          raw.replace(item["accession"].encode(), b'0000000000-26-000000')):
+            index.write_bytes(corrupted)
+            item["issuer_index_raw_sha256"] = hashlib.sha256(corrupted).hexdigest()
+            self.assertNotIn("preferred_funding_events", self.inputs()["ASST"])
+        index.write_bytes(raw)
+        self.assertNotIn("preferred_funding_events", self.inputs()["ASST"])
+
     def test_mstr_reverse_mixed_units_and_unknown_units(self):
         item = self.add("MSTR", "0001050446 As of October 4, 2026, the balances of the USD Reserve and USD Cash were $833.4 million and $4.88 billion, respectively.")
         self.assertEqual(self.inputs()["MSTR"]["burden_current"]["usd_reserve_usd"], 833400000)

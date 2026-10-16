@@ -241,6 +241,15 @@ def build_health_dimensions(*, organs, issuer_id, as_of_ms, residual_change=None
         "analyst_judgment_required": True,
         "limitation": "OBSERVED_ROUTES_ONLY_NOT_MANAGEMENT_INTENT_OR_CONFIRMED_MIGRATION",
     }
+    # Context remains separate from all six dimension directions and rail tilts.
+    attribution = funding.get("preferred_funding_attribution")
+    if isinstance(attribution, dict):
+        migration["funding_lifecycle"] = [deepcopy(r) for r in attribution.get("events", []) if valid(r)]
+    windows = burden.get("fixed_obligation_windows")
+    if (isinstance(windows, dict) and windows.get("as_of_ms") == as_of_ms
+            and (windows.get("liquidity_evidence") is None or valid(windows["liquidity_evidence"]))
+            and all(valid(r) for r in windows.get("confirmed", []) + windows.get("undeclared_terms_scenarios", []))):
+        dimensions["liquidity_buffer"]["fixed_obligation_windows"] = deepcopy(windows)
     result = {
         "schema_version": "CRT_COMPANY_HEALTH_DIMENSIONS_V0.1",
         "dimensions": {k: dimensions[k] for k in DIMENSIONS},
@@ -268,7 +277,7 @@ def compact_health_dimensions(context):
     if context.get("context_hash") != digest:
         raise ValueError("Company health context hash mismatch")
     engine = context["capital_engine"]
-    return {
+    result = {
         "dimensions": {k: {"direction": v["direction"], "state": v["state"],
                             "interpretation_state": v["interpretation_state"],
                             "reason": v["reason"],
@@ -287,3 +296,14 @@ def compact_health_dimensions(context):
         "asset_role_integrity": deepcopy(context["asset_role_integrity"]),
         "as_of_ms": context["as_of_ms"], "context_hash": context["context_hash"],
     }
+    if "funding_lifecycle" in engine:
+        result["capital_engine"]["funding_lifecycle"] = [{k: deepcopy(e.get(k)) for k in (
+            "event_id", "source_ref", "funding_stage", "settlement_time", "realized_accounting_state",
+            "conditional_terms", "components", "effective_preferred_funding_cost", "deployment_attribution_state")}
+            for e in engine["funding_lifecycle"]]
+    windows = context["dimensions"]["liquidity_buffer"].get("fixed_obligation_windows")
+    if windows:
+        result["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"] = {k: deepcopy(windows[k]) for k in (
+            "state", "as_of_ms", "schedule_complete", "liquidity_complete", "qualified_usable_liquidity_usd", "windows",
+            "first_proven_shortfall_date_ms", "blockers")}
+    return result

@@ -970,8 +970,32 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                 raise ValueError("DUPLICATE_ACCESSION_REQUIRES_REVIEW")
             seen.add(identity)
             text = _plain(raw)
+            index_digest = None
             if ASSETS[asset]["cik"] not in raw.decode("utf-8"):
-                raise ValueError("SEC_DOCUMENT_CIK_MISMATCH")
+                # Some official FWP term sheets omit a CIK in the document.
+                # Reuse the CIK/name-verified SEC index, never a ticker match.
+                from .issuer_announcement_runner import load_registry, default_registry_path, parse_sec_submissions
+                if not re.fullmatch(r"[0-9a-f]{64}", str(item.get("issuer_index_raw_sha256", ""))):
+                    raise ValueError("SEC_DOCUMENT_CIK_MISMATCH")
+                index_raw = (root / "sec-disclosures" / f"{asset}-submissions.json").read_bytes()
+                index_digest = hashlib.sha256(index_raw).hexdigest()
+                if index_digest != item.get("issuer_index_raw_sha256"):
+                    raise ValueError("SEC_ISSUER_INDEX_HASH_MISMATCH")
+                index_time = item.get("issuer_index_retrieved_at_ms")
+                if type(index_time) is not int or not disclosed <= index_time <= as_of_ms:
+                    raise ValueError("SEC_ISSUER_INDEX_VISIBILITY_INVALID")
+                registry = load_registry(default_registry_path())
+                issuer = next(i for i in registry["issuers"] if i["cik"] == ASSETS[asset]["cik"])
+                index_payload = json.loads(index_raw)
+                if (not isinstance(index_payload, dict) or not isinstance(index_payload.get("filings"), dict)
+                        or not isinstance(index_payload["filings"].get("recent"), dict)):
+                    raise ValueError("SEC_ISSUER_INDEX_SCHEMA_INVALID")
+                bound = parse_sec_submissions(issuer, index_payload,
+                    material_forms=registry["material_forms"], material_keywords=registry["material_title_keywords"])
+                if not any(e["accession_number"] == accession and e["source_url"] == expected
+                        and _accepted_ms(e["accepted_at"]) == disclosed for e in bound):
+                    raise ValueError("SEC_DOCUMENT_CIK_MISMATCH")
+                retrieved = max(retrieved, index_time)
         except (ValueError, OSError, UnicodeError) as exc:
             block(asset, claim, "ARCHIVE_RAW_UNAVAILABLE" if isinstance(exc, OSError) else str(exc))
             continue
@@ -984,6 +1008,7 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                 retrieval_time=retrieved, basis_ref=basis,
                 source_semantic=dict(identity=basis, version="V1", effective_from=1, effective_to=None),
                 source_evidence=dict(raw_sha256=digest, accession=accession,
+                    **({"issuer_index_raw_sha256": index_digest} if index_digest else {}),
                     effective_precision="DATE", effective_date=datetime.fromtimestamp(at / 1000, timezone.utc).date().isoformat(),
                     effective_time_rule="EXISTING_SEC_DATE_UTC_CONVERSION_NOT_INTRADAY_TIME",
                     first_seen_rule="FIRST_PROVEN_LOCAL_ARCHIVE_RETRIEVAL"))
@@ -1022,6 +1047,20 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                 for field in ("usd_cash_usd", "usd_reserve_usd") if field in values}
             return row
         if asset == "ASST":
+            from .strive_capital_fact_adapter import build_strive_capital_reflexivity_input
+            sats = build_strive_capital_reflexivity_input(raw, mode="SATS_TERMS",
+                issuer_id=ISSUERS[asset], document_id=accession,
+                accepted_at_ms=disclosed, retrieved_at_ms=retrieved)
+            for fact in sats["issuer_facts"]["items"]:
+                terms = fact["value"]
+                event = dict(
+                    **meta(disclosed, "STRIVE_SATS_REPORTED_OFFERING_TERMS"),
+                    source_class="SEC", event_id=accession + ":SATS",
+                    active_for_calculation=False, consequence_basis_ref=ref,
+                    funding_stage=terms["offering_stage"], conditional_terms=terms)
+                event["source_evidence"].update(effective_precision="DISCLOSURE_TIMESTAMP",
+                    effective_time_rule="OFFERING_STAGE_DISCLOSURE_NOT_FINANCING_EXECUTION")
+                out.setdefault("preferred_funding_events", []).append(event)
             out["source_binding"]["observations"].extend(
                 _archived_strive_capital_observations(raw, text, meta, disclosed))
             try:

@@ -166,3 +166,42 @@ Funding-use observations retain period scope; cash/capacity snapshots retain
 as-of semantics. Missing/ambiguous periods block the funding-use claim.
 MSTR ADSO effective time remains unproven; ASST stock-count changes and future
 SATA dividend terms alone do not establish funding proceeds or usable capacity.
+
+### Strive financing lifecycle and dated fixed obligations（Strive 融資階段與定期義務）
+
+既有 Strive 發行人接入器的 `SATS_TERMS` 模式使用已核驗的 Strive CIK
+`0001920406`，保留原文雜湊、證券身分、公告可見時間、條款、順位原文、CUSIP
+及上市日期資格。EchoStar 舊 `SATS` 不屬於該身分。擬上市或預計交易日不等於
+已上市；`ANNOUNCED`、`PRICED`、`SETTLED` 分開。預計交割日期經過，不會自動
+變成交割證明。已交割公告本身也不證明募集款已入帳、淨額、實際流通量或部署。
+
+`build_archived_issuer_ct_inputs()` 沿用原 CIK／原始文件雜湊檢查，把可解析的
+SATS 公告接到 `preferred_funding_events`；沒有完整條款的文件只保留獨立已知值。
+官方 FWP（發行人自由書寫招股文件）未內嵌 CIK 時，須另外提供同一封存內的
+`ASST-submissions.json`、`issuer_index_raw_sha256` 及實際取得時間；復用既有 SEC
+索引解析器核對 CIK、發行人名稱、accession、文件網址與接受時間。任何一項不符
+即拒絕，不能只憑 SATS 代碼或檔名建立身分。
+該輸入可供既有 CT 的 `funding_engine` 及 Treasury Valuation（財庫估值脈絡）
+共用 `build_preferred_funding_attribution()`。未交割事件不能產生已實現的資產、
+請求權、費用或資金轉換。新交割事件須有真實交割時間與來源；舊事件沒有階段
+欄位時保留原契約計算，但明示 `LEGACY_NOT_SETTLEMENT_PROOF`，不冒充新交割證明。
+
+同輪 `round_accounting` 分列毛額、費用、淨額、新增／消滅請求權、購幣、其他部署、
+舊請求權償付現金及未部署現金；必須具來源歸屬依據並完成金額核對，才能標為
+`SOURCE_BOUND_RECONCILED`。償付現金與消滅的請求權分開，不重複扣除；同期變化
+不能自動形成因果歸屬。有效優先股融資成本仍只使用原有的年度股息／已驗證淨額。
+年度成本不當成當日已支出現金。
+
+`fixed_obligations` 是既有 `capital_burden_resilience` 的附加日期明細，不是新引擎。
+每筆須有唯一經濟付款參照、金額依據、到期日、四座時鐘、官方來源分類及義務種類。
+已確認支付與未宣告條款情境分列；優先股須有已發行時間證據。30／90／180 日窗口
+保留已知小計；完整合計及足額結論另需 `ALL_FIXED_OBLIGATIONS` 的完整覆蓋。
+可用流動性另需用途、有效期及其來源依據。未知現金不填零；不完整明細不能證明
+沒有缺口。已知義務大於合格現金時，可以指出最早已證實的最低缺口日期。
+但公司缺口還須證明 `ALL_USABLE_LIQUIDITY` 完整涵蓋可用流動性；只有一部分現金
+不足時，只顯示該現金範圍差額，不能宣稱公司全部資金不足。
+這不是 Corporate Survival Runway（全公司生存年限），不包含預測新融資或出售 BTC。
+
+附加脈絡進入原 Company Health（公司健康）六維及配置投影，但不改六維方向、不
+產生健康放行或配置傾斜。完整來源留在既有 Evidence Pack（證據包）區段，摘要
+沿用原資本分析投影；不新增頂層、第三釵、正式季節、分數或交易權限。

@@ -81,6 +81,60 @@ def aggregate(data, asset_id):
 
 
 class CompanyHealthTests(unittest.TestCase):
+    def test_verified_obligation_survives_absent_burden_through_compact_projection(self):
+        from test_treasury_company_ct import DAY
+        data = scenario()
+        data["burden_current"] = None
+        payment = evidence(source_class="SEC", payment_reference="synthetic-debt:next-payment",
+            due_at_ms=T2+20*DAY, amount_usd=120, obligation_kind="DEBT_PRINCIPAL",
+            recognition="CONFIRMED", amount_basis_ref="synthetic-contract")
+        data["fixed_obligations"] = [payment]
+        data["coverage"]["fixed_obligations"] = evidence(coverage_state="COMPLETE",
+            scope_ref="ALL_FIXED_OBLIGATIONS", covered_until_ms=T2+180*DAY)
+        ct = build_treasury_company_ct(**data)
+        original = ct["organs"]["capital_burden_resilience"]["fixed_obligation_windows"]
+        self.assertEqual(original["confirmed"][0]["amount_usd"], 120)
+        result = health(data)
+        self.assertIn("fixed_obligation_windows", result["dimensions"]["liquidity_buffer"])
+        retained = result["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"]
+        self.assertEqual(retained["confirmed"], original["confirmed"])
+        self.assertIn(payment["source_ref"], result["provenance"])
+        compact = compact_health_dimensions(result)["dimensions"]["liquidity_buffer"]
+        self.assertEqual(compact["state"], "BLOCKED")
+        windows = compact["fixed_obligation_windows"]
+        self.assertEqual(windows["state"], "PARTIAL")
+        self.assertTrue(windows["schedule_complete"])
+        self.assertFalse(windows["liquidity_complete"])
+        self.assertIsNone(windows["qualified_usable_liquidity_usd"])
+        self.assertIsNone(windows["first_proven_shortfall_date_ms"])
+        for row in windows["windows"]:
+            self.assertEqual(row["confirmed_total_usd"], 120)
+            self.assertIsNone(row["proven_minimum_shortfall_usd"])
+            self.assertIsNone(row["complete_schedule_balance_usd"])
+        self.assertIn("CURRENT_USABLE_LIQUIDITY_REQUIRED", {b["code"] for b in windows["blockers"]})
+
+    def test_funding_lifecycle_and_fixed_dues_reach_health_without_changing_six_directions(self):
+        from test_treasury_company_ct import DAY
+        data = scenario()
+        baseline = health(data)
+        data["preferred_funding_events"] = [evidence(source_class="SEC", event_id="priced-round",
+            active_for_calculation=False, consequence_basis_ref="reported-offer", funding_stage="PRICED",
+            conditional_terms={"issuer_id": ISSUER, "security_id": "SYNTHETIC-PREFERRED", "conditional_gross_proceeds_usd": 630})]
+        data["fixed_obligations"] = []
+        data["burden_current"].update(liquidity_valid_until_ms=T2+DAY, liquidity_validity_basis_ref="current-proof")
+        data["coverage"]["fixed_obligations"] = evidence(coverage_state="COMPLETE",
+            scope_ref="ALL_FIXED_OBLIGATIONS", covered_until_ms=T2+180*DAY)
+        result = health(data)
+        self.assertEqual({k:v["direction"] for k,v in baseline["dimensions"].items()},
+                         {k:v["direction"] for k,v in result["dimensions"].items()})
+        compact = compact_health_dimensions(result)
+        self.assertEqual(compact["capital_engine"]["funding_lifecycle"][0]["funding_stage"], "PRICED")
+        self.assertIsNone(compact["capital_engine"]["funding_lifecycle"][0]["effective_preferred_funding_cost"])
+        self.assertTrue(compact["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"]["schedule_complete"])
+        self.assertEqual(result["action_output"], "NONE")
+        self.assertEqual(result["production"], "NOT_APPROVED")
+        self.assertEqual(len(result["dimensions"]), 6)
+
     def test_strategy_divergence_and_observed_migration(self):
         out = health(scenario())
         self.assertEqual({k: v["direction"] for k, v in out["dimensions"].items()}, {
