@@ -43,6 +43,14 @@
       "transport": "HTTPS_READ_ONLY_LOCAL_VERIFIED_FACT_BUNDLE",
       "implementation_state": "OFFICIAL_REPORTED_OBSERVATION_AND_SEC_PAIR_BINDING",
       "MSTR": {
+        "shares": {
+          "source_url": "https://www.strategy.com/shares",
+          "role": "DATED_ADSO_RETROSPECTIVE_RESEARCH_ONLY",
+          "archive_input": "shares-raw/retrieval-*.json",
+          "time_semantic": "AS_OF_DAY_NOT_PUBLIC_DISCLOSURE_TIME",
+          "share_scope": "ADSO_ALL_ASSUMED_CONVERSIONS_NOT_FDSO",
+          "formal_valuation_state": "BLOCKED"
+        },
         "ledger": {
           "source_url": "https://www.strategy.com/ledger",
           "role": "PRIMARY_OFFICIAL_MSTR_BTC_ADSO_HISTORY",

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from crt_radar.issuer_ratio_market_health_source import build_archived_issuer_ct_inputs, _document_url, ASSETS
+from crt_radar.issuer_ratio_market_health_source import build_archived_issuer_ct_inputs, _document_url, ASSETS, parse_strategy_shares
 from crt_radar.treasury_company_ct import build_treasury_company_ct
 from crt_radar.daily_evidence_runner import run_daily_evidence
 from crt_radar.gpt_handoff import _bridge_market_context
@@ -27,6 +27,16 @@ During Period September 21, 2026 to September 27, 2026
 $10.0 million in net proceeds from MSTR Stock sales were used to fund bitcoin purchases and $5.0 million in net proceeds from MSTR Stock sales were used to fund repurchases of STRC Stock
 used $2.0 million of USD Cash to fund repurchases of STRC Stock
 """
+
+# Synthetic Shares/Notes layout. Numeric coincidence is not live evidence.
+ADSO_DEFINITION = '''as of the dates presented, all outstanding convertible notes and convertible preferred stock,
+all outstanding stock option awards, all outstanding restricted stock units and performance stock units;
+not calculated using the treasury method. Shares Outstanding (in '000s)'''
+SHARES = '''<table><tr><th></th><th colspan="2">ADSO</th><th>FDSO</th></tr>
+<tr><td></td><td>09/20/2026</td><td>09/21/2026</td><td>09/21/2026</td></tr>
+<tr><td>Total BTC</td><td>1,000</td><td>1,100</td><td>1,100</td></tr>
+<tr><td>ADSO (3) / FDSO (4)</td><td>10,000</td><td>10,500</td><td>9,000</td></tr>
+</table>''' + ADSO_DEFINITION
 
 # Synthetic period with the real disclosure's column shapes; not live acceptance.
 MSTR_PERIOD = """0001050446 TEST ONLY
@@ -50,6 +60,91 @@ As of September 27, 2026, the balances of the USD Reserve and USD Cash were $4.8
 """
 
 class IssuerCtBindingTests(unittest.TestCase):
+    def shares_archive(self, text=SHARES, notes=ADSO_DEFINITION):
+        folder = self.root / 'shares-raw'
+        folder.mkdir(exist_ok=True)
+        receipt = {}
+        for name, content in (('shares', text), ('notes', notes)):
+            raw = content.encode('utf-8')
+            digest = hashlib.sha256(raw).hexdigest()
+            (folder / (name + '-' + digest + '.html')).write_bytes(raw)
+            receipt[name] = dict(source_url='https://www.strategy.com/' + name,
+                http_status=200, sha256=digest, length=len(raw),
+                first_seen_at_ms=NOW - 1000, retrieved_at_ms=NOW - 1000)
+        path = folder / 'retrieval-test.json'
+        path.write_text(json.dumps(receipt), encoding='utf-8')
+        return path, receipt
+
+    def dated_shares(self, inputs=None):
+        data = self.inputs() if inputs is None else inputs
+        return [r for r in data['MSTR']['source_binding']['observations']
+                if r.get('claim') == 'DATED_ADSO_RESEARCH_OBSERVATION']
+
+    def test_shares_as_of_scope_excludes_same_date_fdso_without_disclosure_invention(self):
+        self.shares_archive()
+        row = self.dated_shares()[0]
+        self.assertEqual(row['previous']['as_of_date'], '2026-09-20')
+        self.assertEqual(row['current']['diluted_shares'], 10500000)
+        self.assertAlmostEqual(row['btc_per_diluted_share_change_pct'], (1100/10500000/(1000/10000000)-1)*100)
+        self.assertIsNone(row['disclosure_time'])
+        self.assertEqual(row['qualification'], 'RESEARCH_ONLY')
+        self.assertEqual(row['formal_valuation_state'], 'BLOCKED')
+        self.assertEqual(row['as_of_date_state'], 'SOURCE_BOUND')
+        self.assertIn('ADSO_FORMAL_DISCLOSURE_AND_DILUTION_INPUTS_UNPROVEN', str(self.inputs()['MSTR']['source_binding']))
+        self.assertEqual(self.inputs()['MSTR']['asset_history'], [])
+        self.assertEqual(self.ct('MSTR')['organs']['per_share_asset_engine']['state'], 'BLOCKED')
+
+    def test_shares_ambiguous_groups_dates_bad_values_and_units_fail_closed(self):
+        for text in (SHARES.replace('ADSO</th>', 'FDSO</th>'),
+                     SHARES.replace('09/20/2026', '09/21/2026'),
+                     SHARES.replace('10,500', '0'), SHARES.replace('10,500', '-'),
+                     SHARES.replace("in '000s", 'units unknown'),
+                     SHARES.replace('09/20/2026', '09/20/2027'),
+                     SHARES.replace('</table>', '</table><table><tr><td>ADSO</td></tr></table>')):
+            with self.subTest(text=text), self.assertRaises(ValueError):
+                parse_strategy_shares(text.encode(), ADSO_DEFINITION.encode(), retrieved_at_ms=NOW)
+
+    def test_shares_missing_definition_or_notes_does_not_erase_sec_cash(self):
+        self.shares_archive(notes='unsupported dilution scope')
+        data = self.inputs()
+        self.assertEqual(self.dated_shares(data), [])
+        self.assertIn('ADSO_DEFINITION_UNPROVEN', str(data['MSTR']['source_binding']))
+        self.assertEqual(data['MSTR']['burden_current']['usd_cash_usd'], 200000000)
+
+    def test_shares_raw_source_clock_and_hash_errors_block_only_research(self):
+        for field, value in (('source_url', 'https://example.com/shares'),
+                             ('first_seen_at_ms', NOW + 1), ('retrieved_at_ms', NOW + 1),
+                             ('length', 1), ('sha256', 'a'*64)):
+            with self.subTest(field=field):
+                path, receipt = self.shares_archive()
+                receipt['shares'][field] = value
+                path.write_text(json.dumps(receipt), encoding='utf-8')
+                data = self.inputs()
+                self.assertEqual(self.dated_shares(data), [])
+                self.assertEqual(data['MSTR']['burden_current']['usd_cash_usd'], 200000000)
+
+    def test_shares_later_archive_cannot_enter_earlier_replay(self):
+        self.shares_archive()
+        self.assertEqual(self.dated_shares(self.inputs(NOW-1001)), [])
+
+    def test_shares_one_bad_receipt_keeps_other_valid_research(self):
+        self.shares_archive()
+        (self.root/'shares-raw'/'retrieval-bad.json').write_text('{}')
+        self.assertEqual(len(self.dated_shares()), 1)
+
+    def test_dated_shares_reach_existing_pack_without_formal_health_promotion(self):
+        self.shares_archive()
+        with patch('crt_radar.daily_evidence_runner.run_source_gate', return_value=gate(0)):
+            pack = run_daily_evidence(None, observation_db=self.root/'shares.sqlite3',
+                issuer_ct_archive=self.root, now_ms=NOW, generated_at_ms=NOW)
+        fact = next(f for f in pack['asset_facts']['items'] if f.get('fact_type') == 'ISSUER_CT_SOURCE_BINDING'
+                    and f.get('issuer_id') == 'CIK-0001050446')
+        rows = self.dated_shares({'MSTR': {'source_binding': fact['evidence']}})
+        self.assertEqual(rows[0]['current']['diluted_shares'], 10500000)
+        health = _bridge_market_context(pack)['common_equity_health']['assets']['MSTR']
+        self.assertIsNone(health['net_residual_value_per_diluted_share'])
+        self.assertEqual(health['health_direction'], 'BLOCKED')
+
     def test_independent_btc_funding_uses_survive_missing_strc_or_cash_snapshot(self):
         self.items = []
         self.add('MSTR', '0001050446 TEST ONLY During Period September 21, 2026 to September 27, 2026 '
