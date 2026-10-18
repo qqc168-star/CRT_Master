@@ -263,10 +263,23 @@ USD Reserve 的用途資格不能被自由現金替代；假設轉股與剩餘�
 `qualified_usable_liquidity_usd` 保留原 carry（股息／利息）用途資格，不代表本金用途
 已核准。確認本金進入某視窗時，該已驗證、未過期的流動性來源還須明示
 `liquidity_usable_for_principal=true` 及非空 `principal_usability_basis_ref`，涵蓋計入的
-整個資金池；包含 Reserve 時必須有適用的本金用途批准，不能以自行標籤或雜湊
-代替來源證明。欠缺此依據，相關視窗的 `liquidity_use_qualified=false`，足額餘額及
+整個資金池。旗標與字串本身不構成資格；還必須提供 `principal_usability_evidence`
+清單，以既有 `_metadata(..., AUDIT_REPLAY)` 驗證發行人、非空來源、上游
+`VALIDATED` 資格、四鐘與來源語義。每筆須具既有官方 `source_class`，
+`permitted_use=DEBT_PRINCIPAL`，非空 `basis_ref` 與上述用途依據一致，且
+`valid_until_ms` 及語義有效期涵蓋驗證時點。這是重用已驗真輸入契約，不是
+下載器或自我簽署的來源驗證；上游必須保留原始證據與驗真血統。
+
+逐筆 `component=USD_CASH / USD_RESERVE`、`amount_usd`、`liquidity_source_ref`
+及 `liquidity_effective_time` 必須精確對應本次已驗真的餘額元件、來源及有效日。
+計入的 Cash（含已知零額）及獨立可用 Reserve 均須各有證明；重複、未知元件、
+錯配金額、過期或尚不可見的證明不能合格。未計入資金池的 Reserve 不要求本金
+資格，但不能將僅限股息／利息的 Reserve 併入已獲本金資格的自由現金。
+合格元件的來源證明仍保留，不因另一元件缺證而抹除；整池資格必須完整覆蓋。
+包含 Reserve 時必須有適用的本金用途批准，不能以自行標籤或雜湊代替來源證明。
+欠缺此依據，相關視窗的 `liquidity_use_qualified=false`，足額餘額及
 缺口均為 null，確認付款仍保留；先前不含本金的股息／利息視窗仍可獨立驗證。
-`principal_liquidity_qualified` 與用途依據沿既有公司健康投影傳遞，不另建資金配置器。
+`principal_liquidity_qualified`、用途依據與逐項合格來源證明沿既有公司健康投影傳遞，不另建資金配置器。
 
 附加脈絡進入原 Company Health（公司健康）六維及配置投影，但不改六維方向、不
 產生健康放行或配置傾斜。完整來源留在既有 Evidence Pack（證據包）區段，摘要

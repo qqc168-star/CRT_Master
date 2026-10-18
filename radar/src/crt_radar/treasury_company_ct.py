@@ -967,7 +967,44 @@ def build_fixed_obligation_windows(*, burden: Any, obligations: Any, issuer_id: 
     # Carry eligibility (in particular a dividend/interest-only USD Reserve)
     # does not establish permission to repay principal. The explicit basis must
     # cover the entire included liquidity pool under this validated snapshot.
-    principal_qualified = bool(usable is not None and isinstance(burden, dict)
+    # Each included component needs independently source-validated use rights,
+    # bound to this balance snapshot, not merely a carry attestation or flag.
+    principal_evidence = []
+    required_components = {"USD_CASH": cash["usd_cash_usd"]} if usable is not None else {}
+    if required_components and cash["coverage_basis"] == "USD_CASH_PLUS_SEPARATE_USABLE_RESERVE":
+        required_components["USD_RESERVE"] = cash["usd_reserve_usd"]
+    proofs = burden.get("principal_usability_evidence") if isinstance(burden, dict) else None
+    covered = set()
+    proofs_valid = isinstance(proofs, list) and bool(proofs)
+    for raw in proofs if isinstance(proofs, list) else []:
+        row = _metadata(raw, out, "liquidity.principal", issuer_id, as_of_ms, "AUDIT_REPLAY")
+        if row is None:
+            proofs_valid = False
+            continue
+        component = raw.get("component")
+        semantic_end = row["source_semantic"]["effective_to"]
+        if (not required_components or not _text(component) or component not in required_components or component in covered
+                or raw.get("source_class") not in OFFICIAL_CLASSES
+                or raw.get("permitted_use") != "DEBT_PRINCIPAL"
+                or not _text(raw.get("basis_ref"))
+                or raw["basis_ref"] != burden.get("principal_usability_basis_ref")
+                or raw.get("liquidity_source_ref") != cash["source_ref"]
+                or not _time(raw.get("liquidity_effective_time"))
+                or raw["liquidity_effective_time"] != cash["effective_time"]
+                or not _number(raw.get("amount_usd"))
+                or raw["amount_usd"] != required_components[component]
+                or not _time(raw.get("valid_until_ms")) or raw["valid_until_ms"] < as_of_ms
+                or (semantic_end is not None and semantic_end < as_of_ms)):
+            proofs_valid = False
+            _block(out, "liquidity.principal", "PRINCIPAL_SOURCE_SCOPE_OR_VALIDITY_UNPROVEN")
+            continue
+        covered.add(component)
+        row.update({key: raw[key] for key in ("source_class", "basis_ref", "permitted_use",
+            "component", "amount_usd", "liquidity_source_ref", "liquidity_effective_time", "valid_until_ms")})
+        principal_evidence.append(row)
+    out["principal_usability_evidence"] = principal_evidence
+    principal_qualified = bool(usable is not None and proofs_valid
+        and covered == set(required_components)
         and burden.get('liquidity_usable_for_principal') is True
         and _text(burden.get('principal_usability_basis_ref')))
     out['principal_liquidity_qualified'] = principal_qualified

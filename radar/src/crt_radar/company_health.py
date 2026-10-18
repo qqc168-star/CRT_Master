@@ -306,7 +306,7 @@ def compact_health_dimensions(context):
         result["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"] = {k: deepcopy(windows[k]) for k in (
             "state", "as_of_ms", "schedule_complete", "liquidity_complete", "qualified_usable_liquidity_usd", "windows",
             "first_proven_shortfall_date_ms", "blockers")}
-        for key in ('principal_liquidity_qualified', 'principal_usability_basis_ref'):
+        for key in ('principal_liquidity_qualified', 'principal_usability_basis_ref', 'principal_usability_evidence'):
             if key in windows:
                 result['dimensions']['liquidity_buffer']['fixed_obligation_windows'][key] = deepcopy(windows[key])
         # The 30/90/180-day totals do not describe longer-dated principal risk.

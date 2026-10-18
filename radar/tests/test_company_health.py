@@ -81,6 +81,33 @@ def aggregate(data, asset_id):
 
 
 class CompanyHealthTests(unittest.TestCase):
+    def test_principal_source_scope_survives_health_and_compact_projection(self):
+        from test_treasury_company_ct import DAY, principal_proof
+        data = scenario()
+        cash = data["burden_current"]
+        cash.update(liquidity_usable_for_principal=True, principal_usability_basis_ref="principal-right",
+            liquidity_coverage_state="COMPLETE", liquidity_scope_ref="ALL_USABLE_LIQUIDITY",
+            liquidity_valid_until_ms=T2+DAY, liquidity_validity_basis_ref="current")
+        cash["principal_usability_evidence"] = [principal_proof(cash)]
+        data["fixed_obligations"] = [evidence(source_class="SEC", payment_reference="principal-due",
+            due_at_ms=T2+20*DAY, amount_usd=120, amount_basis_ref="contract",
+            obligation_kind="DEBT_PRINCIPAL", recognition="CONFIRMED")]
+        data["coverage"]["fixed_obligations"] = evidence(coverage_state="COMPLETE",
+            scope_ref="ALL_FIXED_OBLIGATIONS", covered_until_ms=T2+180*DAY)
+        for include_reserve in (False, True):
+            with self.subTest(include_carry_only_reserve=include_reserve):
+                if include_reserve:
+                    cash.update(usd_reserve_usd=100, reserve_usable_for_carry=True, reserve_separate_from_cash=True)
+                full = health(data)["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"]
+                compact = compact_health_dimensions(health(data))["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"]
+                self.assertEqual(compact["principal_usability_evidence"], full["principal_usability_evidence"])
+                self.assertEqual(compact["principal_liquidity_qualified"], not include_reserve)
+                self.assertEqual(compact["principal_usability_evidence"][0]["component"], "USD_CASH")
+                if include_reserve:
+                    self.assertIsNone(compact["windows"][0]["complete_schedule_balance_usd"])
+                else:
+                    self.assertEqual(compact["windows"][0]["complete_schedule_balance_usd"], 680)
+
     def test_far_put_scenario_remains_visible_without_becoming_confirmed_principal(self):
         from test_treasury_company_ct import DAY
         data = scenario()
