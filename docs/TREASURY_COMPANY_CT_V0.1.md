@@ -167,6 +167,34 @@ as-of semantics. Missing/ambiguous periods block the funding-use claim.
 MSTR ADSO effective time remains unproven; ASST stock-count changes and future
 SATA dividend terms alone do not establish funding proceeds or usable capacity.
 
+### Dated Strategy ADSO research（Strategy 日期股數研究）
+
+The optional `shares-raw/retrieval-*.json` archive input retains independently
+hashed official `https://www.strategy.com/shares` and `/notes` response bytes.
+Each `shares` / `notes` receipt has `source_url`, `http_status`, `sha256`, `length`,
+`first_seen_at_ms`, and `retrieved_at_ms`; raw files are `<name>-<sha256>.html`.
+The existing issuer table-coordinate parser separates the ADSO colspan from
+FDSO, including when their date headers coincide. Positive paired BTC / ADSO
+values retain their as-of day, rounded-thousands precision, conversion components
+and original dilution scope. Date sorting never assigns a public disclosure time.
+
+These are `RESEARCH_ONLY` retrospective observations in the existing CT
+`source_binding` and Evidence Pack facts, not `asset_history`, a formal Company
+Health release, or formal valuation inputs. The last two dated ADSO columns are
+compared within one archived snapshot; historical document revisions are not
+merged into a point-in-time series. First proven local retrieval is preserved;
+the current website cannot prove past public availability. An invalid receipt
+blocks its research observation while unrelated SEC facts remain available.
+
+ADSO assumes conversion of all convertible notes / convertible preferred,
+options and RSU/PSU settlement; FDSO limits note / preferred conversion by market
+price. Neither is GAAP diluted weighted-average EPS shares. Assumed conversion
+does not prove actual debt extinguishment. A residual scenario must still pass
+the existing complete-claims and coherent-capital-structure checks; it must not
+both assume conversion dilution and deduct the same supposedly converted debt.
+No debt, preferred claims or cash adjustment enters the CRT formal mNAV formula.
+Unknown disclosure clocks and formal dilution / price alignment remain blocked.
+
 ### Independent Strategy period facts（Strategy 獨立期間事實）
 
 MSTR 的 SEC 主文件明確引用附件時，可在同一封存 manifest（資料清單）中加入

@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import time
 import urllib.request
 
 from datetime import datetime, timezone
 from html.parser import HTMLParser
+from html import unescape
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
@@ -143,6 +145,102 @@ def build_ledger_ratio_data(history: list[dict[str, Any]]) -> dict[str, Any]:
         "semantic_authority": "METRIC_SEMANTIC_AUTHORITY",
         "sec_authority": "DISCLOSURE_AND_CAPITAL_EVENT_AUTHORITY",
     }
+
+
+def parse_strategy_shares(raw: bytes, notes: bytes, *, retrieved_at_ms: int) -> list[dict[str, Any]]:
+    """Dated ADSO research facts, never a reconstructed disclosure clock/FDSO.
+
+    Reuse issuer table coordinates: ADSO/FDSO may have the same date header.
+    The issuer's rounded thousands are preserved, not treated as exact shares.
+    """
+    from .issuer_disclosure_tables import _Tables, _number
+
+    text = re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", raw.decode("utf-8"))))
+    semantic = re.sub(r"\s+", " ", unescape(re.sub(r"<[^>]+>", " ", notes.decode("utf-8"))))
+    for phrase in ("all outstanding convertible notes and convertible preferred stock",
+                   "all outstanding stock option awards",
+                   "all outstanding restricted stock units and performance stock units"):
+        if phrase not in text or phrase not in semantic:
+            raise ValueError("ADSO_DEFINITION_UNPROVEN")
+    if ("as of the dates presented" not in text or "not calculated using the treasury" not in text
+            or "Shares Outstanding (in '000s)" not in text):
+        raise ValueError("ADSO_DATE_SCOPE_OR_UNITS_UNPROVEN")
+    parser = _Tables()
+    parser.feed(raw.decode("utf-8"))
+    tables = [t for t in parser.tables if any(label == "ADSO" for row in t['rows'] for _, _, label in row)]
+    if len(tables) != 1 or tables[0]['invalid']:
+        raise ValueError("ADSO_TABLE_AMBIGUOUS")
+    rows = tables[0]['rows']
+    groups = [(a, b) for row in rows for a, b, label in row if label == 'ADSO']
+    date_rows = [row for row in rows if sum(bool(re.fullmatch(r"\d{2}/\d{2}/\d{4}", t)) for _, _, t in row) >= 2]
+    btc_rows = [row for row in rows if row and row[0][2] == 'Total BTC']
+    share_rows = [row for row in rows if row and re.fullmatch(r'ADSO\s*\(3\)\s*/\s*FDSO\s*\(4\)', row[0][2])]
+    if not (len(groups) == len(date_rows) == len(btc_rows) == len(share_rows) == 1):
+        raise ValueError("ADSO_COLUMNS_AMBIGUOUS")
+    result = []
+    for start, end, date in date_rows[0]:
+        if not re.fullmatch(r"\d{2}/\d{2}/\d{4}", date) or not groups[0][0] <= start < end <= groups[0][1]:
+            continue
+        dt = datetime.strptime(date, '%m/%d/%Y').replace(tzinfo=timezone.utc)
+        if int(dt.timestamp() * 1000) > retrieved_at_ms:
+            raise ValueError("ADSO_AS_OF_IN_FUTURE")
+        btc, thousands = _number(btc_rows[0], start, end), _number(share_rows[0], start, end)
+        if (btc is None or thousands is None or not all(math.isfinite(v) and v > 0 for v in (btc, thousands))
+                or not math.isfinite(thousands * 1000)):
+            raise ValueError("ADSO_PAIRED_FACT_INVALID")
+        components = {row[0][2]: _number(row, start, end) for row in rows
+                      if row and ('Convert Shares @' in row[0][2] or row[0][2] in
+                          ('Class A', 'Class B', 'Options Outstanding', 'RSU/PSU Unvested'))}
+        result.append(dict(as_of_date=dt.date().isoformat(), date_precision='DAY',
+            btc_holdings=btc, diluted_shares=thousands * 1000,
+            btc_per_diluted_share=btc / (thousands * 1000),
+            share_basis='STRATEGY_ADSO_ALL_ASSUMED_CONVERSIONS',
+            share_precision='ISSUER_ROUNDED_THOUSANDS', components_in_thousands=components))
+    dates = [row['as_of_date'] for row in result]
+    if len(dates) < 2 or dates != sorted(set(dates)):
+        raise ValueError("ADSO_DATES_NOT_UNIQUE_INCREASING")
+    return result
+
+
+def _archived_strategy_shares(root: Path, as_of_ms: int, path: Path) -> list[dict[str, Any]]:
+    """Read only immutable receipts. Unknown public release time stays unknown."""
+    observations = []
+    receipt = json.loads(path.read_text(encoding='utf-8-sig'))
+    if not isinstance(receipt, dict):
+        raise ValueError('SHARES_RECEIPT_INVALID')
+    evidence = {}
+    for name in ('shares', 'notes'):
+        entry = receipt.get(name, {})
+        if not isinstance(entry, dict):
+            raise ValueError('SHARES_RECEIPT_INVALID')
+        digest = entry.get('sha256', '')
+        retrieved, first_seen = entry.get('retrieved_at_ms'), entry.get('first_seen_at_ms')
+        if (entry.get('source_url') != 'https://www.strategy.com/' + name
+                or entry.get('http_status') != 200 or not isinstance(digest, str)
+                or not re.fullmatch('[a-f0-9]{64}', digest)
+                or type(retrieved) is not int or type(first_seen) is not int
+                or not 0 < first_seen <= retrieved <= as_of_ms):
+            raise ValueError('SHARES_SOURCE_OR_LOCAL_VISIBILITY_INVALID')
+        raw = (root / 'shares-raw' / (name + '-' + digest + '.html')).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != digest or len(raw) != entry.get('length'):
+            raise ValueError('SHARES_RAW_HASH_OR_LENGTH_MISMATCH')
+        evidence[name] = dict(entry, raw=raw)
+    rows = parse_strategy_shares(evidence['shares']['raw'], evidence['notes']['raw'],
+                                 retrieved_at_ms=evidence['shares']['retrieved_at_ms'])
+    previous, current = rows[-2:]
+    observations.append(dict(claim='DATED_ADSO_RESEARCH_OBSERVATION',
+        qualification='RESEARCH_ONLY', ct_binding_state='NOT_CT_BOUND',
+        as_of_date_state='SOURCE_BOUND', dilution_scope_state='ISSUER_DECLARED_ADSO_RESEARCH_ONLY',
+        formal_valuation_state='BLOCKED', disclosure_time=None,
+        public_availability_state='UNPROVEN', time_semantic='RETROSPECTIVE_AS_OF_DATE_NOT_DISCLOSURE_TIME',
+        source_evidence={key: {k: v for k, v in entry.items() if k != 'raw'}
+                         for key, entry in evidence.items()},
+        observations=rows, previous=previous, current=current,
+        btc_per_diluted_share_change_pct=(current['btc_per_diluted_share'] / previous['btc_per_diluted_share'] - 1) * 100,
+        limitations=['PUBLIC_DISCLOSURE_TIME_UNPROVEN', 'ROUNDED_ADSO_NOT_EXACT_SHARE_COUNT',
+                     'ASSUMED_CONVERSION_NOT_ACTUAL_DEBT_EXTINGUISHMENT',
+                     'NOT_RESIDUAL_VALUE_OR_FORMAL_MNAV'], action_output='NONE'))
+    return observations
 
 
 def collect_ledger_states(*, raw_archive_dir: Path | None = None) -> list[dict[str, Any]]:
@@ -1277,7 +1375,17 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                 "ct_binding_state": "NOT_CT_BOUND", "reported_comparison": build_ledger_ratio_data(rows)})
         except (ValueError, OSError, UnicodeError) as exc:
             block("MSTR", "ledger", "ARCHIVE_RAW_UNAVAILABLE" if isinstance(exc, OSError) else str(exc))
-    block("MSTR", "asset_history", "ADSO_EFFECTIVE_TIME_UNRESOLVED")
+    for path in sorted((root / 'shares-raw').glob('retrieval-*.json')):
+        try:
+            outputs['MSTR']['source_binding']['observations'].extend(_archived_strategy_shares(root, as_of_ms, path))
+        except (ValueError, OSError, UnicodeError) as exc:
+            block('MSTR', 'dated_adso_research', 'ARCHIVE_RAW_UNAVAILABLE' if isinstance(exc, OSError) else str(exc))
+    # Ledger is still not an effective-date authority; dated research does not
+    # satisfy the existing formal four-clock/dilution/valuation contracts.
+    dated_adso = any(r.get('claim') == 'DATED_ADSO_RESEARCH_OBSERVATION'
+                     for r in outputs['MSTR']['source_binding']['observations'])
+    block("MSTR", "asset_history", "ADSO_FORMAL_DISCLOSURE_AND_DILUTION_INPUTS_UNPROVEN"
+          if dated_adso else "ADSO_EFFECTIVE_TIME_UNRESOLVED")
     return outputs
 
 
