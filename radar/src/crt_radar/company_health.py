@@ -306,4 +306,19 @@ def compact_health_dimensions(context):
         result["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"] = {k: deepcopy(windows[k]) for k in (
             "state", "as_of_ms", "schedule_complete", "liquidity_complete", "qualified_usable_liquidity_usd", "windows",
             "first_proven_shortfall_date_ms", "blockers")}
+        for key in ('principal_liquidity_qualified', 'principal_usability_basis_ref', 'principal_usability_evidence'):
+            if key in windows:
+                result['dimensions']['liquidity_buffer']['fixed_obligation_windows'][key] = deepcopy(windows[key])
+        # The 30/90/180-day totals do not describe longer-dated principal risk.
+        # Preserve existing evidence/recognition; do not turn an unexercised put
+        # assumption into a maturity payment, aggregate alternatives or net cash.
+        principal = [r for r in windows.get('confirmed', []) + windows.get('undeclared_terms_scenarios', [])
+                     if r.get('obligation_kind') == 'DEBT_PRINCIPAL']
+        if principal:
+            compact = result['dimensions']['liquidity_buffer']['fixed_obligation_windows']
+            compact['principal_schedule_evidence'] = [{k: deepcopy(r.get(k)) for k in (
+                'payment_reference', 'security_id', 'due_at_ms', 'amount_usd', 'obligation_kind', 'recognition',
+                'issuer_id', 'source_ref', 'verification_state', 'source_semantic',
+                'effective_time', 'disclosure_time', 'first_seen_time', 'retrieval_time')} for r in principal]
+            compact['principal_schedule_limitation'] = 'SOURCE_AS_OF_REFERENCES_NOT_CURRENT_BALANCE_OR_EXERCISE_PROOF'
     return result

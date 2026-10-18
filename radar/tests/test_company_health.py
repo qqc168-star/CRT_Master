@@ -81,6 +81,87 @@ def aggregate(data, asset_id):
 
 
 class CompanyHealthTests(unittest.TestCase):
+    def test_principal_source_scope_survives_health_and_compact_projection(self):
+        from test_treasury_company_ct import DAY, principal_proof
+        data = scenario()
+        cash = data["burden_current"]
+        cash.update(liquidity_usable_for_principal=True, principal_usability_basis_ref="principal-right",
+            liquidity_coverage_state="COMPLETE", liquidity_scope_ref="ALL_USABLE_LIQUIDITY",
+            liquidity_valid_until_ms=T2+DAY, liquidity_validity_basis_ref="current")
+        cash["principal_usability_evidence"] = [principal_proof(cash)]
+        data["fixed_obligations"] = [evidence(source_class="SEC", payment_reference="principal-due",
+            due_at_ms=T2+20*DAY, amount_usd=120, amount_basis_ref="contract",
+            obligation_kind="DEBT_PRINCIPAL", recognition="CONFIRMED")]
+        data["coverage"]["fixed_obligations"] = evidence(coverage_state="COMPLETE",
+            scope_ref="ALL_FIXED_OBLIGATIONS", covered_until_ms=T2+180*DAY)
+        for include_reserve in (False, True):
+            with self.subTest(include_carry_only_reserve=include_reserve):
+                if include_reserve:
+                    cash.update(usd_reserve_usd=100, reserve_usable_for_carry=True, reserve_separate_from_cash=True)
+                full = health(data)["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"]
+                compact = compact_health_dimensions(health(data))["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"]
+                self.assertEqual(compact["principal_usability_evidence"], full["principal_usability_evidence"])
+                self.assertEqual(compact["principal_liquidity_qualified"], not include_reserve)
+                self.assertEqual(compact["principal_usability_evidence"][0]["component"], "USD_CASH")
+                if include_reserve:
+                    self.assertIsNone(compact["windows"][0]["complete_schedule_balance_usd"])
+                else:
+                    self.assertEqual(compact["windows"][0]["complete_schedule_balance_usd"], 680)
+
+    def test_far_put_scenario_remains_visible_without_becoming_confirmed_principal(self):
+        from test_treasury_company_ct import DAY
+        data = scenario()
+        baseline = health(data)
+        data['fixed_obligations'] = [evidence(source_class='SEC',
+            payment_reference='synthetic:2028-note:full-holder-put-scenario', security_id='SYNTHETIC-NOTE',
+            due_at_ms=T2+332*DAY, amount_usd=1010,
+            obligation_kind='DEBT_PRINCIPAL', recognition='UNDECLARED_TERMS_SCENARIO',
+            amount_basis_ref='synthetic:reference-balance-not-exercise-proof')]
+        data['coverage']['fixed_obligations'] = evidence(coverage_state='COMPLETE',
+            scope_ref='ALL_FIXED_OBLIGATIONS', covered_until_ms=T2+180*DAY)
+        ct = build_treasury_company_ct(**data)
+        full = ct['organs']['capital_burden_resilience']['fixed_obligation_windows']
+        self.assertEqual(full['confirmed'], [])
+        self.assertEqual(full['undeclared_terms_scenarios'][0]['amount_usd'], 1010)
+        self.assertTrue(all(w['known_confirmed_subtotal_usd'] == 0 for w in full['windows']))
+        result = health(data)
+        self.assertEqual({k:v['direction'] for k,v in result['dimensions'].items()},
+                         {k:v['direction'] for k,v in baseline['dimensions'].items()})
+        projected = compact_health_dimensions(result)['dimensions']['liquidity_buffer']['fixed_obligation_windows']
+        row = projected['principal_schedule_evidence'][0]
+        self.assertEqual(row['due_at_ms'], T2+332*DAY)
+        self.assertEqual(row['recognition'], 'UNDECLARED_TERMS_SCENARIO')
+        self.assertEqual(row['source_ref'], full['undeclared_terms_scenarios'][0]['source_ref'])
+        self.assertIsNone(projected['qualified_usable_liquidity_usd'])
+        self.assertIsNone(projected['first_proven_shortfall_date_ms'])
+        from crt_radar.gpt_handoff import _bridge_market_context
+        with tempfile.TemporaryDirectory() as folder:
+            pack = build_evidence_pack(gate(0), observation_db=Path(folder)/'principal.sqlite3',
+                generated_at_ms=T2, treasury_company_ct_inputs={'MSTR': data})
+        bridged = _bridge_market_context(pack)['common_equity_health']['assets']['MSTR']['company_health']
+        retained = bridged['dimensions']['liquidity_buffer']['fixed_obligation_windows']['principal_schedule_evidence']
+        self.assertEqual(retained, projected['principal_schedule_evidence'])
+
+    def test_confirmed_principal_and_put_alternatives_preserve_independent_qualification(self):
+        from test_treasury_company_ct import DAY
+        for amount in (250, 1000):
+            with self.subTest(participation_reference_amount=amount):
+                data = scenario()
+                data['fixed_obligations'] = [evidence(source_class='SEC',
+                    payment_reference='synthetic:put-scenario', security_id='SYNTHETIC-NOTE',
+                    due_at_ms=T2+365*DAY, amount_usd=amount, obligation_kind='DEBT_PRINCIPAL',
+                    recognition='UNDECLARED_TERMS_SCENARIO', amount_basis_ref='synthetic:separate-participation-assumption'),
+                    evidence(source_class='SEC', payment_reference='synthetic:actual-maturity',
+                    due_at_ms=T2+700*DAY, amount_usd=40, obligation_kind='DEBT_PRINCIPAL',
+                    recognition='CONFIRMED', amount_basis_ref='synthetic:other-security-contract')]
+                projected = compact_health_dimensions(health(data))['dimensions']['liquidity_buffer']['fixed_obligation_windows']
+                rows = projected['principal_schedule_evidence']
+                self.assertEqual([(r['recognition'],r['amount_usd']) for r in rows],
+                    [('CONFIRMED',40),('UNDECLARED_TERMS_SCENARIO',amount)])
+                data['fixed_obligations'][0]['retrieval_time'] = T2+1
+                rows = compact_health_dimensions(health(data))['dimensions']['liquidity_buffer']['fixed_obligation_windows']['principal_schedule_evidence']
+                self.assertEqual([r['amount_usd'] for r in rows], [40])
+
     def test_verified_obligation_survives_absent_burden_through_compact_projection(self):
         from test_treasury_company_ct import DAY
         data = scenario()

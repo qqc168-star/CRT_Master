@@ -964,22 +964,76 @@ def build_fixed_obligation_windows(*, burden: Any, obligations: Any, issuer_id: 
     out["schedule_complete"] = complete
     if not complete:
         _block(out, "coverage", "COMPLETE_DATED_FIXED_OBLIGATION_SCHEDULE_REQUIRED")
+    # Carry eligibility (in particular a dividend/interest-only USD Reserve)
+    # does not establish permission to repay principal. The explicit basis must
+    # cover the entire included liquidity pool under this validated snapshot.
+    # Each included component needs independently source-validated use rights,
+    # bound to this balance snapshot, not merely a carry attestation or flag.
+    principal_evidence = []
+    required_components = {"USD_CASH": cash["usd_cash_usd"]} if usable is not None else {}
+    if required_components and cash["coverage_basis"] == "USD_CASH_PLUS_SEPARATE_USABLE_RESERVE":
+        required_components["USD_RESERVE"] = cash["usd_reserve_usd"]
+    proofs = burden.get("principal_usability_evidence") if isinstance(burden, dict) else None
+    covered = set()
+    proofs_valid = isinstance(proofs, list) and bool(proofs)
+    for raw in proofs if isinstance(proofs, list) else []:
+        row = _metadata(raw, out, "liquidity.principal", issuer_id, as_of_ms, "AUDIT_REPLAY")
+        if row is None:
+            proofs_valid = False
+            continue
+        component = raw.get("component")
+        semantic_end = row["source_semantic"]["effective_to"]
+        if (not required_components or not _text(component) or component not in required_components or component in covered
+                or raw.get("source_class") not in OFFICIAL_CLASSES
+                or raw.get("permitted_use") != "DEBT_PRINCIPAL"
+                or not _text(raw.get("basis_ref"))
+                or raw["basis_ref"] != burden.get("principal_usability_basis_ref")
+                or raw.get("liquidity_source_ref") != cash["source_ref"]
+                or not _time(raw.get("liquidity_effective_time"))
+                or raw["liquidity_effective_time"] != cash["effective_time"]
+                or not _number(raw.get("amount_usd"))
+                or raw["amount_usd"] != required_components[component]
+                or not _time(raw.get("valid_until_ms")) or raw["valid_until_ms"] < as_of_ms
+                or (semantic_end is not None and semantic_end < as_of_ms)):
+            proofs_valid = False
+            _block(out, "liquidity.principal", "PRINCIPAL_SOURCE_SCOPE_OR_VALIDITY_UNPROVEN")
+            continue
+        covered.add(component)
+        row.update({key: raw[key] for key in ("source_class", "basis_ref", "permitted_use",
+            "component", "amount_usd", "liquidity_source_ref", "liquidity_effective_time", "valid_until_ms")})
+        principal_evidence.append(row)
+    out["principal_usability_evidence"] = principal_evidence
+    principal_qualified = bool(usable is not None and proofs_valid
+        and covered == set(required_components)
+        and burden.get('liquidity_usable_for_principal') is True
+        and _text(burden.get('principal_usability_basis_ref')))
+    out['principal_liquidity_qualified'] = principal_qualified
+    out['principal_usability_basis_ref'] = burden.get('principal_usability_basis_ref') if principal_qualified else None
+    principal_dates = [r['due_at_ms'] for r in out['confirmed'] if r['obligation_kind'] == 'DEBT_PRINCIPAL']
+    if principal_dates and not principal_qualified:
+        _block(out, 'liquidity.principal', 'PRINCIPAL_USE_OF_INCLUDED_LIQUIDITY_UNPROVEN')
+
+    def purpose_qualified(until):
+        return principal_qualified or not any(due <= until for due in principal_dates)
+
     cumulative = 0
     for due in sorted({r["due_at_ms"] for r in out["confirmed"]}):
         cumulative += sum(r["amount_usd"] for r in out["confirmed"] if r["due_at_ms"] == due)
-        if liquidity_complete and cumulative > usable:
+        if liquidity_complete and purpose_qualified(due) and cumulative > usable:
             out["first_proven_shortfall_date_ms"] = due
             break
     for days in (30, 90, 180):
         end = as_of_ms+days*DAY_MS
         subtotal = sum(r["amount_usd"] for r in out["confirmed"] if r["due_at_ms"] <= end)
         scenario = sum(r["amount_usd"] for r in out["undeclared_terms_scenarios"] if r["due_at_ms"] <= end)
+        purpose = purpose_qualified(end)
         out["windows"].append(dict(days=days, known_confirmed_subtotal_usd=subtotal,
             confirmed_total_usd=subtotal if complete else None,
             undeclared_terms_scenario_usd=scenario,
-            known_cash_only_gap_usd=max(0, subtotal-usable) if usable is not None else None,
-            proven_minimum_shortfall_usd=max(0, subtotal-usable) if liquidity_complete else None,
-            complete_schedule_balance_usd=usable-subtotal if liquidity_complete and complete else None))
+            liquidity_use_qualified=purpose,
+            known_cash_only_gap_usd=max(0, subtotal-usable) if usable is not None and purpose else None,
+            proven_minimum_shortfall_usd=max(0, subtotal-usable) if liquidity_complete and purpose else None,
+            complete_schedule_balance_usd=usable-subtotal if liquidity_complete and complete and purpose else None))
     return _finish(out, bool(out["confirmed"] or out["undeclared_terms_scenarios"] or usable is not None))
 
 
