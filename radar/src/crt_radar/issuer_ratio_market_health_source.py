@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 from .mstr_asst_market_health_runtime import seal_runtime_source
@@ -955,7 +956,9 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
             expected = _document_url(ASSETS[asset]["cik"], accession, primary)
             if item.get("source_url") != expected:
                 raise ValueError("SEC_ISSUER_SOURCE_MISMATCH")
-            raw = (root / "sec-disclosures" / f"{asset}-{accession}.html").read_bytes()
+            parent = item.get("parent_document")
+            suffix = "-" + primary if parent is not None else ""
+            raw = (root / "sec-disclosures" / f"{asset}-{accession}{suffix}.html").read_bytes()
             digest = hashlib.sha256(raw).hexdigest()
             if digest != item.get("raw_sha256"):
                 raise ValueError("RAW_HASH_MISMATCH")
@@ -965,13 +968,34 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                 raise ValueError("SOURCE_CLOCK_INVALID")
             if retrieved > as_of_ms:
                 raise ValueError("NOT_LOCALLY_VISIBLE_AT_REPLAY")
-            identity = (asset, accession)
+            parent_evidence = None
+            if parent is not None:
+                parent_rows = [r for r in manifest if r.get("asset") == asset and r.get("accession") == accession
+                    and r.get("primary") == parent.get("primary") and r.get("parent_document") is None] if isinstance(parent, dict) else []
+                if asset != "MSTR" or primary != "mstr-ex99_1.htm" or len(parent_rows) != 1:
+                    raise ValueError("SEC_EXHIBIT_PARENT_UNBOUND")
+                document = parent_rows[0]
+                parent_raw = (root / "sec-disclosures" / f"{asset}-{accession}.html").read_bytes()
+                parent_hash = hashlib.sha256(parent_raw).hexdigest()
+                parent_url = _document_url(ASSETS[asset]["cik"], accession, document["primary"])
+                parent_time = document.get("retrieved_at_ms")
+                if (parent_hash != parent.get("raw_sha256") or parent_hash != document.get("raw_sha256")
+                        or document.get("source_url") != parent_url or document.get("accepted") != item.get("accepted")
+                        or parent_time != parent.get("retrieved_at_ms") or type(parent_time) is not int
+                        or not disclosed <= parent_time <= as_of_ms
+                        or ASSETS[asset]["cik"] not in parent_raw.decode("utf-8")
+                        or expected not in {urljoin(parent_url, link) for link in re.findall(
+                            r'''href\s*=\s*["']([^"']+)["']''', parent_raw.decode("utf-8"), re.I)}):
+                    raise ValueError("SEC_EXHIBIT_PARENT_PROOF_INVALID")
+                parent_evidence = dict(source_url=parent_url, raw_sha256=parent_hash, retrieval_time=parent_time)
+                retrieved = max(retrieved, parent_time)
+            identity = (asset, accession, primary if parent is not None else "PRIMARY")
             if identity in seen:
                 raise ValueError("DUPLICATE_ACCESSION_REQUIRES_REVIEW")
             seen.add(identity)
             text = _plain(raw)
             index_digest = None
-            if ASSETS[asset]["cik"] not in raw.decode("utf-8"):
+            if parent_evidence is None and ASSETS[asset]["cik"] not in raw.decode("utf-8"):
                 # Some official FWP term sheets omit a CIK in the document.
                 # Reuse the CIK/name-verified SEC index, never a ticker match.
                 from .issuer_announcement_runner import load_registry, default_registry_path, parse_sec_submissions
@@ -1008,6 +1032,7 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                 retrieval_time=retrieved, basis_ref=basis,
                 source_semantic=dict(identity=basis, version="V1", effective_from=1, effective_to=None),
                 source_evidence=dict(raw_sha256=digest, accession=accession,
+                    **({"parent_document": parent_evidence, "raw_retrieval_time": item["retrieved_at_ms"]} if parent_evidence else {}),
                     **({"issuer_index_raw_sha256": index_digest} if index_digest else {}),
                     effective_precision="DATE", effective_date=datetime.fromtimestamp(at / 1000, timezone.utc).date().isoformat(),
                     effective_time_rule="EXISTING_SEC_DATE_UTC_CONVERSION_NOT_INTRADAY_TIME",
@@ -1035,6 +1060,11 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                 raw_sha256=digest, period_precision="DATE", **period,
                 execution_time=None, ct_binding_state="BLOCKED", active_for_calculation=False,
                 reason="PERIOD_AGGREGATE_EXECUTION_TIME_UNRESOLVED", **effects)
+            if asset == "MSTR":
+                row.update(effective_time_precision="PERIOD_ONLY",
+                    evidence_qualification="VERIFIED_REPORTED_PERIOD_FACT" if len(periods) == 1 else "BLOCKED_PERIOD_SCOPE",
+                    source_evidence={"raw_sha256": digest,
+                        **({"parent_document": parent_evidence, "raw_retrieval_time": item["retrieved_at_ms"]} if parent_evidence else {})})
             out["source_binding"]["observations"].append(row)
             for section in ("capital_conversion", "management_evidence"):
                 block(asset, section + ":" + row["observation_id"], row["reason"])
@@ -1113,26 +1143,88 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
                     reserve_separate_from_cash=True,
                     reserve_usable_for_carry=(True if re.search(
                         r"USD Reserve.*?intended to support the payment of dividends.*?interest on its outstanding indebtedness", text) else None)))
-                allocations = re.search(r"\$([\d.]+) million in net proceeds from MSTR Stock sales were used to fund bitcoin purchases and \$([\d.]+) million in net proceeds from MSTR Stock sales were used to fund repurchases of STRC Stock", text)
-                if allocations:
-                    for key, amount, dest in (("btc-purchase", allocations.group(1), "BTC_PURCHASE"),
-                                              ("strc-repurchase-common-funded", allocations.group(2), "STRC_REPURCHASE")):
-                        period_fact(key, "MSTR_COMMON_ISSUANCE", dest, float(amount) * 1e6)
-                    out["funding_instruments"].append(dict(**meta(at, "MSTR_REPORTED_COMMON_ISSUANCE_USE"),
-                        instrument_id=accession + ":MSTR_COMMON", instrument_type="COMMON_ATM",
-                        observed_funding_use_usd=sum(float(x) for x in allocations.groups()) * 1e6))
-                    out["funding_instruments"][-1]["source_evidence"].update(
-                        observation_kind="PERIOD_FUNDING_USE_WITH_AS_OF_CAPACITY_NOT_EXECUTION_TIME", **period)
-                    if len(periods) != 1:
-                        out["funding_instruments"][-1]["observed_funding_use_usd"] = None
-                        block(asset, "funding:observed_funding_use_usd", "FUNDING_USE_PERIOD_UNRESOLVED")
-                nominal = re.search(r"MSTR Stock [\d,]+ \$ - \$ [\d.]+ (?:\(3\) )?\$ ([\d,.]+) Class A Common Stock Total", text)
-                if nominal and allocations:
-                    out["funding_instruments"][-1]["reported_remaining_nominal_capacity_usd"] = _scale(nominal.group(1)) * 1e6
-                cash_use = re.search(r"used \$([\d.]+) million of USD Cash to fund repurchases of STRC Stock", text)
-                if cash_use:
-                    period_fact("strc-repurchase-cash-funded", "USD_CASH", "STRC_REPURCHASE",
-                        float(cash_use.group(1)) * 1e6, liquidity_change_usd=-float(cash_use.group(1)) * 1e6)
+            # Each disclosed use is independent of the other uses and of a
+            # separate cash-balance snapshot. Repeated wording is one fact.
+            def amount_for(key, patterns):
+                values = {_scale(v)*1e6 for pattern in patterns for v in re.findall(pattern, text, re.I)}
+                if len(values) > 1:
+                    block(asset, key, "CONFLICTING_REPORTED_PERIOD_AMOUNT")
+                return next(iter(values)) if len(values) == 1 else None
+            atm_uses = []
+            for key, destination, noun in (("btc-purchase", "BTC_PURCHASE", "bitcoin purchases"),
+                                          ("strc-repurchase-common-funded", "STRC_REPURCHASE", "repurchases of STRC Stock")):
+                patterns = [r"\$([\d.]+) million in net proceeds from MSTR Stock sales were used to fund " + noun]
+                if destination == "BTC_PURCHASE":
+                    patterns.append(r"\$([\d.]+) million in bitcoin purchases were made using net proceeds from MSTR Stock sales")
+                amount = amount_for(key, patterns)
+                if amount is not None:
+                    period_fact(key, "MSTR_COMMON_ISSUANCE", destination, amount,
+                        aggregation_role="FUNDING_COMPONENT_NOT_ADDITIVE_WITH_TOTAL")
+                    atm_uses.append(amount)
+            for key, destination, noun in (("btc-purchase-cash-funded", "BTC_PURCHASE", "bitcoin purchases"),
+                                          ("strc-repurchase-cash-funded", "STRC_REPURCHASE", "repurchases of STRC Stock")):
+                patterns = [r"used \$([\d.]+) million of USD Cash to fund " + noun]
+                if destination == "BTC_PURCHASE":
+                    patterns.append(r"\$([\d.]+) million in bitcoin purchases were made using USD Cash")
+                amount = amount_for(key, patterns)
+                if amount is not None:
+                    period_fact(key, "USD_CASH", destination, amount, liquidity_change_usd=-amount,
+                        aggregation_role="FUNDING_COMPONENT_NOT_ADDITIVE_WITH_TOTAL")
+            # Preserve the existing funding-use metric, not an inferred total
+            # cash receipt. An explicit as-of balance remains necessary here.
+            if atm_uses and cash:
+                instrument = dict(**meta(at, "MSTR_REPORTED_COMMON_ISSUANCE_USE"),
+                    instrument_id=accession + ":MSTR_COMMON", instrument_type="COMMON_ATM",
+                    observed_funding_use_usd=sum(atm_uses) if len(periods) == 1 else None)
+                instrument["source_evidence"].update(
+                    observation_kind="PERIOD_FUNDING_USE_WITH_AS_OF_CAPACITY_NOT_EXECUTION_TIME", **period)
+                out["funding_instruments"].append(instrument)
+                if len(periods) != 1:
+                    block(asset, "funding:observed_funding_use_usd", "FUNDING_USE_PERIOD_UNRESOLVED")
+            parser = _LedgerTable()
+            try:
+                parser.feed(raw.decode("utf-8"))
+            except ValueError:
+                block(asset, "period_tables", "ISSUER_PERIOD_TABLE_INVALID")
+                parser.tables = []
+            def table_rows(claim, required):
+                tables = [table for table in parser.tables if all(label in " ".join(" ".join(row) for row in table)
+                    for label in required)]
+                if len(tables) > 1:
+                    block(asset, claim, "ISSUER_PERIOD_TABLE_AMBIGUOUS")
+                return [" ".join(cell for cell in row if cell) for row in tables[0]] if len(tables) == 1 else []
+            def single_row(claim, pattern, rows):
+                matches = [re.fullmatch(pattern, row) for row in rows]
+                matches = [match for match in matches if match]
+                if len(matches) > 1:
+                    block(asset, claim, "ISSUER_PERIOD_ROW_AMBIGUOUS")
+                return matches[0] if len(matches) == 1 else None
+            issuance = single_row("common_issuance", r"MSTR Stock ([\d,]+) \$ - \$ ([\d.]+)(?: \(3\))? \$ ([\d,.]+)",
+                table_rows("common_issuance", ("During Period", "Shares Sold", "Net Proceeds (in millions)")))
+            if issuance:
+                period_fact("common-issuance", "MSTR_COMMON_ISSUANCE", "ISSUER_REPORTED_NET_PROCEEDS",
+                    _scale(issuance[2])*1e6, new_common_shares_sold=_scale(issuance[1]),
+                    amount_precision="ISSUER_ROUNDED_USD_MILLIONS",
+                    net_proceeds_scope="NET_OF_SALES_COMMISSION" if "Net proceeds are presented net of sales commission" in text else "UNRESOLVED",
+                    aggregation_role="SOURCE_PROCEEDS_NOT_ADDITIVE_WITH_USES")
+                if atm_uses and cash:
+                    out["funding_instruments"][-1]["reported_remaining_nominal_capacity_usd"] = _scale(issuance[3])*1e6
+            purchase = single_row("btc_purchase_total", r"([\d,]+) \$ ([\d.]+) \$ ([\d,]+) ([\d,]+) \$ ([\d.]+) \$ ([\d,]+)",
+                table_rows("btc_purchase_total", ("During Period", "BTC Purchased", "Aggregate BTC Holdings")))
+            if purchase:
+                period_fact("btc-purchase-total", "FUNDING_SOURCE_UNRESOLVED", "BTC_PURCHASE",
+                    _scale(purchase[2])*1e6, btc_change=_scale(purchase[1]),
+                    reported_average_price_usd=_scale(purchase[3]), reported_btc_holdings=_scale(purchase[4]),
+                    cost_precision="ISSUER_ROUNDED_USD_MILLIONS",
+                    cost_scope="INCLUDES_FEES_AND_EXPENSES" if "prices are inclusive of fees and expenses" in text else "UNRESOLVED",
+                    aggregation_role="OVERLAPPING_TOTAL_NOT_ADDITIVE")
+            repurchase = single_row("strc_repurchase_total", r"STRC Stock(?: \(1\))? ([\d,]+) \$ ([\d.]+)",
+                table_rows("strc_repurchase_total", ("During Period", "Shares Repurchased", "Aggregate Purchase Price (in millions)")))
+            if repurchase:
+                period_fact("strc-repurchase-total", "FUNDING_SOURCE_UNRESOLVED", "STRC_REPURCHASE",
+                    _scale(repurchase[2])*1e6, shares_repurchased=_scale(repurchase[1]),
+                    cost_precision="ISSUER_ROUNDED_USD_MILLIONS",
+                    aggregation_role="OVERLAPPING_TOTAL_NOT_ADDITIVE")
         out["source_binding"]["observations"].append(dict(source_ref=ref,
             disclosure_time=disclosed, first_seen_time=retrieved, retrieval_time=retrieved,
             role="DISCLOSURE_AND_CAPITAL_EVENT_AUTHORITY"))
