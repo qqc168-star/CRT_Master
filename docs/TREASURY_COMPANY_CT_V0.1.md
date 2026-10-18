@@ -250,6 +250,24 @@ SATS 公告接到 `preferred_funding_events`；沒有完整條款的文件只保
 不足時，只顯示該現金範圍差額，不能宣稱公司全部資金不足。
 這不是 Corporate Survival Runway（全公司生存年限），不包含預測新融資或出售 BTC。
 
+精簡投影另保留既有 `DEBT_PRINCIPAL` 的 `principal_schedule_evidence`，包括 180 日以外
+的日期、金額、原 `recognition`、來源參照及四座時鐘。此為傳遞，不新增計算、當前
+本金驗證或健康規則。未行使回售權的假設只能使用 `UNDECLARED_TERMS_SCENARIO`
+研究情境，不能放入 `maturities` 或提升為 `CONFIRMED`；實際行使、結算或註銷另須
+獨立來源證明。部分／全部行使假設分別重播，不能把互斥假設加總。歷史本金只是
+其來源有效日的參照，不因重播升格為當前或未來確定餘額。短期窗口為零不代表
+沒有遠期本金風險；未知可用現金及不完整付款表繼續阻擋足額與缺口判斷。
+USD Reserve 的用途資格不能被自由現金替代；假設轉股與剩餘債務須沿用既有一致
+資本結構檢查，不能對同筆已假設轉換本金同時扣債並計入完整轉股稀釋。
+
+`qualified_usable_liquidity_usd` 保留原 carry（股息／利息）用途資格，不代表本金用途
+已核准。確認本金進入某視窗時，該已驗證、未過期的流動性來源還須明示
+`liquidity_usable_for_principal=true` 及非空 `principal_usability_basis_ref`，涵蓋計入的
+整個資金池；包含 Reserve 時必須有適用的本金用途批准，不能以自行標籤或雜湊
+代替來源證明。欠缺此依據，相關視窗的 `liquidity_use_qualified=false`，足額餘額及
+缺口均為 null，確認付款仍保留；先前不含本金的股息／利息視窗仍可獨立驗證。
+`principal_liquidity_qualified` 與用途依據沿既有公司健康投影傳遞，不另建資金配置器。
+
 附加脈絡進入原 Company Health（公司健康）六維及配置投影，但不改六維方向、不
 產生健康放行或配置傾斜。完整來源留在既有 Evidence Pack（證據包）區段，摘要
 沿用原資本分析投影；不新增頂層、第三釵、正式季節、分數或交易權限。

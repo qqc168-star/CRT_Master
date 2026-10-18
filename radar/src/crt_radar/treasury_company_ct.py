@@ -964,22 +964,39 @@ def build_fixed_obligation_windows(*, burden: Any, obligations: Any, issuer_id: 
     out["schedule_complete"] = complete
     if not complete:
         _block(out, "coverage", "COMPLETE_DATED_FIXED_OBLIGATION_SCHEDULE_REQUIRED")
+    # Carry eligibility (in particular a dividend/interest-only USD Reserve)
+    # does not establish permission to repay principal. The explicit basis must
+    # cover the entire included liquidity pool under this validated snapshot.
+    principal_qualified = bool(usable is not None and isinstance(burden, dict)
+        and burden.get('liquidity_usable_for_principal') is True
+        and _text(burden.get('principal_usability_basis_ref')))
+    out['principal_liquidity_qualified'] = principal_qualified
+    out['principal_usability_basis_ref'] = burden.get('principal_usability_basis_ref') if principal_qualified else None
+    principal_dates = [r['due_at_ms'] for r in out['confirmed'] if r['obligation_kind'] == 'DEBT_PRINCIPAL']
+    if principal_dates and not principal_qualified:
+        _block(out, 'liquidity.principal', 'PRINCIPAL_USE_OF_INCLUDED_LIQUIDITY_UNPROVEN')
+
+    def purpose_qualified(until):
+        return principal_qualified or not any(due <= until for due in principal_dates)
+
     cumulative = 0
     for due in sorted({r["due_at_ms"] for r in out["confirmed"]}):
         cumulative += sum(r["amount_usd"] for r in out["confirmed"] if r["due_at_ms"] == due)
-        if liquidity_complete and cumulative > usable:
+        if liquidity_complete and purpose_qualified(due) and cumulative > usable:
             out["first_proven_shortfall_date_ms"] = due
             break
     for days in (30, 90, 180):
         end = as_of_ms+days*DAY_MS
         subtotal = sum(r["amount_usd"] for r in out["confirmed"] if r["due_at_ms"] <= end)
         scenario = sum(r["amount_usd"] for r in out["undeclared_terms_scenarios"] if r["due_at_ms"] <= end)
+        purpose = purpose_qualified(end)
         out["windows"].append(dict(days=days, known_confirmed_subtotal_usd=subtotal,
             confirmed_total_usd=subtotal if complete else None,
             undeclared_terms_scenario_usd=scenario,
-            known_cash_only_gap_usd=max(0, subtotal-usable) if usable is not None else None,
-            proven_minimum_shortfall_usd=max(0, subtotal-usable) if liquidity_complete else None,
-            complete_schedule_balance_usd=usable-subtotal if liquidity_complete and complete else None))
+            liquidity_use_qualified=purpose,
+            known_cash_only_gap_usd=max(0, subtotal-usable) if usable is not None and purpose else None,
+            proven_minimum_shortfall_usd=max(0, subtotal-usable) if liquidity_complete and purpose else None,
+            complete_schedule_balance_usd=usable-subtotal if liquidity_complete and complete and purpose else None))
     return _finish(out, bool(out["confirmed"] or out["undeclared_terms_scenarios"] or usable is not None))
 
 

@@ -98,9 +98,42 @@ def kwargs():
 
 
 class TreasuryCompanyCtTests(unittest.TestCase):
+    def test_carry_only_reserve_cannot_certify_principal_funding(self):
+        cash = burden(
+            reserve_usable_for_carry=True, reserve_separate_from_cash=True,
+            usd_cash_usable_for_carry=True, cash_usability_basis_ref='synthetic:carry-only',
+            liquidity_coverage_state='COMPLETE', liquidity_scope_ref='ALL_USABLE_LIQUIDITY',
+            liquidity_valid_until_ms=T2+DAY, liquidity_validity_basis_ref='synthetic:current')
+        cash.update(usd_cash_usd=0, usd_reserve_usd=200)
+        result = self.windows(burden=cash)
+        self.assertEqual(result['confirmed'][0]['amount_usd'], 120)
+        self.assertEqual(result['qualified_usable_liquidity_usd'], 200)
+        self.assertIsNone(result['windows'][0]['complete_schedule_balance_usd'])
+        self.assertIsNone(result['windows'][0]['proven_minimum_shortfall_usd'])
+        self.assertIsNone(result['first_proven_shortfall_date_ms'])
+        self.assertFalse(result['principal_liquidity_qualified'])
+        self.assertFalse(result['windows'][0]['liquidity_use_qualified'])
+
+    def test_principal_basis_is_required_but_carry_only_payments_remain_independent(self):
+        for change in ({'liquidity_usable_for_principal': False}, {'liquidity_usable_for_principal': 1},
+                       {'principal_usability_basis_ref': None}, {'principal_usability_basis_ref': ''}):
+            # Reuse the input helper, not its normalized output or a fake clock.
+            cash = burden(usd_cash_usable_for_carry=True, cash_usability_basis_ref='synthetic:free',
+                liquidity_coverage_state='COMPLETE', liquidity_scope_ref='ALL_USABLE_LIQUIDITY',
+                liquidity_valid_until_ms=T2+DAY, liquidity_validity_basis_ref='synthetic:current',
+                liquidity_usable_for_principal=True, principal_usability_basis_ref='synthetic:all-included-pool')
+            cash.update(change)
+            principal = self.windows(burden=cash)
+            self.assertIsNone(principal['windows'][0]['proven_minimum_shortfall_usd'])
+            self.assertEqual(principal['confirmed'][0]['amount_usd'], 120)
+            interest = evidence(source_class='SEC', payment_reference='interest-only', due_at_ms=T2+20*DAY,
+                amount_usd=120, obligation_kind='DEBT_INTEREST', recognition='CONFIRMED', amount_basis_ref='contract')
+            self.assertEqual(self.windows(burden=cash, obligations=[interest])['windows'][0]['proven_minimum_shortfall_usd'], 20)
+
     def windows(self, **changes):
         args = dict(issuer_id=ISSUER, as_of_ms=T2,
             burden=burden(usd_cash_usable_for_carry=True, cash_usability_basis_ref="unrestricted",
+                liquidity_usable_for_principal=True, principal_usability_basis_ref="synthetic:unrestricted-all-included-pool",
                 liquidity_coverage_state="COMPLETE", liquidity_scope_ref="ALL_USABLE_LIQUIDITY",
                 liquidity_valid_until_ms=T2+DAY, liquidity_validity_basis_ref="current-cash-proof"),
             obligations=[evidence(source_class="SEC", payment_reference="debt-1:payment-1", due_at_ms=T2+20*DAY,
@@ -154,6 +187,7 @@ class TreasuryCompanyCtTests(unittest.TestCase):
 
     def test_known_cash_insufficiency_not_company_shortfall_without_complete_liquidity(self):
         cash = burden(usd_cash_usable_for_carry=True, cash_usability_basis_ref="cash",
+                liquidity_usable_for_principal=True, principal_usability_basis_ref="synthetic:free-cash",
                 liquidity_valid_until_ms=T2+DAY, liquidity_validity_basis_ref="current")
         result = self.windows(burden=cash)
         self.assertEqual(result["windows"][0]["known_cash_only_gap_usd"], 20)
