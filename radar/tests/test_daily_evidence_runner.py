@@ -308,6 +308,9 @@ class LiquidationResearchWakeTests(unittest.TestCase):
         return {"source_id": source, "symbol": "BTCUSDT", "direction": direction,
                 "anchor_evidence_id": identity, "supporting_evidence_ids": [identity],
                 "candidate_rule_version": "SYNTHETIC_EXPLICIT_CLASSIFICATION_V1",
+                "formed_at_ms": max(NOW_MS, record["received_ms"]),
+                "classification_provenance": "synthetic-analyst-review:" + identity,
+                "classification_basis": "Synthetic analyst directional-stress hypothesis based on the referenced source observation; not an independent-trade claim.",
                 "revision": 1, "event_records": json.loads(json.dumps(self.records))}
 
     def run_pack(self, candidate=None, *, snapshot=None, at=NOW_MS, db=None, fail_oi=False):
@@ -387,7 +390,7 @@ class LiquidationResearchWakeTests(unittest.TestCase):
         self.assertEqual(pack["reanalysis_wake"]["state"], "NO_WAKE")
         self.assertEqual(pack["reanalysis_wake"]["liquidation_research"]["event_id"], original["event_id"])
 
-    def test_material_revision_requires_new_visible_execution_and_explicit_basis(self):
+    def test_later_source_observation_and_basis_do_not_prove_independent_execution(self):
         from crt_radar.liquidation_aggregator import build_snapshot
         first = self.run_pack(self.candidate())["reanalysis_wake"]["liquidation_research"]
         new_id = self.add_event("SELL", NOW_MS + 1000, NOW_MS + 2000)
@@ -400,9 +403,104 @@ class LiquidationResearchWakeTests(unittest.TestCase):
         self.assertEqual(blocked["liquidation_research"]["reason"], "UPGRADE_CLASSIFICATION_MISSING")
         candidate["upgrade_basis"] = "Synthetic later execution supports an explicit research revision"
         upgraded = self.run_pack(candidate, snapshot=snap, at=NOW_MS + 3000)["reanalysis_wake"]
-        self.assertEqual(upgraded["state"], "REANALYSIS_REQUESTED")
+        self.assertEqual(upgraded["state"], "NO_WAKE")
+        self.assertEqual(upgraded["liquidation_research"]["reason"], "INDEPENDENT_EXECUTION_NOT_PROVEN")
         self.assertEqual(upgraded["liquidation_research"]["event_id"], first["event_id"])
         self.assertEqual(self.run_pack(candidate, snapshot=snap, at=NOW_MS + 3001)["reanalysis_wake"]["state"], "NO_WAKE")
+
+    def test_cumulative_z_one_to_two_is_not_a_proven_independent_trade(self):
+        from copy import deepcopy
+        from crt_radar.liquidation_aggregator import LiquidationStore, build_snapshot, normalize_force_order
+        from crt_radar.reanalysis_wake import liquidation_evidence_identity
+        def capture(records, at, label):
+            source = LiquidationStore(self.root / label)
+            sid = source.begin_session(opened_ms=NOW_MS - 2 * 86400_000)
+            source.end_session(sid, closed_ms=at)
+            for record in records:
+                source.ingest_force_order(record["raw_payload"], received_ms=record["received_ms"])
+            return build_snapshot(source, as_of_ms=at)
+        first_payload = deepcopy(self.records[0]["raw_payload"])
+        first_payload["o"].update(z="1", l="1", X="PARTIALLY_FILLED")
+        first_event = normalize_force_order(first_payload, received_ms=NOW_MS - 1000)
+        anchor = liquidation_evidence_identity(first_event, self.candidate()["source_id"])
+        records = [first_event.as_record()]
+        initial = self.candidate()
+        initial.update(anchor_evidence_id=anchor, supporting_evidence_ids=[anchor], event_records=records)
+        first = self.run_pack(initial, snapshot=capture(records, NOW_MS - 1000, "z-one"))
+        self.assertEqual(first["reanalysis_wake"]["state"], "REANALYSIS_REQUESTED")
+        for updated_trade_clock in (first_payload["o"]["T"], NOW_MS + 1000):
+            with self.subTest(updated_trade_clock=updated_trade_clock):
+                update = deepcopy(first_payload)
+                update["E"] = NOW_MS + 1000
+                update["o"].update(z="2", l="1", T=updated_trade_clock)
+                later = normalize_force_order(update, received_ms=NOW_MS + 2000)
+                source_observation_id = liquidation_evidence_identity(later, initial["source_id"])
+                # Different source content does not establish another independent trade.
+                self.assertNotEqual(source_observation_id, anchor)
+                combined = [*records, later.as_record()]
+                candidate = deepcopy(initial)
+                candidate.update(revision=2, upgrade_basis="Cumulative filled quantity increased",
+                    event_records=combined, supporting_evidence_ids=[anchor, source_observation_id])
+                snap = capture(combined, NOW_MS + 2000, "z-two-" + str(updated_trade_clock))
+                wake = self.run_pack(candidate, snapshot=snap, at=NOW_MS + 3000)["reanalysis_wake"]
+                self.assertEqual(wake["state"], "NO_WAKE")
+                self.assertEqual(wake["liquidation_research"]["reason"], "INDEPENDENT_EXECUTION_NOT_PROVEN")
+                self.assertEqual(wake["liquidation_research"]["independent_execution_state"], "NOT_PROVEN")
+        self.assertEqual(len(self.diagnostics), 1)
+
+    def test_version_alone_and_unavailable_classification_clocks_cannot_form_candidate(self):
+        cases = [(key, None) for key in ("classification_basis", "classification_provenance", "formed_at_ms")]
+        cases += [("classification_basis", " "), ("classification_provenance", " "),
+                  ("formed_at_ms", NOW_MS + 1), ("formed_at_ms", NOW_MS - 1001),
+                  ("formed_at_ms", True)]
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                candidate = self.candidate()
+                if value is None:
+                    candidate.pop(key)
+                else:
+                    candidate[key] = value
+                wake = self.run_pack(candidate)["reanalysis_wake"]
+                self.assertEqual(wake["state"], "NO_WAKE")
+                self.assertEqual(wake["liquidation_research"]["state"], "BLOCKED")
+        self.assertEqual(self.diagnostics, [])
+
+    def test_first_classification_is_frozen_and_cannot_be_rewritten(self):
+        from crt_radar.observation_store import ObservationStore
+        candidate = self.candidate()
+        pack = self.run_pack(candidate)
+        event = pack["reanalysis_wake"]["liquidation_research"]
+        with ObservationStore(self.db) as store:
+            original = store.research_event(event["event_id"], kind="LIQUIDATION_RESEARCH_CANDIDATE")
+        self.assertEqual(original["classification_basis"], candidate["classification_basis"])
+        self.assertEqual(original["classification_provenance"], candidate["classification_provenance"])
+        self.assertEqual(original["formed_at_ms"], candidate["formed_at_ms"])
+        self.assertEqual(original["classification_evidence_ids"], candidate["supporting_evidence_ids"])
+        for key, replacement in (("classification_basis", "Different retrospective rationale"),
+                                 ("classification_provenance", "Different analyst reference"),
+                                 ("formed_at_ms", NOW_MS - 1)):
+            changed = dict(candidate, **{key: replacement})
+            wake = self.run_pack(changed)["reanalysis_wake"]
+            self.assertEqual(wake["state"], "NO_WAKE")
+            self.assertEqual(wake["liquidation_research"]["reason"], "FROZEN_CLASSIFICATION_CONFLICT")
+        with ObservationStore(self.db) as store:
+            self.assertEqual(store.research_event(event["event_id"], kind="LIQUIDATION_RESEARCH_CANDIDATE"), original)
+
+    def test_legacy_unclassified_candidate_cannot_be_retroactively_qualified(self):
+        from crt_radar.observation_store import ObservationStore
+        from crt_radar.liquidation_aggregator import canonical_json_bytes, sha256_hex
+        candidate = self.candidate()
+        identity = {key: candidate[key] for key in ("source_id", "symbol", "direction", "anchor_evidence_id")}
+        event_id = sha256_hex(canonical_json_bytes(identity))
+        legacy = {**identity, "candidate_rule_version": candidate["candidate_rule_version"],
+                  "first_qualified_at_ms": NOW_MS - 1}
+        with ObservationStore(self.db) as store:
+            store.record_research_event(event_id, "LIQUIDATION_RESEARCH_CANDIDATE", legacy)
+        wake = self.run_pack(candidate)["reanalysis_wake"]
+        self.assertEqual(wake["state"], "NO_WAKE")
+        self.assertEqual(wake["liquidation_research"]["reason"], "FROZEN_CLASSIFICATION_CONFLICT")
+        with ObservationStore(self.db) as store:
+            self.assertEqual(store.research_event(event_id, kind="LIQUIDATION_RESEARCH_CANDIDATE"), legacy)
 
     def test_opposite_direction_new_event_is_not_deduplicated(self):
         from crt_radar.liquidation_aggregator import build_snapshot

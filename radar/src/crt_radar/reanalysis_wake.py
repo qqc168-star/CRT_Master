@@ -272,7 +272,12 @@ def _assert_optional_authority(
 
 
 def liquidation_evidence_identity(event: Any, source_id: str) -> str:
-    """Execution identity, independent of capture/receipt/snapshot hashes."""
+    """Source-observation fingerprint, NOT an order or independent-trade ID.
+
+    forceOrder z is cumulative. A changed z/price/time can change this fingerprint
+    without proving another independent execution. Keep the existing fingerprints
+    for immutable-history compatibility; never use novelty alone to upgrade.
+    """
     return hashlib.sha256(json.dumps([
         source_id, event.symbol, event.trade_time_ms,
         event.order_side, event.price, event.filled_quantity,
@@ -283,7 +288,8 @@ def apply_liquidation_research_wake(base_wake, *, store, candidate, source_gate,
                                     snapshot, registry, at_ms):
     """Consume an explicit local research classification, never detect one.
 
-    The caller supplies the candidate rule/version and any upgrade rationale.
+    The caller supplies a dated, traceable analyst classification, not just a
+    rule/version. Source-observation identity does not establish trade identity.
     Existing Source Gate and immutable research storage own qualification and
     history. Full raw event-set membership is required; rolling totals alone
     cannot create events. No model, transport or notification is called here.
@@ -296,6 +302,9 @@ def apply_liquidation_research_wake(base_wake, *, store, candidate, source_gate,
     result = deepcopy(base_wake)
     outcome = dict(state="BLOCKED", reason="LIQUIDATION_CANDIDATE_INVALID",
                    research_only=True, formal_season=None, action_output="NONE",
+                   evidence_semantics="SOURCE_OBSERVATIONS_NOT_INDEPENDENT_TRADES",
+                   independent_execution_state="NOT_PROVEN", order_level_deduplication="NOT_PROVEN",
+                   classification_quality="ANALYST_JUDGMENT_NOT_MACHINE_PROVEN",
                    external_action_authority="NONE", external_action_performed=False)
     try:
         def require(condition, reason):
@@ -371,13 +380,29 @@ def apply_liquidation_research_wake(base_wake, *, store, candidate, source_gate,
         frozen = store.research_event(event_id, kind=kind)
         if frozen:
             require(frozen["candidate_rule_version"] == rule, "FROZEN_CANDIDATE_RULE_CONFLICT")
+        classification = {key: candidate.get(key) for key in (
+            "formed_at_ms", "classification_provenance", "classification_basis")}
+        require(all(isinstance(classification[key], str) and bool(classification[key].strip())
+                    for key in ("classification_provenance", "classification_basis")),
+                "EXPLICIT_ANALYST_CLASSIFICATION_REQUIRED")
+        formed = classification["formed_at_ms"]
+        require(type(formed) is int and 0 < formed <= at_ms, "CLASSIFICATION_CLOCK_INVALID")
+        if frozen:
+            require(all(frozen.get(key) == value for key, value in classification.items())
+                    and isinstance(frozen.get("classification_evidence_ids"), list),
+                    "FROZEN_CLASSIFICATION_CONFLICT")
+        classification_ids = frozen["classification_evidence_ids"] if frozen else sorted(selected)
+        require(bool(classification_ids) and set(classification_ids) <= set(selected),
+                "CLASSIFICATION_EVIDENCE_MISMATCH")
+        require(all(evidence[key].received_ms <= formed for key in classification_ids),
+                "CLASSIFICATION_PRECEDES_VISIBLE_EVIDENCE")
         revision = candidate["revision"]
         require(type(revision) is int and revision >= 1, "CANDIDATE_REVISION_INVALID")
         revision_kind = "LIQUIDATION_RESEARCH_REVISION:" + event_id
         prior = store.latest_research_event(revision_kind)
         outcome.update(event_id=event_id, candidate_rule_version=rule,
                        first_qualified_at_ms=frozen["first_qualified_at_ms"] if frozen else at_ms,
-                       evidence_ids=sorted(selected), revision=revision)
+                       evidence_ids=sorted(selected), revision=revision, **classification)
         if prior and revision <= prior["revision"]:
             outcome.update(state="NO_WAKE", reason="LIQUIDATION_EVENT_ALREADY_RECORDED")
         else:
@@ -390,14 +415,21 @@ def apply_liquidation_research_wake(base_wake, *, store, candidate, source_gate,
                 require(all(evidence[e].received_ms > prior["qualified_at_ms"]
                             and evidence[e].event_time_ms > prior["latest_event_time_ms"] for e in novel),
                         "UPGRADE_EVIDENCE_NOT_NEW")
-            # Globally bind an execution to one research event, even if a caller
+                # The existing source has no verifiable order/trade identifiers.
+                # Later timestamps or cumulative z increases prove observations,
+                # not independent trades. Do not invent grouping or accept a
+                # caller-supplied flag as proof; this upgrade stays unavailable.
+                raise ValueError("INDEPENDENT_EXECUTION_NOT_PROVEN")
+            # Globally bind a source observation to one research event, even if a caller
             # renames its anchor or changes capture hashes to evade deduplication.
+            # The legacy EXECUTION_CLAIM kind is retained, not an order-level claim.
             for evidence_id in selected:
                 claim = store.research_event(evidence_id, kind="LIQUIDATION_EXECUTION_CLAIM")
                 require(claim is None or claim["event_id"] == event_id, "EXECUTION_ALREADY_CLAIMED")
             if frozen is None:
                 store.record_research_event(event_id, kind, {
-                    **identity, "candidate_rule_version": rule, "first_qualified_at_ms": at_ms})
+                    **identity, "candidate_rule_version": rule, "first_qualified_at_ms": at_ms,
+                    **classification, "classification_evidence_ids": classification_ids})
             for evidence_id in selected:
                 store.record_research_event(evidence_id, "LIQUIDATION_EXECUTION_CLAIM", {"event_id": event_id})
             wake_id = sha256_hex(canonical_json_bytes([event_id, revision]))
