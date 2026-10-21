@@ -30,6 +30,20 @@ def obs(index: int, value: float) -> Observation:
 
 class ReanalysisWakeTests(unittest.TestCase):
 
+    def test_liquidation_research_fusion_preserves_existing_primary_wake(self):
+        for family, reason, expected in (("BTC_SPOT_PRICE", "PRICE", "BTC_INTRADAY"),
+                ("BTC_DVOL_RESEARCH", "DVOL_EXPANSION_ACTIVATED", "DVOL"),
+                ("BROKER_CAPITAL_STATE", "CAPITAL", "BROKER_CAPITAL_STATE")):
+            with self.subTest(family=family):
+                base = {"state": "REANALYSIS_REQUESTED", "reason": reason, "input_family": family,
+                        "liquidation_research": {"state": "REANALYSIS_REQUESTED", "reason": "L4_RESEARCH",
+                            "event_id": "a" * 64, "external_action_authority": "NONE",
+                            "external_action_performed": False, "action_output": "NONE"}}
+                result = fuse_reanalysis_wake(base, plan_drift=None)
+                self.assertEqual(result["reason"], reason)
+                self.assertIn(expected, result["wake_sources"])
+                self.assertIn("LIQUIDATION_RESEARCH", result["wake_sources"])
+
     def test_no_history_does_not_invent_wake(self):
         result = evaluate_intraday_reanalysis_wake(obs(1, 100.0), [])
         self.assertEqual(result.state, "NO_WAKE")
