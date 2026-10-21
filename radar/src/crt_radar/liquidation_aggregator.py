@@ -456,22 +456,39 @@ class LiquidationStore:
             return db.execute(
                 """
                 SELECT * FROM events
-                WHERE event_time_ms > ? AND event_time_ms <= ?
+                WHERE event_time_ms > ? AND event_time_ms <= ? AND received_ms <= ?
                 ORDER BY event_time_ms,event_hash
                 """,
-                (start_ms, end_ms),
+                (start_ms, end_ms, end_ms),
             ).fetchall()
 
     def intervals_overlapping(self, start_ms: int, end_ms: int) -> list[tuple[int, int, str]]:
+        """Return only coverage supported by timestamps visible at end_ms.
+
+        Sessions retain only the latest heartbeat, not its historical sequence.
+        A future heartbeat/close cannot reconstruct earlier coverage: omit that
+        unproven interval rather than clamp future evidence to the cutoff. These
+        are proven coverage bounds, not proof of a disconnect in omitted time;
+        insufficient bounds remain subject to the existing coverage gate.
+        """
         with closing(self._connect()) as db, db:
             rows = db.execute(
                 """
-                SELECT session_id,opened_ms,COALESCE(closed_ms, ?) AS effective_closed
-                FROM sessions
-                WHERE opened_ms < ? AND COALESCE(closed_ms, ?) > ?
+                WITH visible_intervals AS (
+                    SELECT session_id,opened_ms,
+                        CASE
+                            WHEN closed_ms <= :end_ms THEN closed_ms
+                            WHEN last_heartbeat_ms <= :end_ms THEN last_heartbeat_ms
+                            ELSE opened_ms
+                        END AS effective_closed
+                    FROM sessions
+                    WHERE opened_ms < :end_ms
+                )
+                SELECT * FROM visible_intervals
+                WHERE effective_closed > :start_ms
                 ORDER BY opened_ms,effective_closed
                 """,
-                (end_ms, end_ms, end_ms, start_ms),
+                {"start_ms": start_ms, "end_ms": end_ms},
             ).fetchall()
         return [
             (max(start_ms, int(row["opened_ms"])), min(end_ms, int(row["effective_closed"])), row["session_id"])

@@ -62,6 +62,95 @@ class LiquidationAggregatorTests(unittest.TestCase):
         sid = self.store.begin_session(opened_ms=NOW_MS - 86400_000, session_id="full")
         self.store.end_session(sid, closed_ms=NOW_MS, close_reason="TEST")
 
+    def test_open_session_coverage_stops_at_last_proven_heartbeat(self):
+        sid = self.store.begin_session(opened_ms=NOW_MS - 86400_000)
+        self.store.touch_session(sid, heartbeat_ms=NOW_MS - 20 * 60_000)
+        snap = build_snapshot(self.store, as_of_ms=NOW_MS)
+        self.assertEqual(snap["windows"]["1h"]["covered_ms"], 40 * 60_000)
+        self.assertAlmostEqual(snap["windows"]["1h"]["coverage_ratio"], 2 / 3)
+        self.assertEqual(snap["quality_state"], "BLOCKED")
+        self.assertIn("1H_COVERAGE_BELOW_0.95", snap["blocked_reasons"])
+        self.assertEqual(snap["minimum_coverage_ratio"], 0.95)
+
+    def test_open_session_without_heartbeat_does_not_require_recovery_to_fail_closed(self):
+        self.store.begin_session(opened_ms=NOW_MS - 3600_000)
+        self.assertEqual(self.store.intervals_overlapping(NOW_MS - 3600_000, NOW_MS), [])
+        self.assertEqual(build_snapshot(self.store, as_of_ms=NOW_MS)["quality_state"], "BLOCKED")
+
+    def test_current_open_heartbeat_proves_coverage_without_closing_session(self):
+        sid = self.store.begin_session(opened_ms=NOW_MS - 86400_000)
+        self.store.touch_session(sid, heartbeat_ms=NOW_MS - 1000)
+        self.store.touch_session(sid, heartbeat_ms=NOW_MS)
+        snap = build_snapshot(self.store, as_of_ms=NOW_MS)
+        self.assertEqual(snap["coverage_ratio"], 1)
+        self.assertEqual(snap["quality_state"], "VALID_FRESH_COMPLETE_COVERAGE")
+
+    def test_future_heartbeat_cannot_prove_historical_session_coverage(self):
+        sid = self.store.begin_session(opened_ms=NOW_MS - 86400_000)
+        self.store.touch_session(sid, heartbeat_ms=NOW_MS + 60_000)
+        first = build_snapshot(self.store, as_of_ms=NOW_MS)
+        second = build_snapshot(self.store, as_of_ms=NOW_MS)
+        self.assertEqual(first["snapshot_hash"], second["snapshot_hash"])
+        self.assertEqual(first["quality_state"], "BLOCKED")
+        self.assertEqual(first["windows"]["1h"]["covered_ms"], 0)
+        self.assertIn("1H_COVERAGE_BELOW_0.95", first["blocked_reasons"])
+        self.store.end_session(sid, closed_ms=NOW_MS + 120_000)
+        self.assertEqual(build_snapshot(self.store, as_of_ms=NOW_MS)["snapshot_hash"],
+                         first["snapshot_hash"])
+
+    def test_future_close_does_not_extend_visible_heartbeat_coverage(self):
+        sid = self.store.begin_session(opened_ms=NOW_MS - 3600_000)
+        self.store.touch_session(sid, heartbeat_ms=NOW_MS - 20 * 60_000)
+        before = build_snapshot(self.store, as_of_ms=NOW_MS)
+        self.store.end_session(sid, closed_ms=NOW_MS + 60_000)
+        after = build_snapshot(self.store, as_of_ms=NOW_MS)
+        self.assertEqual(after["snapshot_hash"], before["snapshot_hash"])
+        self.assertEqual(after["windows"]["1h"]["covered_ms"], 40 * 60_000)
+
+    def test_visible_normal_close_keeps_its_proven_end_time(self):
+        sid = self.store.begin_session(opened_ms=NOW_MS - 3600_000)
+        self.store.touch_session(sid, heartbeat_ms=NOW_MS - 20 * 60_000)
+        self.store.end_session(sid, closed_ms=NOW_MS - 10 * 60_000)
+        self.assertEqual(self.store.intervals_overlapping(NOW_MS - 3600_000, NOW_MS),
+                         [(NOW_MS - 3600_000, NOW_MS - 10 * 60_000, sid)])
+
+    def test_late_event_is_visible_only_after_actual_receipt_and_raw_is_retained(self):
+        self.full_session()
+        before = build_snapshot(self.store, as_of_ms=NOW_MS)
+        saved = self.root / "snapshots" / "before-receipt.json"
+        write_snapshot(before, saved)
+        saved_bytes = saved.read_bytes()
+        payload = event(event_ms=NOW_MS - 60_000, side="SELL", qty="2")
+        received = NOW_MS + 5 * 60_000
+        self.assertTrue(self.store.ingest_force_order(payload, received_ms=received))
+        self.assertEqual(self.store.events_between(NOW_MS - 3600_000, NOW_MS), [])
+        self.assertEqual(build_snapshot(self.store, as_of_ms=NOW_MS)["snapshot_hash"],
+                         before["snapshot_hash"])
+        self.assertEqual(self.store.events_between(NOW_MS - 3600_000, received - 1), [])
+        visible = self.store.events_between(NOW_MS - 3600_000, received)
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(visible[0]["received_ms"], received)
+        self.assertEqual(build_snapshot(self.store, as_of_ms=received)["event_count_24h"], 1)
+        self.assertEqual(saved.read_bytes(), saved_bytes)
+        raw_file, = (self.root / "raw" / "events").glob("*.jsonl")
+        record = json.loads(raw_file.read_text(encoding="utf-8"))
+        self.assertEqual(record["received_ms"], received)
+        self.assertEqual(record["raw_payload"], payload)
+
+    def test_receipt_filter_preserves_event_window_boundaries(self):
+        self.full_session()
+        for index, event_ms, received in (
+            (1, NOW_MS - 3600_000, NOW_MS),
+            (2, NOW_MS, NOW_MS),
+            (3, NOW_MS - 1, NOW_MS + 1),
+        ):
+            self.store.ingest_force_order(event(event_ms=event_ms, side="SELL", qty=str(index)),
+                                          received_ms=received)
+        rows = self.store.events_between(NOW_MS - 3600_000, NOW_MS)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["event_time_ms"], NOW_MS)
+        self.assertEqual(rows[0]["filled_quantity"], 2)
+
     def test_expired_unfilled_order_is_retained_but_never_counted_or_blocking(self):
         self.full_session()
         payload = event(event_ms=NOW_MS - 1000, side="SELL", qty="100")
