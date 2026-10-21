@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,6 +61,110 @@ class LiquidationAggregatorTests(unittest.TestCase):
     def full_session(self):
         sid = self.store.begin_session(opened_ms=NOW_MS - 86400_000, session_id="full")
         self.store.end_session(sid, closed_ms=NOW_MS, close_reason="TEST")
+
+    def test_expired_unfilled_order_is_retained_but_never_counted_or_blocking(self):
+        self.full_session()
+        payload = event(event_ms=NOW_MS - 1000, side="SELL", qty="100")
+        payload["o"].update(z="0", l="0", ap="0", p="64000", X="EXPIRED")
+        self.assertFalse(self.store.ingest_force_order(payload, received_ms=NOW_MS))
+        snap = build_snapshot(self.store, as_of_ms=NOW_MS)
+        self.assertEqual(snap["windows"]["24h"]["total_liquidation_usd"], 0)
+        self.assertEqual(snap["windows"]["24h"]["event_count"], 0)
+        self.assertEqual(snap["anomaly_count_24h"], 0)
+        self.assertEqual(snap["quality_state"], "VALID_FRESH_COMPLETE_COVERAGE")
+        audit = self.store.anomalies_between(NOW_MS - 86400_000, NOW_MS)
+        self.assertEqual(len(audit), 1)
+        self.assertEqual(audit[0]["anomaly_type"], "UNFILLED_ORDER_EXCLUDED")
+        details = json.loads(audit[0]["details_json"])
+        self.assertEqual(details["payload"], payload)
+        self.assertIn("zero executed quantity", details["error"])
+
+    def test_filled_and_partial_orders_use_executed_quantity_and_average_price(self):
+        self.full_session()
+        for offset, status, z, last, expected in (
+            (1, "FILLED", "3", "3", 192003),
+            (2, "PARTIALLY_FILLED", "2", "1", 128002),
+            (3, "EXPIRED", "1", "0", 64001),
+        ):
+            with self.subTest(status=status):
+                payload = event(event_ms=NOW_MS - offset, side="SELL", qty="100")
+                payload["o"].update(z=z, l=last, ap="64001", p="64000", X=status)
+                self.assertTrue(self.store.ingest_force_order(payload, received_ms=NOW_MS))
+                rows = self.store.events_between(NOW_MS - 10, NOW_MS)
+                row = next(r for r in rows if r["event_time_ms"] == NOW_MS - offset)
+                self.assertEqual(row["notional_usd"], expected)
+        self.assertEqual(build_snapshot(self.store, as_of_ms=NOW_MS)["quality_state"],
+                         "VALID_FRESH_COMPLETE_COVERAGE")
+
+    def test_last_filled_quantity_can_prove_execution_when_cumulative_is_absent(self):
+        payload = event(event_ms=NOW_MS - 1000, side="BUY", qty="100")
+        del payload["o"]["z"]
+        payload["o"]["l"] = "2"
+        self.assertTrue(self.store.ingest_force_order(payload, received_ms=NOW_MS))
+        row = self.store.events_between(NOW_MS - 2000, NOW_MS)[0]
+        self.assertEqual(row["filled_quantity"], 2)
+        self.assertEqual(row["notional_usd"], 128000)
+
+    def test_missing_or_invalid_execution_price_never_falls_back_to_order_price(self):
+        self.full_session()
+        for index, average in enumerate((None, "0", "bad", "NaN", "-1")):
+            with self.subTest(average=average):
+                payload = event(event_ms=NOW_MS - index - 1, side="SELL")
+                payload["o"]["ap"] = average
+                self.assertFalse(self.store.ingest_force_order(payload, received_ms=NOW_MS))
+        self.assertEqual(self.store.events_between(NOW_MS - 100, NOW_MS), [])
+        snap = build_snapshot(self.store, as_of_ms=NOW_MS)
+        self.assertEqual(snap["quality_state"], "BLOCKED")
+        self.assertEqual(snap["anomaly_count_24h"], 5)
+
+    def test_missing_invalid_or_conflicting_fills_do_not_use_original_quantity(self):
+        self.full_session()
+        for index, fills in enumerate(({}, {"z": "bad", "l": "1"},
+                {"z": "-1", "l": "1"}, {"z": "NaN", "l": "0"},
+                {"z": "0", "l": "1"}, {"z": "1", "l": "2"})):
+            with self.subTest(fills=fills):
+                payload = event(event_ms=NOW_MS - index - 1, side="SELL", qty="100")
+                del payload["o"]["z"]
+                del payload["o"]["l"]
+                payload["o"].update(fills)
+                self.assertFalse(self.store.ingest_force_order(payload, received_ms=NOW_MS))
+        self.assertEqual(self.store.events_between(NOW_MS - 100, NOW_MS), [])
+        self.assertEqual(build_snapshot(self.store, as_of_ms=NOW_MS)["quality_state"], "BLOCKED")
+
+    def test_zero_fills_require_a_nonexecuted_status_and_do_not_mask_real_anomalies(self):
+        self.full_session()
+        for index, status in enumerate(("NEW", "CANCELED", "REJECTED", "EXPIRED")):
+            payload = event(event_ms=NOW_MS - index - 1, side="SELL")
+            payload["o"].update(z="0", l="0", ap="0", X=status)
+            self.assertFalse(self.store.ingest_force_order(payload, received_ms=NOW_MS))
+        self.assertEqual(build_snapshot(self.store, as_of_ms=NOW_MS)["anomaly_count_24h"], 0)
+        payload["o"]["X"] = "FILLED"
+        self.assertFalse(self.store.ingest_force_order(payload, received_ms=NOW_MS))
+        snap = build_snapshot(self.store, as_of_ms=NOW_MS)
+        self.assertEqual(snap["anomaly_count_24h"], 1)
+        self.assertEqual(snap["quality_state"], "BLOCKED")
+
+    def test_exclusion_does_not_rewrite_existing_event_or_snapshot_evidence(self):
+        self.full_session()
+        self.store.ingest_force_order(event(event_ms=NOW_MS - 2000, side="SELL"), received_ms=NOW_MS)
+        before = build_snapshot(self.store, as_of_ms=NOW_MS)
+        saved = self.root / "snapshots" / "retained.json"
+        write_snapshot(before, saved)
+        retained = saved.read_bytes()
+        with closing(sqlite3.connect(self.store.db_path)) as db:
+            columns = db.execute("PRAGMA table_info(events)").fetchall()
+            rows = db.execute("SELECT * FROM events").fetchall()
+        payload = event(event_ms=NOW_MS - 1000, side="SELL", qty="100")
+        payload["o"].update(z="0", l="0", ap="0", X="EXPIRED")
+        self.store.ingest_force_order(payload, received_ms=NOW_MS)
+        with closing(sqlite3.connect(self.store.db_path)) as db:
+            self.assertEqual(db.execute("PRAGMA table_info(events)").fetchall(), columns)
+            self.assertEqual(db.execute("SELECT * FROM events").fetchall(), rows)
+        self.assertEqual(saved.read_bytes(), retained)
+        after = build_snapshot(self.store, as_of_ms=NOW_MS)
+        self.assertEqual(after["event_set_hash"], before["event_set_hash"])
+        self.assertEqual(after["windows"], before["windows"])
+        self.assertEqual(after["symbol"], "BTCUSDT")  # Legacy *_usd keys do not prove USD conversion.
 
     def test_duplicate_event_is_deduplicated_and_raw_is_append_only_once(self):
         payload = event(event_ms=NOW_MS - 1000, side="SELL")
