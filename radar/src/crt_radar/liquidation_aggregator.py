@@ -29,6 +29,10 @@ class SnapshotCorruption(LiquidationError):
     pass
 
 
+class _UnfilledOrder(LiquidationError):
+    """Valid order snapshot with no executed trade to aggregate."""
+
+
 def canonical_json_bytes(value: Any) -> bytes:
     return json.dumps(
         value,
@@ -78,6 +82,8 @@ def _unwrap_force_order(payload: Any) -> dict[str, Any]:
 
 @dataclass(frozen=True)
 class NormalizedLiquidationEvent:
+    """BTCUSDT quote notional; legacy *_usd names do not attest USD conversion."""
+
     event_hash: str
     event_time_ms: int
     trade_time_ms: int
@@ -132,21 +138,25 @@ def normalize_force_order(
     if trade_time_ms > received_ms + future_clock_skew_ms:
         raise LiquidationError("trade clock is implausibly in the future")
 
-    price_value = order.get("ap")
-    try:
-        price = _finite(price_value, "o.ap", positive=True)
-    except LiquidationError:
-        price = _finite(order.get("p"), "o.p", positive=True)
-
-    quantity: float | None = None
-    for field in ("z", "l", "q"):
-        try:
-            quantity = _finite(order.get(field), f"o.{field}", positive=True)
-            break
-        except LiquidationError:
-            continue
-    if quantity is None:
-        raise LiquidationError("no positive filled quantity available")
+    # z is cumulative executed quantity; l is last executed quantity. Neither
+    # the original order quantity q nor limit price p proves an execution.
+    fills = {}
+    for field in ("z", "l"):
+        if field in order:
+            fills[field] = _finite(order[field], f"o.{field}")
+            if fills[field] < 0:
+                raise LiquidationError(f"o.{field} must be nonnegative")
+    if not fills:
+        raise LiquidationError("no executed quantity evidence available")
+    if "z" in fills and "l" in fills and fills["l"] > fills["z"]:
+        raise LiquidationError("last filled quantity exceeds cumulative filled quantity")
+    quantity = fills.get("z", fills.get("l"))
+    if quantity == 0:
+        if order.get("X") in {"NEW", "EXPIRED", "CANCELED", "PENDING_CANCEL", "REJECTED"}:
+            raise _UnfilledOrder("zero executed quantity; order snapshot excluded from trade notional")
+        raise LiquidationError("zero executed quantity inconsistent with execution status")
+    price = _finite(order.get("ap"), "o.ap", positive=True)
+    notional = _finite(price * quantity, "executed quote notional", positive=True)
 
     raw_payload = row
     event_hash = sha256_hex(canonical_json_bytes(raw_payload))
@@ -162,7 +172,7 @@ def normalize_force_order(
         liquidation_side=liquidation_side,
         price=price,
         filled_quantity=quantity,
-        notional_usd=price * quantity,
+        notional_usd=notional,
         out_of_order=out_of_order,
         raw_payload=raw_payload,
     )
@@ -286,6 +296,16 @@ class LiquidationStore:
                 received_ms=received,
                 last_event_time_ms=self.latest_event_time_ms(),
             )
+        except _UnfilledOrder as exc:
+            # Reuse the existing append-only audit table and payload retention;
+            # this is an exclusion, not corrupt market data or a filled event.
+            self.record_anomaly(
+                "UNFILLED_ORDER_EXCLUDED",
+                observed_ms=received,
+                event_hash=raw_hash,
+                details={"error": str(exc), "payload": payload},
+            )
+            return False
         except Exception as exc:
             self.record_anomaly(
                 "INVALID_OR_CLOCK_ANOMALY",
@@ -526,7 +546,8 @@ def build_snapshot(
         if window["coverage_ratio"] < minimum_coverage_ratio:
             blocked_reasons.append(f"{label.upper()}_COVERAGE_BELOW_{minimum_coverage_ratio:.2f}")
 
-    anomalies = store.anomalies_between(as_of - 86400_000, as_of)
+    anomalies = [row for row in store.anomalies_between(as_of - 86400_000, as_of)
+                 if row["anomaly_type"] != "UNFILLED_ORDER_EXCLUDED"]
     if anomalies:
         blocked_reasons.append("CLOCK_OR_SCHEMA_ANOMALY_WITHIN_24H")
 
