@@ -271,6 +271,157 @@ def _assert_optional_authority(
             )
 
 
+def liquidation_evidence_identity(event: Any, source_id: str) -> str:
+    """Execution identity, independent of capture/receipt/snapshot hashes."""
+    return hashlib.sha256(json.dumps([
+        source_id, event.symbol, event.trade_time_ms,
+        event.order_side, event.price, event.filled_quantity,
+    ], separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def apply_liquidation_research_wake(base_wake, *, store, candidate, source_gate,
+                                    snapshot, registry, at_ms):
+    """Consume an explicit local research classification, never detect one.
+
+    The caller supplies the candidate rule/version and any upgrade rationale.
+    Existing Source Gate and immutable research storage own qualification and
+    history. Full raw event-set membership is required; rolling totals alone
+    cannot create events. No model, transport or notification is called here.
+    """
+    if candidate is None:
+        return deepcopy(base_wake)
+    from .liquidation_aggregator import canonical_json_bytes, normalize_force_order, sha256_hex
+    from .source_gate_runner import parse_liquidation_aggregate
+
+    result = deepcopy(base_wake)
+    outcome = dict(state="BLOCKED", reason="LIQUIDATION_CANDIDATE_INVALID",
+                   research_only=True, formal_season=None, action_output="NONE",
+                   external_action_authority="NONE", external_action_performed=False)
+    try:
+        def require(condition, reason):
+            if not condition:
+                raise ValueError(reason)
+
+        spec = registry.by_input_family("LIQUIDATION_AGGREGATES")
+        require(spec.source_id == "CRT-CONN-BTC-DERIV-LIQ-AGGREGATOR-001",
+                "LIQUIDATION_SOURCE_NOT_APPROVED")
+        require(candidate["source_id"] == spec.source_id and candidate["symbol"] == "BTCUSDT",
+                "LIQUIDATION_CANDIDATE_SOURCE_MISMATCH")
+        require(candidate["direction"] in {"LONG", "SHORT"}, "LIQUIDATION_DIRECTION_INVALID")
+        rule = candidate["candidate_rule_version"]
+        require(isinstance(rule, str) and bool(rule.strip()), "CANDIDATE_RULE_VERSION_MISSING")
+        require(type(at_ms) is int, "EVALUATION_CLOCK_INVALID")
+        parsed = parse_liquidation_aggregate(snapshot, spec)
+        cutoff = parsed["as_of_ms"]
+        require(0 <= at_ms - cutoff <= spec.max_age_seconds * 1000,
+                "LIQUIDATION_SNAPSHOT_STALE_OR_FUTURE")
+        require(snapshot["generated_at_ms"] == cutoff, "LIQUIDATION_SNAPSHOT_CLOCK_MISMATCH")
+        envelope, = [e for e in source_gate["evidence"]
+                     if e.get("input_family") == "LIQUIDATION_AGGREGATES"]
+        material = {k: v for k, v in envelope.items() if k != "evidence_hash"}
+        require(envelope["source_id"] == spec.source_id
+                and envelope["quality_state"] == "VALID_FRESH_COMPLETE_COVERAGE"
+                and envelope["payload_hash"] == sha256_hex(canonical_json_bytes(snapshot))
+                and envelope["evidence_hash"] == sha256_hex(canonical_json_bytes(material))
+                and envelope["registry_hash"] == registry.with_l6_candidate_sources().hash
+                and envelope["as_of_ms"] == cutoff,
+                "LIQUIDATION_SOURCE_GATE_BINDING_INVALID")
+        history = store.scoring_series("LIQUIDATION_AGGREGATES", "liquidation_24h_total_usd",
+            visible_at_ms=at_ms, expected_layer_id=spec.namespace,
+            allowed_source_ids=[spec.source_id], before_as_of_ms=cutoff)
+        require(bool(history), "LIQUIDATION_HISTORY_BASELINE_MISSING")
+        records = candidate["event_records"]
+        require(isinstance(records, list) and bool(records), "RAW_EXECUTION_EVIDENCE_MISSING")
+        events, raw_hashes, evidence = [], set(), {}
+        for record in records:
+            received = record["received_ms"]
+            require(type(received) is int and received <= cutoff, "EXECUTION_NOT_YET_VISIBLE")
+            event = normalize_force_order(record["raw_payload"], received_ms=received)
+            require(cutoff - 86400_000 < event.event_time_ms <= cutoff
+                    and max(event.event_time_ms, event.trade_time_ms) <= received,
+                    "EXECUTION_CLOCK_OR_WINDOW_INVALID")
+            require(record["event_hash"] == event.event_hash and event.event_hash not in raw_hashes,
+                    "RAW_EXECUTION_HASH_OR_DUPLICATE_INVALID")
+            identity = liquidation_evidence_identity(event, spec.source_id)
+            require(identity not in evidence, "DUPLICATE_UNDERLYING_EXECUTION")
+            evidence[identity] = event
+            raw_hashes.add(event.event_hash)
+            events.append(event)
+        require(snapshot["event_set_hash"] == sha256_hex(canonical_json_bytes(sorted(raw_hashes)))
+                and snapshot["event_count_24h"] == len(events), "EXECUTION_SET_BINDING_INVALID")
+        for label, duration in (("1h", 3600_000), ("24h", 86400_000)):
+            rows = [e for e in events if e.event_time_ms > cutoff - duration]
+            bucket = parsed["windows"][label]
+            require(len(rows) == bucket["event_count"], "EXECUTION_COUNT_MISMATCH")
+            for direction, field in (("LONG", "long_liquidation_usd"), ("SHORT", "short_liquidation_usd")):
+                require(math.isclose(sum(e.notional_usd for e in rows if e.liquidation_side == direction),
+                                     bucket[field], rel_tol=1e-9, abs_tol=0.01),
+                        "EXECUTION_NOTIONAL_MISMATCH")
+        selected = candidate["supporting_evidence_ids"]
+        require(isinstance(selected, list) and bool(selected) and len(set(selected)) == len(selected),
+                "SUPPORTING_EVIDENCE_INVALID")
+        require(all(e in evidence and evidence[e].liquidation_side == candidate["direction"]
+                    for e in selected), "SUPPORTING_DIRECTION_OR_IDENTITY_INVALID")
+        anchor = candidate["anchor_evidence_id"]
+        require(anchor in selected, "CANDIDATE_ANCHOR_NOT_VISIBLE")
+        identity = dict(source_id=spec.source_id, symbol="BTCUSDT",
+                        direction=candidate["direction"], anchor_evidence_id=anchor)
+        event_id = sha256_hex(canonical_json_bytes(identity))
+        kind = "LIQUIDATION_RESEARCH_CANDIDATE"
+        frozen = store.research_event(event_id, kind=kind)
+        if frozen:
+            require(frozen["candidate_rule_version"] == rule, "FROZEN_CANDIDATE_RULE_CONFLICT")
+        revision = candidate["revision"]
+        require(type(revision) is int and revision >= 1, "CANDIDATE_REVISION_INVALID")
+        revision_kind = "LIQUIDATION_RESEARCH_REVISION:" + event_id
+        prior = store.latest_research_event(revision_kind)
+        outcome.update(event_id=event_id, candidate_rule_version=rule,
+                       first_qualified_at_ms=frozen["first_qualified_at_ms"] if frozen else at_ms,
+                       evidence_ids=sorted(selected), revision=revision)
+        if prior and revision <= prior["revision"]:
+            outcome.update(state="NO_WAKE", reason="LIQUIDATION_EVENT_ALREADY_RECORDED")
+        else:
+            require(revision == (prior["revision"] + 1 if prior else 1), "REVISION_SEQUENCE_INVALID")
+            novel = set(selected) - set(prior["evidence_ids"] if prior else [])
+            require(bool(novel), "UPGRADE_HAS_NO_NEW_EXECUTION_EVIDENCE")
+            if prior:
+                require(isinstance(candidate.get("upgrade_basis"), str)
+                        and bool(candidate["upgrade_basis"].strip()), "UPGRADE_CLASSIFICATION_MISSING")
+                require(all(evidence[e].received_ms > prior["qualified_at_ms"]
+                            and evidence[e].event_time_ms > prior["latest_event_time_ms"] for e in novel),
+                        "UPGRADE_EVIDENCE_NOT_NEW")
+            # Globally bind an execution to one research event, even if a caller
+            # renames its anchor or changes capture hashes to evade deduplication.
+            for evidence_id in selected:
+                claim = store.research_event(evidence_id, kind="LIQUIDATION_EXECUTION_CLAIM")
+                require(claim is None or claim["event_id"] == event_id, "EXECUTION_ALREADY_CLAIMED")
+            if frozen is None:
+                store.record_research_event(event_id, kind, {
+                    **identity, "candidate_rule_version": rule, "first_qualified_at_ms": at_ms})
+            for evidence_id in selected:
+                store.record_research_event(evidence_id, "LIQUIDATION_EXECUTION_CLAIM", {"event_id": event_id})
+            wake_id = sha256_hex(canonical_json_bytes([event_id, revision]))
+            recorded = store.record_research_event(wake_id, revision_kind, {
+                "event_id": event_id, "revision": revision, "qualified_at_ms": at_ms,
+                "evidence_ids": sorted(set(selected) | set(prior["evidence_ids"] if prior else [])),
+                "latest_event_time_ms": max(evidence[e].event_time_ms for e in selected),
+                "source_gate_evidence_hash": envelope["evidence_hash"],
+                "snapshot_hash": snapshot["snapshot_hash"], "candidate": deepcopy(candidate),
+            })
+            outcome.update(state="REANALYSIS_REQUESTED" if recorded else "NO_WAKE",
+                           reason="QUALIFIED_LIQUIDATION_RESEARCH_EVENT" if recorded else "LIQUIDATION_EVENT_ALREADY_RECORDED",
+                           wake_id=wake_id)
+    except (ValueError, KeyError, TypeError) as exc:
+        outcome.update(state="BLOCKED", reason=str(exc))
+    result["liquidation_research"] = outcome
+    if outcome["state"] == "REANALYSIS_REQUESTED" and result.get("state") != "REANALYSIS_REQUESTED":
+        result.update(state="REANALYSIS_REQUESTED", reason=outcome["reason"],
+                      input_family="LIQUIDATION_RESEARCH", metric="research_event",
+                      current_value=None, previous_value=None, percent_change=None,
+                      historical_percentile=None, baseline_count=len(history))
+    return fuse_reanalysis_wake(result, plan_drift=None)
+
+
 def fuse_reanalysis_wake(
     base_wake: dict[str, Any] | None,
     *,
@@ -392,6 +543,8 @@ def fuse_reanalysis_wake(
 
         if base_reason == "DVOL_EXPANSION_ACTIVATED":
             base_source = "DVOL"
+        elif result.get("input_family") == "LIQUIDATION_RESEARCH":
+            base_source = "LIQUIDATION_RESEARCH"
         elif result.get("input_family") == "BTC_SPOT_PRICE":
             base_source = "BTC_INTRADAY"
         elif result.get("input_family") == "COMMANDER_PLAN_OBSERVATION":
@@ -504,6 +657,12 @@ def fuse_reanalysis_wake(
             })
     if capital_change is not None:
         result["capital_change"] = deepcopy(capital_change)
+
+    liquidation = result.get("liquidation_research")
+    if isinstance(liquidation, dict) and liquidation.get("state") == "REANALYSIS_REQUESTED":
+        _assert_optional_authority(liquidation, label="liquidation_research")
+        wake_sources.append("LIQUIDATION_RESEARCH")
+        wake_reasons.append(liquidation["reason"])
 
     requested = (
         result.get("state") == "REANALYSIS_REQUESTED"

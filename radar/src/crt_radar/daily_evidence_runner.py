@@ -161,6 +161,7 @@ def run_daily_evidence(
     season_transition_replay_context: dict[str, Any] | None = None,
     btc_control_transfer_validation_evidence: dict[str, Any] | None = None,
     acceptance_wake_operational_percentile: float | None = None,
+    liquidation_research_candidate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if issuer_ct_archive is not None:
         if treasury_company_ct_inputs is not None:
@@ -292,6 +293,15 @@ def run_daily_evidence(
             decision_intent=full_decision_intent,
             previous_decision_intent=previous_full_decision_intent,
         )
+
+    if liquidation_research_candidate is not None:
+        from .reanalysis_wake import apply_liquidation_research_wake
+        with ObservationStore(observation_db) as store:
+            reanalysis_wake = apply_liquidation_research_wake(
+                reanalysis_wake, store=store, candidate=liquidation_research_candidate,
+                source_gate=source_gate, snapshot=liquidation_aggregate_payload,
+                registry=registry, at_ms=generated_at_ms,
+            )
 
     if reanalysis_wake["state"] == "REANALYSIS_REQUESTED":
         if transition_diagnostic_runner is None:
