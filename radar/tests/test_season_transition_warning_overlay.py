@@ -208,6 +208,27 @@ def build(**overrides) -> dict:
 
 
 class SeasonTransitionWarningOverlayTests(unittest.TestCase):
+    def test_absorption_label_alone_is_not_a_conflict_and_input_is_preserved(self):
+        for state in ("NOT_SUPPORTED", "INCONCLUSIVE"):
+            with self.subTest(state=state):
+                diagnostic = transition_diagnostic()
+                diagnostic["mechanism_findings"]["spot_demand_absorption"] = state
+                original = deepcopy(diagnostic)
+                overlay = build(transition_diagnostic=diagnostic)
+                veto = overlay["lights"]["conflict_veto"]
+                self.assertEqual(veto["raw_metrics"]["conflict_evidence"], [])
+                self.assertEqual(veto["threshold_bucket"], "NO_DECISIVE_VETO")
+                self.assertEqual(diagnostic, original)
+
+    def test_leverage_caution_survives_inconclusive_absorption(self):
+        diagnostic = transition_diagnostic()
+        diagnostic["mechanism_findings"].update(
+            spot_demand_absorption="INCONCLUSIVE", leverage_quality="CAUTION",
+        )
+        overlay = build(transition_diagnostic=diagnostic)
+        self.assertIn("LEVERAGE_QUALITY_CAUTION",
+                      overlay["lights"]["conflict_veto"]["raw_metrics"]["conflict_evidence"])
+
     def test_locked_threshold_boundaries_are_reused(self) -> None:
         self.assertEqual(EXPECTED_LIGHT_THRESHOLDS, [-60, -35, 35, 60])
         expected = {

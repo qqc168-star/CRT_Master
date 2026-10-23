@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,8 +68,29 @@ class BtcTransitionDiagnosticsTests(unittest.TestCase):
             liquidation_context=None,
         )
         self.assertEqual(result["long_fomo_rebuild"], "SUPPORTED")
-        self.assertEqual(result["spot_demand_absorption"], "NOT_SUPPORTED")
+        self.assertEqual(result["spot_demand_absorption"], "INCONCLUSIVE")
         self.assertEqual(result["leverage_quality"], "CAUTION")
+
+    def test_nonpositive_cvd_does_not_disprove_passive_absorption(self):
+        for cvd in (-1_000_000.0, 0.0, None):
+            with self.subTest(cvd=cvd):
+                summaries = {"recent_60m": {
+                    "oi_change_pct": 1.0,
+                    "premium_mean_bp": -1.0,
+                    "spot_buy_share_pct": 49.0,
+                    "spot_cvd_proxy_usd": cvd,
+                }}
+                original = deepcopy(summaries)
+                result = evaluate_transition_mechanisms(
+                    summaries, funding_latest_bp=-1.0,
+                )
+                self.assertEqual(result["spot_demand_absorption"], "INCONCLUSIVE")
+                semantics = result["spot_demand_absorption_semantics"]
+                self.assertEqual(semantics["scope"], "AGGRESSIVE_BUYING_COMBINATION_ONLY")
+                self.assertEqual(semantics["passive_absorption"], "NOT_EVALUATED")
+                self.assertEqual(semantics["version"], "CRT_SPOT_DEMAND_ABSORPTION_V0.2")
+                self.assertEqual(summaries, original)
+                self.assertFalse(result["machine_may_confirm_bull_transition"])
 
     def test_persistence_requires_both_half_hour_windows(self):
         summaries = {
