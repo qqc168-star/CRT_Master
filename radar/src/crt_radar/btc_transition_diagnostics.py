@@ -335,9 +335,9 @@ def evaluate_transition_mechanisms(
         and cvd > 0
     ):
         absorption = "SUPPORTED"
-    elif cvd is not None and cvd <= 0:
-        absorption = "NOT_SUPPORTED"
     else:
+        # This combination supports aggressive buying only. Nonpositive CVD
+        # cannot disprove passive absorption or other buyer support mechanisms.
         absorption = "INCONCLUSIVE"
 
     persistence = "NOT_YET_CONFIRMED"
@@ -369,6 +369,11 @@ def evaluate_transition_mechanisms(
         "short_squeeze": squeeze,
         "long_fomo_rebuild": long_fomo,
         "spot_demand_absorption": absorption,
+        "spot_demand_absorption_semantics": {
+            "version": "CRT_SPOT_DEMAND_ABSORPTION_V0.2",
+            "scope": "AGGRESSIVE_BUYING_COMBINATION_ONLY",
+            "passive_absorption": "NOT_EVALUATED",
+        },
         "spot_demand_persistence": persistence,
         "leverage_quality": leverage_quality,
         "machine_regime_judgment": None,
@@ -435,6 +440,7 @@ def build_transition_diagnostic_case(
             "limitations": [
                 "Single-venue directional evidence; not a total-market claim.",
                 "Rolling 1h liquidation context is coarser than exact event-window liquidation evidence.",
+                "Spot demand absorption describes an aggressive-buying combination; nonpositive CVD does not rule out passive absorption.",
                 "This diagnostic does not alter formal six-layer inputs or locked thresholds.",
             ],
             "provenance": bundle.get("provenance", {}),

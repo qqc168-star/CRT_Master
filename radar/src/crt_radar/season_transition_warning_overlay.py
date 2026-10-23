@@ -568,8 +568,7 @@ def _collect_veto_evidence(
             conflicts.append(check_id)
 
     mechanisms = _mechanisms(transition_diagnostic)
-    if mechanisms.get("spot_demand_absorption") == "NOT_SUPPORTED":
-        conflicts.append("SPOT_DEMAND_ABSORPTION_NOT_SUPPORTED")
+    # A legacy absorption label alone is not evidence against passive support.
     if mechanisms.get("leverage_quality") == "CAUTION":
         conflicts.append("LEVERAGE_QUALITY_CAUTION")
     if institutional_evidence_status == "AVAILABLE_WITH_20D_CONTEXT_CONFLICT":

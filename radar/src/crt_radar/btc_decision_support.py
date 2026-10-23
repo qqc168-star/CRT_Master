@@ -329,7 +329,9 @@ def evaluate_btc_entry_gate(
         and leverage == "CONSTRUCTIVE"
         and long_fomo != "SUPPORTED"
     )
-    adverse_mechanism = absorption == "NOT_SUPPORTED" or leverage == "CAUTION"
+    # Legacy absorption labels alone do not disprove general buyer support.
+    # Preserve the original input and the independent leverage warning.
+    adverse_mechanism = leverage == "CAUTION"
     control_transfer = evaluate_control_transfer_evidence(
         control_transfer_evidence
     )
