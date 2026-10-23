@@ -6,6 +6,7 @@ import json
 import os
 import tempfile
 import time
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
@@ -58,6 +59,378 @@ def default_observation_db_path() -> Path:
 
 def default_evidence_pack_path() -> Path:
     return Path(__file__).resolve().parents[2] / "runtime" / "evidence" / "latest.json"
+
+
+SHADOW_VERSION = "CRT_LIQUIDATION_PAIRED_SHADOW_V0.1"
+SHADOW_STUDY = "LIQUIDATION_SHADOW_STUDY"
+
+
+def _shadow_require(condition, reason):
+    if not condition:
+        raise ValueError(reason)
+
+
+def _shadow_hash(value):
+    return hashlib.sha256(json.dumps(value, ensure_ascii=False, sort_keys=True,
+                                    separators=(",", ":"), allow_nan=False).encode()).hexdigest()
+
+
+def _shadow_now():
+    return int(time.time() * 1000)
+
+
+def _shadow_locks():
+    return dict(research_only=True, formal_season=None, production="NOT_APPROVED",
+                external_action_authority="NONE", external_action_performed=False,
+                capital_decision_authority="USER_ONLY", machine_execution="FORBIDDEN",
+                action_output="NONE", reasoning_state="NOT_YET_PROVEN")
+
+
+def _shadow_check_clocks_and_authority(value, cutoff):
+    """Reject future factual clocks and execution claims in shared research."""
+    locks = {"external_action_authority": "NONE", "external_action_performed": False,
+             "production": "NOT_APPROVED", "machine_execution": "FORBIDDEN",
+             "action_output": "NONE", "capital_decision_authority": "USER_ONLY",
+             "machine_may_confirm_bull_transition": False,
+             "machine_may_output_trade_action": False, "formal_season": None}
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in locks:
+                expected = locks[key]
+                valid = item is expected if expected is None or type(expected) is bool else item == expected
+                _shadow_require(valid, "SHADOW_AUTHORITY_VIOLATION")
+            if key.endswith("_ms") and item is not None and key not in {
+                    "valid_until_ms", "expires_at_ms", "max_age_ms", "horizon_ms"}:
+                _shadow_require(type(item) is int and 0 <= item <= cutoff,
+                                "SHADOW_FUTURE_CONTEXT_OR_CLOCK_INVALID")
+            _shadow_check_clocks_and_authority(item, cutoff)
+    elif isinstance(value, list):
+        for item in value:
+            _shadow_check_clocks_and_authority(item, cutoff)
+
+
+def _shadow_no_increment_in_a(value, incremental_ids):
+    """A keeps aggregate L4, never the added event interpretation or Wake."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            _shadow_require(not (key == "liquidation_research" and item),
+                            "SHADOW_A_ALREADY_CONTAINS_INCREMENT")
+            _shadow_no_increment_in_a(item, incremental_ids)
+    elif isinstance(value, list):
+        for item in value:
+            _shadow_no_increment_in_a(item, incremental_ids)
+    elif isinstance(value, str):
+        _shadow_require(value != "LIQUIDATION_RESEARCH" and value not in incremental_ids,
+                        "SHADOW_A_ALREADY_CONTAINS_INCREMENT")
+
+
+def _shadow_validate_baseline(pack, gate, store, cutoff, control_transfer_evidence):
+    from .evidence_pack import _group_layers, _data_health, _model_status
+    from .change_engine import compute_changes
+    from .v110_candidate import evaluate_v110_candidate
+    from .btc_control_transfer_validation import evaluate_control_transfer_validation
+    observations = extract_observations(gate, recorded_at_ms=cutoff)
+    layers = _group_layers(observations)
+    _shadow_require(pack.get("layers") == layers, "SHADOW_BASELINE_METRICS_MISMATCH")
+    _shadow_require(pack.get("data_health") == _data_health(gate), "SHADOW_BASELINE_GATE_MISMATCH")
+    _shadow_require(pack.get("changes") == compute_changes(store, observations),
+                    "SHADOW_BASELINE_HISTORY_MISMATCH")
+    formal = evaluate_v110_candidate(layers, store, evaluation_at_ms=cutoff)
+    _shadow_require(pack.get("formal_candidate") == formal
+                    and pack.get("model_status") == _model_status(layers, formal),
+                    "SHADOW_BASELINE_MODEL_MISMATCH")
+    q1 = evaluate_control_transfer_validation(control_transfer_evidence,
+        observation_store=store, evaluated_at_ms=cutoff, require_observed_evidence=True)
+    _shadow_require(pack.get("btc_control_transfer_validation") == q1,
+                    "SHADOW_Q1_LINEAGE_OR_RESULT_MISMATCH")
+    _shadow_check_clocks_and_authority(pack, cutoff)
+    _shadow_require(all(item is None for item in pack.get("analyst_output", {}).values()),
+                    "SHADOW_ANALYSIS_MUST_BE_FROZEN_SEPARATELY")
+
+
+def _shadow_code_version():
+    """Read actual evaluated code identity, without fetching or changing Git."""
+    import subprocess
+    root = Path(__file__).resolve().parents[3]
+    env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+    def git(*args):
+        return subprocess.check_output(["git", "-C", str(root), *args], env=env).decode().strip()
+    modules = ("daily_evidence_runner", "observation_store", "source_gate_runner", "reanalysis_wake",
+               "btc_transition_diagnostics", "btc_decision_support", "btc_control_transfer_validation")
+    return dict(git_sha=git("rev-parse", "HEAD"), working_tree_dirty=bool(git("status", "--porcelain")),
+                module_sha256={name: hashlib.sha256((Path(__file__).parent / (name + ".py")).read_bytes()).hexdigest()
+                               for name in modules}, absorption_semantics="CRT_SPOT_DEMAND_ABSORPTION_V0.2",
+                pair_semantics=SHADOW_VERSION)
+
+
+def start_liquidation_shadow(store, registry, *, mode="PROSPECTIVE"):
+    """Explicit isolated-study enrollment; never starts a collector or scheduler."""
+    prior = store.research_event(SHADOW_STUDY, kind=SHADOW_STUDY)
+    if prior:
+        _shadow_require(prior["mode"] == mode, "SHADOW_STUDY_MODE_CONFLICT")
+        return prior
+    _shadow_require(mode in {"PROSPECTIVE", "SYNTHETIC_TEST"}, "SHADOW_MODE_INVALID")
+    version = _shadow_code_version()
+    _shadow_require(mode == "SYNTHETIC_TEST" or not version["working_tree_dirty"], "SHADOW_CODE_NOT_SEALED")
+    record = dict(schema_version=SHADOW_VERSION, mode=mode, started_at_ms=_shadow_now(),
+                  registry=deepcopy(registry.with_l6_candidate_sources().payload), code_version=version,
+                  selection="ALL_SUBMITTED_CLASSIFIED_CANDIDATES_IN_RECEIPT_ORDER",
+                  stream_completeness="NOT_PROVEN_BINANCE_SAMPLED_SOURCE", **_shadow_locks())
+    store.record_research_event(SHADOW_STUDY, SHADOW_STUDY, record)
+    return record
+
+
+class _ShadowWakePreview:
+    """Buffer the existing Wake validator's writes until the pair intake commits."""
+    def __init__(self, store):
+        self.store, self.records = store, []
+
+    def __getattr__(self, name):
+        return getattr(self.store, name)
+
+    def record_research_event(self, event_id, kind, payload):
+        self.records.append((event_id, kind, deepcopy(payload)))
+        return True
+
+
+def capture_liquidation_shadow(store, registry, *, baseline_pack, captures, cutoff_ms,
+                               candidate=None, liquidation_snapshot=None,
+                               control_transfer_evidence=None):
+    """Freeze one shared input plus a strictly additive B, using offline Gate/Wake.
+
+    captures preserves original UTF-8 bytes and actual archive clocks, alongside
+    the existing FetchResult. Local integrity does not attest external truth.
+    The caller must use an isolated ObservationStore; no Runtime/default path,
+    fetch, broker, model, notification or external-action entry is invoked.
+    """
+    from .reanalysis_wake import apply_liquidation_research_wake
+    from .source_registry import sha256_hex
+    study = store.research_event(SHADOW_STUDY, kind=SHADOW_STUDY)
+    _shadow_require(study is not None, "SHADOW_NOT_ENROLLED")
+    if candidate is None:
+        return dict(state="NOT_RUN", reason="NO_CLASSIFIED_NATURAL_EVENT", **_shadow_locks())
+    _shadow_require(isinstance(candidate, dict) and isinstance(captures, dict)
+                    and all(isinstance(v, dict) and isinstance(v.get("fetch"), FetchResult)
+                            for v in captures.values()), "SHADOW_CAPTURE_FORMAT_INVALID")
+    # Stable identity is exactly the existing research event identity, not a
+    # capture hash, revised cutoff, study name or eventual outcome.
+    identity = {key: candidate.get(key) for key in ("source_id", "symbol", "direction", "anchor_evidence_id")}
+    event_id = _shadow_hash(identity)
+    pair_id = "liquidation-shadow:" + event_id
+    request = dict(baseline_pack=baseline_pack, candidate=candidate, snapshot=liquidation_snapshot,
+                   control_transfer_evidence=control_transfer_evidence,
+                   captures={k: {**{a: b for a, b in v.items() if a != "fetch"},
+                                 "fetch": vars(v["fetch"])} for k, v in captures.items()}, cutoff_ms=cutoff_ms)
+    request_hash = _shadow_hash(request)
+    prior = store.research_event(pair_id, kind="LIQUIDATION_SHADOW_INPUTS")
+    if prior:
+        _shadow_require(prior["request_hash"] == request_hash, "SHADOW_FROZEN_INPUT_CONFLICT")
+        return prior
+    now = _shadow_now()
+    _shadow_require(type(cutoff_ms) is int and study["started_at_ms"] <= cutoff_ms <= now,
+                    "SHADOW_CUTOFF_INVALID")
+    _shadow_require(now - cutoff_ms <= registry.by_input_family("LIQUIDATION_AGGREGATES").max_age_seconds * 1000,
+                    "SHADOW_HISTORICAL_REPLAY_FORBIDDEN")
+    version = _shadow_code_version()
+    _shadow_require(study["mode"] == "SYNTHETIC_TEST" or not version["working_tree_dirty"], "SHADOW_CODE_NOT_SEALED")
+    _shadow_require(study["mode"] == "SYNTHETIC_TEST" or version == study["code_version"],
+                    "SHADOW_STUDY_CODE_CHANGED")
+    _shadow_require(registry.with_l6_candidate_sources().payload == study["registry"], "SHADOW_REGISTRY_CHANGED")
+    overrides, sources = {}, {}
+    for source_id, capture in captures.items():
+        required = {"fetch", "raw_utf8", "sha256", "encoding", "first_seen_at_ms",
+                    "retrieved_at_ms", "verified_at_ms", "available_at_ms",
+                    "request_identity", "source_authority_hash", "evidence_class"}
+        _shadow_require(isinstance(capture, dict) and required <= set(capture),
+                        "SHADOW_CAPTURE_METADATA_MISSING")
+        fetched = capture["fetch"]
+        spec = registry.with_l6_candidate_sources().get(source_id)
+        _shadow_require(isinstance(fetched, FetchResult) and isinstance(capture["raw_utf8"], str)
+                        and capture["encoding"] in {"JSON", "TEXT"}, "SHADOW_CAPTURE_FORMAT_INVALID")
+        raw = capture["raw_utf8"].encode("utf-8")
+        _shadow_require(sha256_hex(raw) == capture["sha256"], "SHADOW_ORIGINAL_BYTES_MISMATCH")
+        payload = json.loads(raw) if capture["encoding"] == "JSON" else raw.decode("utf-8")
+        _shadow_require(fetched.source_id == source_id and payload == fetched.payload, "SHADOW_PAYLOAD_MISMATCH")
+        first, retrieved = capture["first_seen_at_ms"], capture["retrieved_at_ms"]
+        verified, available = capture["verified_at_ms"], capture["available_at_ms"]
+        _shadow_require(all(type(t) is int for t in (first, retrieved, verified, available))
+                        and 0 < available <= first <= retrieved <= verified <= cutoff_ms,
+                        "SHADOW_SOURCE_NOT_VISIBLE")
+        expected_request = ("READ_LOCAL_PUBLIC_L4_SNAPSHOT:" + capture["sha256"]
+            if spec.input_family == "LIQUIDATION_AGGREGATES" else
+            "COMPOSE_REGISTERED_ENDPOINTS:" + _shadow_hash(spec.raw["endpoints"])
+            if spec.raw.get("endpoints") else "GET " + str(spec.endpoint))
+        _shadow_require(capture["request_identity"] == expected_request
+                        and capture["source_authority_hash"] == registry.with_l6_candidate_sources().hash,
+                        "SHADOW_SOURCE_IDENTITY_MISMATCH")
+        _shadow_require(capture["evidence_class"] == (
+            "SYNTHETIC_FIXTURE" if study["mode"] == "SYNTHETIC_TEST" else "CURRENT_FIRST_SEEN_CAPTURE"),
+            "SHADOW_EVIDENCE_CLASS_MISMATCH")
+        overrides[source_id] = fetched
+        sources[source_id] = {**{k: deepcopy(v) for k, v in capture.items() if k != "fetch"},
+                              "source_definition": deepcopy(spec.raw)}
+    gate = run_source_gate(registry, fetch_overrides=overrides,
+                           liquidation_aggregate_payload=liquidation_snapshot, now_ms=cutoff_ms)
+    _shadow_require(baseline_pack.get("evidence_pack_hash") == _shadow_hash(
+        {k: v for k, v in baseline_pack.items() if k != "evidence_pack_hash"}), "SHADOW_BASE_PACK_HASH_INVALID")
+    _shadow_require(baseline_pack["generated_at_ms"] == cutoff_ms
+                    and baseline_pack["source_gate_idempotency_key"] == gate["idempotency_key"],
+                    "SHADOW_BASELINE_SOURCE_OR_CLOCK_MISMATCH")
+    _shadow_require(not baseline_pack.get("reanalysis_wake", {}).get("liquidation_research"),
+                    "SHADOW_A_ALREADY_CONTAINS_INCREMENT")
+    _shadow_no_increment_in_a(baseline_pack,
+        {event_id, *candidate.get("supporting_evidence_ids", [])})
+    preview = _ShadowWakePreview(store)
+    _shadow_validate_baseline(baseline_pack, gate, preview, cutoff_ms, control_transfer_evidence)
+    for e in gate["evidence"]:
+        _shadow_require(e.get("as_of_ms") is None or e["as_of_ms"] <= cutoff_ms, "SHADOW_FUTURE_MARKET_OBSERVATION")
+    common = dict(evidence_pack=deepcopy(baseline_pack), source_gate=gate, sources=sources)
+    base_wake = baseline_pack.get("reanalysis_wake") or dict(state="NO_WAKE", reason="BASELINE_NO_WAKE",
+                    action_output="NONE", external_action_authority="NONE", external_action_performed=False)
+    b_wake = apply_liquidation_research_wake(base_wake, store=preview, candidate=candidate,
+        source_gate=gate, snapshot=liquidation_snapshot, registry=registry, at_ms=cutoff_ms)
+    b = b_wake["liquidation_research"]
+    if b["state"] == "REANALYSIS_REQUESTED":
+        from .liquidation_aggregator import normalize_force_order
+        from .reanalysis_wake import liquidation_evidence_identity
+        anchor = next(normalize_force_order(row["raw_payload"], received_ms=row["received_ms"])
+                      for row in candidate["event_records"] if liquidation_evidence_identity(
+                          normalize_force_order(row["raw_payload"], received_ms=row["received_ms"]),
+                          candidate["source_id"]) == candidate["anchor_evidence_id"])
+        aggregate_capture = captures.get(candidate["source_id"])
+        if not aggregate_capture or aggregate_capture["fetch"].payload != liquidation_snapshot:
+            b = dict(state="BLOCKED", reason="SHADOW_SNAPSHOT_ARCHIVE_CLOCK_MISSING")
+        elif (min(anchor.received_ms, anchor.event_time_ms, candidate["formed_at_ms"])
+                < study["started_at_ms"]):
+            b = dict(state="BLOCKED", reason="SHADOW_PRE_ENROLLMENT_EVENT")
+    qualified = b["state"] == "REANALYSIS_REQUESTED"
+    prior_intake = store.latest_research_event("LIQUIDATION_SHADOW_INPUTS")
+    _shadow_require(prior_intake is None or cutoff_ms >= prior_intake["cutoff_ms"], "SHADOW_INTAKE_ORDER_INVALID")
+    evidence_ids = [e["evidence_hash"] for e in gate["evidence"] if e["quality_state"].startswith("VALID")]
+    increment = dict(candidate=deepcopy(candidate), snapshot=deepcopy(liquidation_snapshot), wake=b_wake) if qualified else None
+    record = dict(schema_version=SHADOW_VERSION, pair_id=pair_id, event_id=event_id, request_hash=request_hash,
+                  mode=study["mode"], cutoff_ms=cutoff_ms, captured_at_ms=now, code_version=version,
+                  revalidated_at_ms=_shadow_now(),
+                  judgment_deadline_ms=cutoff_ms + registry.by_input_family("LIQUIDATION_AGGREGATES").max_age_seconds * 1000,
+                  source_qualification="EXISTING_GATE_REVALIDATED_LOCAL_CAPTURE",
+                  external_source_authenticity="NOT_INDEPENDENTLY_ATTESTED",
+                  common=common, common_hash=_shadow_hash(common), evidence_ids=evidence_ids,
+                  A=dict(state="AVAILABLE_FOR_RESEARCH", input_hash=_shadow_hash(common)),
+                  B=dict(state="AVAILABLE_FOR_RESEARCH" if qualified else "BLOCKED", reason=b.get("reason"),
+                         increment=increment, input_hash=_shadow_hash([_shadow_hash(common), increment])),
+                  classification={k: candidate.get(k) for k in ("formed_at_ms", "classification_provenance", "classification_basis")},
+                  analysis_execution={"A": "NOT_RUN", "B": "NOT_RUN"},
+                  sample_state="AWAITING_JUDGMENTS" if qualified else "B_BLOCKED_A_RETAINED", **_shadow_locks())
+    if qualified:
+        record["B"]["evidence_ids"] = b["evidence_ids"]
+    record["wake_comparison"] = dict(
+        A_requested=base_wake.get("state") == "REANALYSIS_REQUESTED",
+        B_requested=qualified and b_wake.get("state") == "REANALYSIS_REQUESTED",
+        measured_analysis_lead_ms=None, timing_improvement="NOT_YET_PROVEN")
+    store.record_research_events((preview.records if qualified else []) + [(pair_id, "LIQUIDATION_SHADOW_INPUTS", record)])
+    return record
+
+
+def freeze_liquidation_shadow_judgments(store, pair_id, judgments):
+    """Append actual analyst judgments; never manufacture either arm's analysis."""
+    inputs = store.research_event(pair_id, kind="LIQUIDATION_SHADOW_INPUTS")
+    _shadow_require(inputs is not None, "SHADOW_INPUTS_NOT_FROZEN")
+    freeze_id = pair_id + ":judgments"
+    prior = store.research_event(freeze_id, kind="LIQUIDATION_SHADOW_JUDGMENTS")
+    if prior:
+        _shadow_require(prior["judgments"] == judgments and prior["inputs_hash"] == _shadow_hash(inputs),
+                        "SHADOW_FROZEN_JUDGMENT_CONFLICT")
+        return prior
+    expected = {"A", "B"} if inputs["B"]["state"] == "AVAILABLE_FOR_RESEARCH" else {"A"}
+    _shadow_require(set(judgments) == expected, "SHADOW_ARM_SET_INVALID")
+    fields = {"input_hash", "cutoff_ms", "formed_at_ms", "analyst_provenance", "research_hypothesis", "competing_hypotheses",
+              "supporting_evidence_ids", "strongest_counterevidence", "capital_posture_research",
+              "invalidation_conditions", "next_trigger_conditions", "difference_reason"}
+    now = _shadow_now()
+    _shadow_require(now <= inputs["judgment_deadline_ms"], "SHADOW_JUDGMENTS_TOO_LATE")
+    version = _shadow_code_version()
+    _shadow_require(inputs["mode"] == "SYNTHETIC_TEST" or version == inputs["code_version"],
+                    "SHADOW_JUDGMENT_CODE_CHANGED")
+    for arm, judgment in judgments.items():
+        _shadow_require(set(judgment) == fields, "SHADOW_JUDGMENT_FIELDS_INVALID")
+        _shadow_require(judgment["input_hash"] == inputs[arm]["input_hash"]
+                        and judgment["cutoff_ms"] == inputs["cutoff_ms"], "SHADOW_JUDGMENT_INPUT_MISMATCH")
+        formed = judgment["formed_at_ms"]
+        _shadow_require(type(formed) is int and inputs["captured_at_ms"] <= formed <= now,
+                        "SHADOW_JUDGMENT_CLOCK_INVALID")
+        for key in ("analyst_provenance", "research_hypothesis", "difference_reason"):
+            _shadow_require(isinstance(judgment[key], str) and bool(judgment[key].strip()), "SHADOW_JUDGMENT_TEXT_MISSING")
+        for key in ("competing_hypotheses", "invalidation_conditions", "next_trigger_conditions"):
+            values = judgment[key]
+            _shadow_require(isinstance(values, list) and len(values) >= (2 if key == "competing_hypotheses" else 1)
+                            and all(isinstance(v, str) and v.strip() for v in values), "SHADOW_REASONING_FIELDS_MISSING")
+        allowed = set(inputs["evidence_ids"] + [inputs["common"]["evidence_pack"]["evidence_pack_hash"]]
+                      + inputs[arm].get("evidence_ids", []))
+        counter = judgment["strongest_counterevidence"]
+        _shadow_require(set(counter) == {"statement", "evidence_ids"} and bool(counter["statement"]), "SHADOW_COUNTEREVIDENCE_MISSING")
+        for refs in (judgment["supporting_evidence_ids"], counter["evidence_ids"]):
+            _shadow_require(isinstance(refs, list) and bool(refs) and set(refs) <= allowed, "SHADOW_EVIDENCE_REFERENCE_INVALID")
+        posture = judgment["capital_posture_research"]
+        _shadow_require(set(posture) == {"state", "btc_capital_question", "conditional_direction", "limitations"}
+                        and posture["state"] in {"CONDITIONAL_RESEARCH", "BLOCKED", "NOT_RUN"}
+                        and all(isinstance(posture[k], str) and posture[k].strip()
+                                for k in ("btc_capital_question", "conditional_direction", "limitations")),
+                        "SHADOW_CAPITAL_LINK_MISSING")
+        _shadow_check_clocks_and_authority(judgment, now)
+    result = dict(schema_version=SHADOW_VERSION, pair_id=pair_id, inputs_hash=_shadow_hash(inputs),
+                  frozen_at_ms=now, judgments=deepcopy(judgments), code_version=version,
+                  paired=expected == {"A", "B"}, sample_state=(
+                      "PROSPECTIVE_PAIR_FROZEN" if inputs["mode"] == "PROSPECTIVE" and len(expected) == 2
+                      else "SYNTHETIC_PAIR_ONLY" if len(expected) == 2 else "A_ONLY_B_BLOCKED"),
+                  judgment_quality="ANALYST_DECLARED_NOT_MACHINE_PROVEN", **_shadow_locks())
+    result["judgment_differences"] = {
+        key: {"A": judgments["A"][key], "B": judgments["B"][key]}
+        for key in fields - {"input_hash", "cutoff_ms", "formed_at_ms", "analyst_provenance"}
+        if len(expected) == 2 and judgments["A"][key] != judgments["B"][key]
+    }
+    store.record_research_event(freeze_id, "LIQUIDATION_SHADOW_JUDGMENTS", result)
+    return result
+
+
+def record_liquidation_shadow_followup(store, pair_id, *, archive_root, artifact, window_start_ms,
+                                       window_end_ms, interpretation):
+    """Only after paired freezing, read GO4's existing verified research archive."""
+    from .source_gate_runner import verified_price_structure_archive, parse_price_structure, _assert_fresh
+    frozen = store.research_event(pair_id + ":judgments", kind="LIQUIDATION_SHADOW_JUDGMENTS")
+    _shadow_require(frozen is not None and frozen["paired"], "SHADOW_PAIRED_JUDGMENTS_REQUIRED")
+    inputs = store.research_event(pair_id, kind="LIQUIDATION_SHADOW_INPUTS")
+    _shadow_require(inputs is not None and _shadow_hash(inputs) == frozen["inputs_hash"],
+                    "SHADOW_FROZEN_INPUT_CHAIN_MISMATCH")
+    now = _shadow_now()
+    _shadow_require(type(window_start_ms) is int and type(window_end_ms) is int
+                    and frozen["frozen_at_ms"] < window_start_ms <= window_end_ms < now,
+                    "SHADOW_FOLLOWUP_WINDOW_NOT_LATER")
+    _shadow_require(frozen["frozen_at_ms"] < artifact["first_seen_at_ms"] <= now,
+                    "SHADOW_FOLLOWUP_ALREADY_VISIBLE_AT_FREEZE")
+    _shadow_require(artifact["first_seen_at_ms"] > window_end_ms,
+                    "SHADOW_FOLLOWUP_NOT_YET_AVAILABLE")
+    payload = verified_price_structure_archive(Path(archive_root), artifact, now)
+    registry = SourceRegistry(store.research_event(SHADOW_STUDY, kind=SHADOW_STUDY)["registry"])
+    spec = registry.by_input_family("PRICE_STRUCTURE_CONTEXT")
+    parsed = parse_price_structure(payload)
+    _assert_fresh(parsed["as_of_ms"], now_ms=now, max_age_seconds=spec.max_age_seconds)
+    bars = [row for row in payload if window_start_ms <= row[0] and row[6] <= window_end_ms]
+    _shadow_require(bool(bars) and all(row[0] > frozen["frozen_at_ms"] and row[6] < now for row in bars),
+                    "SHADOW_FOLLOWUP_BARS_INVALID")
+    _shadow_require(isinstance(interpretation, str) and bool(interpretation.strip()), "SHADOW_FOLLOWUP_INTERPRETATION_MISSING")
+    identity = [pair_id, spec.source_id, "BTCUSDT", window_start_ms, window_end_ms]
+    event_id = "shadow-followup:" + _shadow_hash(identity)
+    material = dict(identity=identity, bars=bars, interpretation=interpretation)
+    prior = store.research_event(event_id, kind="LIQUIDATION_SHADOW_FOLLOWUP")
+    if prior:
+        _shadow_require(prior["material"] == material, "SHADOW_FROZEN_OUTCOME_CONFLICT")
+        return prior
+    result = dict(schema_version=SHADOW_VERSION, material=material, artifact=deepcopy(artifact), recorded_at_ms=now,
+                  paired_judgments_hash=_shadow_hash(frozen), inputs_hash=_shadow_hash(inputs),
+                  market_outcome_not_decision_quality_proof=True, code_version=_shadow_code_version(),
+                  **_shadow_locks())
+    store.record_research_event(event_id, "LIQUIDATION_SHADOW_FOLLOWUP", result)
+    return result
 
 
 def _resolve_wake_operational_percentile(

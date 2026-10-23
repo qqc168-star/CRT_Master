@@ -317,6 +317,29 @@ class ObservationStore:
         self.conn.commit()
         return True
 
+    def record_research_events(self, records: list[tuple[str, str, dict]]) -> int:
+        """Atomically append a related research set using the existing schema."""
+        added = 0
+        with self.conn:
+            for event_id, kind, payload in records:
+                if not isinstance(event_id, str) or not event_id or not isinstance(kind, str) or not kind:
+                    raise ValueError("RESEARCH_EVENT_IDENTITY_INVALID")
+                encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), allow_nan=False)
+                digest = hashlib.sha256(encoded.encode()).hexdigest()
+                prior = self.conn.execute(
+                    "SELECT kind,payload_hash FROM btc_research_events WHERE event_id=?", (event_id,)
+                ).fetchone()
+                if prior:
+                    if (prior["kind"], prior["payload_hash"]) != (kind, digest):
+                        raise ObservationRevisionConflict("FROZEN_RESEARCH_EVENT_CONFLICT")
+                    continue
+                self.conn.execute(
+                    "INSERT INTO btc_research_events(event_id,kind,payload_hash,payload_json) VALUES (?,?,?,?)",
+                    (event_id, kind, digest, encoded),
+                )
+                added += 1
+        return added
+
     def research_event(self, event_id: str, *, kind: str) -> dict | None:
         if not isinstance(event_id, str) or not event_id:
             return None
