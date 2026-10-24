@@ -37,6 +37,30 @@ class ObservationRevisionConflict(ValueError):
     pass
 
 
+def observation_exclusion_reason(observation: Observation) -> str | None:
+    """Reject only the six proven PR #164 pre-fix facts, retaining raw audit rows.
+
+    Raw archive f524e37187de79df9b1004d320d9dcfa94c988edbb24079e75563e06b0696abd
+    was captured at 1792627360013; its 10/22 UTC bar was still incomplete.
+    The audited evidence identity below incorrectly promoted that partial bar.
+    This is a scoped correction, not a new source policy or history ledger.
+    """
+    if (
+        observation.evidence_hash == "3f01f7a525cc42bc0cabaee3cd51698780c794b1510edceefa3c2db5ac40e8aa"
+        and observation.input_family == "PRICE_STRUCTURE_CONTEXT"
+        and observation.source_id == "CRT-CONN-BTC-SPOT-PRICE-STRUCTURE-PROXY-001"
+        and observation.layer_id == "AS-L6"
+        and observation.as_of_ms == 1792713599999
+        and observation.metric in {
+            "close_minus_sma200_over_atr20", "sma50_minus_sma200_over_atr20",
+            "return_20d_over_atr_vol", "cvd_20d_share", "quote_volume_rvol20",
+            "taker_buy_quote_share_1d",
+        }
+    ):
+        return "ORIGINAL_CAPTURE_UNFINISHED_DAILY_BAR_PR164"
+    return None
+
+
 COMPARABLE_METRICS = {
     ("MACRO_CONTEXT", "core_inflation_acceleration"),
     ("MACRO_CONTEXT", "unemployment_deterioration"),
@@ -512,6 +536,8 @@ class ObservationStore:
         selected: dict[int, Observation] = {}
         for row in rows:
             observation = self._from_row(row)
+            if observation_exclusion_reason(observation) is not None:
+                continue
             if before_as_of_ms is not None and observation.as_of_ms >= before_as_of_ms:
                 continue
             context = f"{input_family}:{metric}:{observation.as_of_ms}"

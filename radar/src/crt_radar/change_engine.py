@@ -8,6 +8,7 @@ from .observation_store import (
     Observation,
     ObservationRevisionConflict,
     ObservationStore,
+    observation_exclusion_reason,
 )
 from .oi_revision_policy import OiRevisionPolicyError
 
@@ -116,6 +117,14 @@ def compute_changes(store: ObservationStore, current: list[Observation]) -> dict
             "current_value": observation.value_num,
             "horizons": {},
         }
+        excluded = observation_exclusion_reason(observation)
+        if excluded is not None:
+            metric_result["current_value"] = None
+            metric_result["horizons"] = _revision_blocked_horizons(
+                "EVIDENCE_EXCLUDED_BLOCKED", excluded,
+            )
+            result[observation.metric] = metric_result
+            continue
         try:
             series = store.scoring_series(
                 observation.input_family,
