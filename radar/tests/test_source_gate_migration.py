@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 import tempfile
 import unittest
@@ -332,7 +333,8 @@ class PriceStructureIntegrityTests(unittest.TestCase):
         self.rows = _price_rows(NOW_MS)[-201:]
 
     def parse(self, rows=None):
-        return parse_price_structure(self.rows if rows is None else rows, now_ms=NOW_MS)
+        return parse_price_structure(self.rows if rows is None else rows,
+                                     captured_at_ms=NOW_MS, now_ms=NOW_MS)
 
     def test_complete_201_days_retains_research_scope(self):
         result = self.parse()
@@ -372,6 +374,78 @@ class PriceStructureIntegrityTests(unittest.TestCase):
         with self.assertRaisesRegex(ContractViolation, "201 complete"):
             self.parse(self.rows[1:] + [self.current_day_row()])
 
+    def test_replay_clock_cannot_complete_original_partial_bar(self):
+        rows = self.rows + [self.current_day_row()]
+        expected = self.parse(rows)
+        for evaluation in (NOW_MS + DAY_MS, NOW_MS + 10 * DAY_MS):
+            self.assertEqual(parse_price_structure(rows, captured_at_ms=NOW_MS,
+                                                  now_ms=evaluation), expected)
+
+    def test_missing_invalid_or_future_original_capture_blocks(self):
+        for capture in (None, True, 0, "1785549120000", NOW_MS + 1):
+            with self.subTest(capture=capture), self.assertRaises(ContractViolation):
+                parse_price_structure(self.rows, captured_at_ms=capture, now_ms=NOW_MS)
+
+    def test_gate_missing_capture_does_not_discard_independent_sources(self):
+        registry = SourceRegistry.load(REGISTRY_PATH)
+        spec = registry.by_input_family("PRICE_STRUCTURE_CONTEXT")
+        overrides = supplemental_overrides(registry, NOW_MS)
+        overrides[spec.source_id] = FetchResult(spec.source_id, "OK", payload=self.rows)
+        result = run_source_gate(registry, fetch_overrides=overrides, now_ms=NOW_MS)
+        evidence = next(row for row in result["evidence"] if row["source_id"] == spec.source_id)
+        self.assertEqual(evidence["quality_state"], "INVALID")
+        self.assertIn("capture time missing", evidence["quality_error"])
+        self.assertNotIn("PRICE_STRUCTURE_CONTEXT", result["parsed"])
+        self.assertIn("MACRO_CONTEXT", result["parsed"])
+
+    def test_live_fetch_uses_actual_capture_not_run_start(self):
+        registry = SourceRegistry.load(REGISTRY_PATH)
+        spec = registry.by_input_family("PRICE_STRUCTURE_CONTEXT")
+        def fetch(source):
+            if source.source_id == spec.source_id:
+                return FetchResult(source.source_id, "OK", payload=self.rows,
+                                   captured_at_ms=NOW_MS + 1000)
+            return FetchResult(source.source_id, "ERROR", error="ISOLATED_TEST")
+        with patch("crt_radar.source_gate_runner._http_get", side_effect=fetch), \
+             patch("crt_radar.source_gate_runner.time.time", side_effect=[NOW_MS / 1000] +
+                   [(NOW_MS + 2000) / 1000] * 100):
+            result = run_source_gate(registry)
+        self.assertIn("PRICE_STRUCTURE_CONTEXT", result["parsed"])
+
+    def test_real_oct22_archive_has_identical_completed_metrics_at_later_replay(self):
+        # Public, unmodified GET /api/v3/klines?symbol=BTCUSDT&interval=1d&limit=210.
+        # Sealed first_seen_at_ms == retrieved_at_ms, 2026-10-22 00:02:40.013 UTC.
+        raw = (ROOT / "tests/fixtures/binance_btcusdt_20261022_capture.json").read_bytes()
+        self.assertEqual(hashlib.sha256(raw).hexdigest(),
+                         "f524e37187de79df9b1004d320d9dcfa94c988edbb24079e75563e06b0696abd")
+        capture = 1792627360013
+        rows = json.loads(raw)
+        original = parse_price_structure(rows, captured_at_ms=capture, now_ms=capture)
+        complete_only = [row for row in rows if row[6] < capture]
+        self.assertEqual(len(complete_only), 209)
+        self.assertEqual(parse_price_structure(complete_only, captured_at_ms=capture,
+                                              now_ms=capture), original)
+        for delay in (DAY_MS, 3 * DAY_MS):
+            self.assertEqual(parse_price_structure(rows, captured_at_ms=capture,
+                                                  now_ms=capture + delay), original)
+        self.assertEqual(original["as_of_ms"], 1792627199999)
+        self.assertAlmostEqual(original["cvd_20d_share"], -0.009333586943610465)
+        self.assertAlmostEqual(original["quote_volume_rvol20"], 1.1733621936636607)
+        self.assertAlmostEqual(original["close_minus_sma200_over_atr20"], 5.475467915505541)
+        self.assertAlmostEqual(original["sma50_minus_sma200_over_atr20"], 4.338353398890444)
+        self.assertAlmostEqual(original["return_20d_over_atr_vol"], -0.0846890298282057)
+        self.assertNotAlmostEqual(original["cvd_20d_share"], 0.002417606318939953)
+        registry = SourceRegistry.load(REGISTRY_PATH)
+        spec = registry.by_input_family("PRICE_STRUCTURE_CONTEXT")
+        gate = run_source_gate(registry, now_ms=capture + 3 * DAY_MS,
+            fetch_overrides={spec.source_id: FetchResult(spec.source_id, "OK", payload=rows,
+                                                       captured_at_ms=capture)})
+        evidence = next(row for row in gate["evidence"] if row["source_id"] == spec.source_id)
+        self.assertEqual(evidence["quality_state"], "STALE")
+        self.assertEqual(evidence["as_of_ms"], original["as_of_ms"])
+        self.assertEqual(evidence["captured_at_ms"], capture)
+        self.assertNotIn("PRICE_STRUCTURE_CONTEXT", gate["parsed"])
+
     def test_future_day_is_rejected(self):
         with self.assertRaisesRegex(ContractViolation, "future"):
             self.parse(self.rows + [self.current_day_row(offset=1)])
@@ -399,7 +473,8 @@ class PriceStructureIntegrityTests(unittest.TestCase):
         with patch("crt_radar.source_gate_runner._http_get", side_effect=AssertionError("NO_NETWORK")):
             return run_source_gate(
                 registry, now_ms=now_ms,
-                fetch_overrides={spec.source_id: FetchResult(spec.source_id, "OK", payload=rows)},
+                fetch_overrides={spec.source_id: FetchResult(spec.source_id, "OK", payload=rows,
+                                                            captured_at_ms=NOW_MS)},
             )
 
     def test_historical_complete_window_is_stale_not_invalid(self):

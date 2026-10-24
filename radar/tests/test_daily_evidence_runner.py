@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -160,6 +161,36 @@ class DailyEvidenceRunnerTests(unittest.TestCase):
         self.assertEqual(router["state"], "CANDIDATE_BLOCKED")
         self.assertEqual(router["reason"], "V110_SEASON_STATE_TRANSITION_CONTRACT_NOT_RECOVERED")
         self.assertIsNone(router["season"])
+
+    def test_real_cached_daily_completion_is_fixed_while_pack_freshness_advances(self):
+        # Actual immutable 10/22 capture, not a synthetic market qualification.
+        payload = json.loads((ROOT / "tests/fixtures/binance_btcusdt_20261022_capture.json")
+                             .read_text(encoding="utf-8"))
+        captured = 1792627360013
+        spec = self.registry.by_input_family("PRICE_STRUCTURE_CONTEXT")
+        overrides = {spec.source_id: FetchResult(spec.source_id, "OK", payload=payload,
+                                                 captured_at_ms=captured)}
+        with tempfile.TemporaryDirectory() as td, \
+             patch("crt_radar.source_gate_runner._http_get", side_effect=AssertionError("NO_NETWORK")):
+            packs = [run_daily_evidence(self.registry,
+                     observation_db=Path(td) / (str(delay) + ".sqlite3"),
+                     fetch_overrides=overrides, now_ms=captured + delay,
+                     generated_at_ms=captured + delay)
+                     for delay in (0, 86_400_000, 3 * 86_400_000)]
+        first, replay, stale = packs
+        self.assertEqual(first["layers"]["L6"]["metrics"], replay["layers"]["L6"]["metrics"])
+        self.assertAlmostEqual(replay["layers"]["L6"]["metrics"]["cvd_20d_share"]["value"],
+                               -0.009333586943610465)
+        self.assertEqual(replay["layers"]["L6"]["metrics"]["cvd_20d_share"]["as_of_ms"],
+                         1792627199999)
+        self.assertNotIn("cvd_20d_share", stale["layers"].get("L6", {}).get("metrics", {}))
+        self.assertEqual(first["reanalysis_wake"], replay["reanalysis_wake"])
+        for pack in packs:
+            self.assertEqual(pack["reanalysis_wake"]["state"], "NO_WAKE")
+            self.assertEqual(pack["pack_state"], "BLOCKED")
+            self.assertIsNone(pack["analyst_output"]["season"])
+            self.assertEqual(pack["authority"]["external_action_authority"], "NONE")
+            self.assertFalse(pack["authority"]["external_action_performed"])
 
     def test_critical_source_failure_propagates_blocked(self):
         self.overrides[self.oi.source_id] = FetchResult(self.oi.source_id, "ERROR", error="timeout")

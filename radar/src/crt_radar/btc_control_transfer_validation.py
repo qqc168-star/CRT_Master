@@ -90,7 +90,7 @@ def _observation(store, observation_id: str, cutoff: int) -> dict:
     from .source_gate_runner import verified_price_structure_archive, parse_price_structure
     artifact = observation.get("artifact", {})
     payload = verified_price_structure_archive(observation["archive_root"], artifact, cutoff)
-    parse_price_structure(payload, now_ms=artifact["retrieved_at_ms"])
+    parse_price_structure(payload, captured_at_ms=artifact["first_seen_at_ms"], now_ms=cutoff)
     if (artifact.get("sha256") != observation.get("raw_sha256")
             or artifact.get("first_seen_at_ms") != first
             or artifact.get("retrieved_at_ms") != available
