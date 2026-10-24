@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import tempfile
 import unittest
 from dataclasses import replace
@@ -12,11 +13,13 @@ from crt_radar.observation_store import (
     ObservationRevisionConflict,
     ObservationStore,
     extract_observations,
+    observation_exclusion_reason,
 )
 from crt_radar.source_gate_runner import (
     FetchResult,
     _evidence_envelope,
     parse_fred_latest,
+    parse_price_structure,
 )
 from crt_radar.source_registry import SourceRegistry
 
@@ -502,6 +505,120 @@ class ObservationIdentityTests(unittest.TestCase):
                 visible_at_ms=BASE_MS + 2 * DAY_MS,
                 before_as_of_ms=boundary.as_of_ms,
             )
+
+
+class DailyCaptureHistoryExclusionTests(unittest.TestCase):
+    """Replay audited identities; future examples are synthetic, not market proof."""
+
+    BAD_VALUES = {
+        "close_minus_sma200_over_atr20": 5.94093351607026,
+        "sma50_minus_sma200_over_atr20": 4.736120150049881,
+        "return_20d_over_atr_vol": -0.039979119688414,
+        "cvd_20d_share": 0.002417606318939953,
+        "quote_volume_rvol20": 0.004452654039606193,
+        "taker_buy_quote_share_1d": 0.4532244891629451,
+    }
+
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp_dir.cleanup)
+        self.store = ObservationStore(Path(self.temp_dir.name) / "history.sqlite3")
+        self.addCleanup(self.store.close)
+
+    def row(self, metric="cvd_20d_share", **changes):
+        return replace(Observation(
+            layer_id="AS-L6", input_family="PRICE_STRUCTURE_CONTEXT", metric=metric,
+            as_of_ms=1792713599999, value_num=self.BAD_VALUES[metric],
+            source_id="CRT-CONN-BTC-SPOT-PRICE-STRUCTURE-PROXY-001", quality_state="VALID_FRESH",
+            evidence_hash="3f01f7a525cc42bc0cabaee3cd51698780c794b1510edceefa3c2db5ac40e8aa",
+            registry_hash="f1942cda86ba77889ba6460656e8f72bf1d0257e2fb5b86eafd6b32e9f7e9123",
+            recorded_run_id="cb85606b-0369-42f0-aee3-ee38f795ae26", recorded_at_ms=1792714655492,
+        ), **changes)
+
+    def qualified(self, row, store=None):
+        return (store or self.store).scoring_series(row.input_family, row.metric,
+            visible_at_ms=row.recorded_at_ms + 40 * DAY_MS, expected_layer_id=row.layer_id,
+            allowed_source_ids=[row.source_id])
+
+    def test_six_audited_facts_excluded_without_rewriting_raw_rows_or_schema(self):
+        rows = [self.row(metric) for metric in self.BAD_VALUES]
+        payload = json.loads((ROOT / "tests/fixtures/binance_btcusdt_20261022_capture.json").read_bytes())
+        legal = parse_price_structure(payload, captured_at_ms=1792627360013,
+                                      now_ms=1792714655492)
+        good = [replace(row, as_of_ms=legal["as_of_ms"], value_num=legal[row.metric],
+                recorded_at_ms=1792627360013,
+                evidence_hash=hashlib.sha256((row.metric + "-legal").encode()).hexdigest()) for row in rows]
+        self.store.record(rows + good)
+        schema = self.store.conn.execute("SELECT sql FROM sqlite_master ORDER BY name").fetchall()
+        writes = self.store.conn.total_changes
+        for bad, valid in zip(rows, good):
+            self.assertIsNotNone(observation_exclusion_reason(bad))
+            self.assertEqual(self.qualified(bad), [valid])
+            self.assertEqual(self.store.series(bad.input_family, bad.metric), [valid, bad])
+        self.assertEqual(self.store.count(), 12)
+        self.assertEqual(self.store.conn.total_changes, writes)
+        self.assertEqual(self.store.conn.execute("SELECT sql FROM sqlite_master ORDER BY name").fetchall(), schema)
+        with ObservationStore(self.store.path) as reopened:
+            for bad, valid in zip(rows, good):
+                self.assertEqual(self.qualified(bad, reopened), [valid])
+            self.assertEqual(reopened.count(), 12)
+
+    def test_matching_hash_does_not_exclude_other_source_period_family_or_metric(self):
+        bad = self.row()
+        for changes in (
+            {"evidence_hash": "a" * 64}, {"source_id": "OTHER_SOURCE"},
+            {"as_of_ms": bad.as_of_ms - DAY_MS}, {"input_family": "OTHER_FAMILY"},
+            {"layer_id": "AS-L5"}, {"metric": "another_metric"},
+        ):
+            with self.subTest(changes=changes):
+                different = replace(bad, **changes)
+                self.assertIsNone(observation_exclusion_reason(different))
+                with ObservationStore(Path(self.temp_dir.name) / (str(len(changes)) +
+                     hashlib.sha256(str(changes).encode()).hexdigest() + ".sqlite3")) as store:
+                    store.record([different])
+                    self.assertEqual(self.qualified(different, store), [different])
+
+    def test_new_valid_capture_same_day_remains_comparable(self):
+        bad = self.row()
+        valid = replace(bad, evidence_hash="b" * 64, value_num=-0.01,
+                        recorded_at_ms=bad.recorded_at_ms + DAY_MS)
+        self.store.record([bad, valid])
+        self.assertEqual(self.qualified(valid), [valid])
+        self.assertEqual(self.store.count(), 2)
+
+    def test_bad_current_cannot_publish_changes_for_any_horizon(self):
+        rows = [self.row(metric) for metric in self.BAD_VALUES]
+        self.store.record(rows)
+        changes = compute_changes(self.store, rows)
+        self.assertEqual(len(changes), 4)  # RVOL and 1d buy-share are not comparable metrics.
+        self.assertNotIn("quote_volume_rvol20", changes)
+        self.assertNotIn("taker_buy_quote_share_1d", changes)
+        for metric in changes.values():
+            self.assertIsNone(metric["current_value"])
+            for horizon in metric["horizons"].values():
+                self.assertEqual(horizon["history_state"], "EVIDENCE_EXCLUDED_BLOCKED")
+                self.assertIn("PR164", horizon["blocked_reason"])
+                self.assertNotIn("percent_change", horizon)
+
+    def test_future_changes_and_percentiles_equal_clean_history_without_reset(self):
+        bad = self.row()
+        # Synthetic future counterexamples only; no real later bar is claimed.
+        good = [replace(bad, as_of_ms=bad.as_of_ms - days * DAY_MS,
+                        value_num=-0.05 + days * 0.0001,
+                        recorded_at_ms=bad.as_of_ms - days * DAY_MS + 1,
+                        evidence_hash=hashlib.sha256(str(days).encode()).hexdigest())
+                for days in range(40, 0, -1)]
+        self.store.record(good + [bad])
+        with ObservationStore(Path(self.temp_dir.name) / "clean-control.sqlite3") as clean:
+            clean.record(good)
+            for days in (1, 3, 7, 30):
+                current = replace(bad, as_of_ms=bad.as_of_ms + days * DAY_MS,
+                    recorded_at_ms=bad.as_of_ms + days * DAY_MS + 1,
+                    value_num=0.01, evidence_hash="c" * 64)
+                self.assertEqual(compute_changes(self.store, [current]), compute_changes(clean, [current]))
+            self.assertEqual(len(self.qualified(bad)), 40)
+            self.assertEqual(self.store.count(), 41)
+            self.assertEqual(clean.count(), 40)
 
 
 if __name__ == "__main__":
