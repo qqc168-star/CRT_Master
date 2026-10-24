@@ -109,5 +109,6 @@ def supplemental_overrides(registry, now_ms: int) -> dict[str, FetchResult]:
                 }
             ],
         ),
-        price.source_id: FetchResult(price.source_id, "OK", payload=_price_rows(now_ms)),
+        price.source_id: FetchResult(price.source_id, "OK", payload=_price_rows(now_ms),
+                                     captured_at_ms=now_ms - 500),
     }

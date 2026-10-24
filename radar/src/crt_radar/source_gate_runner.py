@@ -83,6 +83,8 @@ class FetchResult:
     elapsed_ms: float | None = None
     attempts: int = 1
     error: str | None = None
+    # Original source-view time; retain it when reading an immutable cache.
+    captured_at_ms: int | None = None
 
 
 def _is_retryable(exc: Exception) -> bool:
@@ -133,6 +135,7 @@ def _http_get(
                 payload=payload,
                 elapsed_ms=(time.perf_counter() - started) * 1000,
                 attempts=attempt,
+                captured_at_ms=int(time.time() * 1000),
             )
         except Exception as exc:
             last_error = exc
@@ -529,12 +532,23 @@ def parse_coinmetrics_caps(payload: Any) -> dict[str, Any]:
     return result
 
 
-def parse_price_structure(payload: Any, *, now_ms: int | None = None) -> dict[str, Any]:
+def parse_price_structure(payload: Any, *, captured_at_ms: int | None = None,
+                          now_ms: int | None = None) -> dict[str, Any]:
+    """Completion belongs to the original capture, freshness to evaluation.
+
+    The transport or verified archive reader owns capture provenance. Missing
+    capture evidence must never fall back to today's clock. run_source_gate
+    still applies the unchanged freshness policy against the evaluation time.
+    """
     if not isinstance(payload, list):
         raise ContractViolation("BTC kline payload must be a list")
     now = int(time.time() * 1000) if now_ms is None else now_ms
+    if type(captured_at_ms) is not int or captured_at_ms < 1_000_000_000_000:
+        raise ContractViolation("BTC price structure original capture time missing or invalid")
+    if type(now) is not int or captured_at_ms > now:
+        raise ContractViolation("BTC price structure capture time exceeds evaluation time")
     day_ms = 86_400_000
-    current_day = now // day_ms * day_ms
+    current_day = captured_at_ms // day_ms * day_ms
     complete = []
     previous_open = None
     seen = set()
@@ -555,7 +569,7 @@ def parse_price_structure(payload: Any, *, now_ms: int | None = None) -> dict[st
             raise ContractViolation("BTC daily kline future date")
         seen.add(open_ms)
         previous_open = open_ms
-        if close_ms < now:
+        if close_ms < captured_at_ms:
             complete.append(row)
         elif open_ms != current_day or index != len(payload) - 1:
             raise ContractViolation("BTC unfinished daily kline must be the trailing current day")
@@ -754,6 +768,8 @@ def _evidence_envelope(
         "registry_hash": registry_hash,
         "quality_error": quality_error,
     }
+    if spec.parser_id == "BINANCE_PRICE_STRUCTURE_PROXY_V1":
+        envelope["captured_at_ms"] = fetched.captured_at_ms
     envelope["evidence_hash"] = sha256_hex(canonical_json_bytes(envelope))
     return envelope
 
@@ -910,12 +926,16 @@ def run_source_gate(
                 parser = PARSERS.get(spec.parser_id)
                 if parser is None:
                     raise ContractViolation(f"unsupported parser_id: {spec.parser_id}")
+                # A live fetch can finish after the run began. An explicit
+                # replay cutoff remains fixed; only an unpinned live evaluation
+                # uses the actual post-fetch clock.
+                evaluation_ms = int(time.time() * 1000) if now_ms is None else now
                 parsed_value = (
-                    parser(fetched.payload, now_ms=now)
+                    parser(fetched.payload, captured_at_ms=fetched.captured_at_ms, now_ms=evaluation_ms)
                     if spec.parser_id == "BINANCE_PRICE_STRUCTURE_PROXY_V1"
                     else parser(fetched.payload)
                 )
-                _assert_fresh(parsed_value["as_of_ms"], now_ms=now, max_age_seconds=spec.max_age_seconds)
+                _assert_fresh(parsed_value["as_of_ms"], now_ms=evaluation_ms, max_age_seconds=spec.max_age_seconds)
                 quality_state = "VALID_FRESH"
                 parsed[family] = parsed_value
             except Exception as exc:

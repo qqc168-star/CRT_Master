@@ -271,7 +271,7 @@ class BtcBullValidationTests(unittest.TestCase):
                 ]
             )
 
-        result = parse_price_structure(payload)
+        result = parse_price_structure(payload, captured_at_ms=payload[-1][6] + 1)
 
         self.assertAlmostEqual(
             result["quote_volume_rvol20"],

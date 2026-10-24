@@ -270,6 +270,11 @@ def capture_liquidation_shadow(store, registry, *, baseline_pack, captures, cuto
         _shadow_require(capture["evidence_class"] == (
             "SYNTHETIC_FIXTURE" if study["mode"] == "SYNTHETIC_TEST" else "CURRENT_FIRST_SEEN_CAPTURE"),
             "SHADOW_EVIDENCE_CLASS_MISMATCH")
+        if spec.parser_id == "BINANCE_PRICE_STRUCTURE_PROXY_V1":
+            # The staged archive has just been bound to original bytes and
+            # first visibility. Reuse that evidence instead of the replay clock.
+            from dataclasses import replace
+            fetched = replace(fetched, captured_at_ms=first)
         overrides[source_id] = fetched
         sources[source_id] = {**{k: deepcopy(v) for k, v in capture.items() if k != "fetch"},
                               "source_definition": deepcopy(spec.raw)}
@@ -534,7 +539,7 @@ def record_liquidation_shadow_followup(store, pair_id, *, archive_root, artifact
     payload = verified_price_structure_archive(Path(archive_root), artifact, now)
     registry = SourceRegistry(store.research_event(SHADOW_STUDY, kind=SHADOW_STUDY)["registry"])
     spec = registry.by_input_family("PRICE_STRUCTURE_CONTEXT")
-    parsed = parse_price_structure(payload)
+    parsed = parse_price_structure(payload, captured_at_ms=artifact["first_seen_at_ms"], now_ms=now)
     _assert_fresh(parsed["as_of_ms"], now_ms=now, max_age_seconds=spec.max_age_seconds)
     bars = [row for row in payload if window_start_ms <= row[0] and row[6] <= window_end_ms]
     _shadow_require(bool(bars) and all(row[0] > frozen["frozen_at_ms"] and row[6] < now for row in bars),

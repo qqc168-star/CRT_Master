@@ -169,7 +169,7 @@ def archive_structure_observation(root, artifact, store, *, recorded_at_ms,
     from crt_radar.btc_control_transfer_validation import research_identity
     from crt_radar.btc_transition_replay_evidence import archived_structure_bars
     payload = verified_proxy_payload(Path(root), artifact, recorded_at_ms)
-    parse_price_structure(payload, now_ms=artifact["retrieved_at_ms"])
+    parse_price_structure(payload, captured_at_ms=artifact["first_seen_at_ms"], now_ms=recorded_at_ms)
     rows = [row for row in payload if row[6] < artifact["retrieved_at_ms"]]
     rows = rows[-201:]
     if window_start_ms is not None:
@@ -367,7 +367,8 @@ def verify_evidence_chain(root, now, *, proxy_artifact=None, l6_root=None):
     proxy_spec = registry.by_input_family(PROXY)
     if proxy_artifact is not None:
         overrides[proxy_spec.source_id] = FetchResult(proxy_spec.source_id, "OK", attempts=0,
-            payload=verified_proxy_payload(root, proxy_artifact, now))
+            payload=verified_proxy_payload(root, proxy_artifact, now),
+            captured_at_ms=proxy_artifact["first_seen_at_ms"])
     gate = run_source_gate(registry, now_ms=now, l6_source_root=l6_root or root, fetch_overrides=overrides,
         probe_fetcher=lambda spec:overrides[spec.source_id])
     folder = root/"verification"
