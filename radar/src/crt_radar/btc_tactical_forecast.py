@@ -65,11 +65,11 @@ def _hash(value: object) -> None:
         raise ValueError("CONTENT_HASH_INVALID")
 
 
-def _sources(rows: object, cutoff_ms: int) -> set[str]:
+def _sources(rows: object, cutoff_ms: int) -> dict[str, str]:
     """Preserve upstream qualifications; never manufacture source qualification."""
     if not isinstance(rows, list) or not rows:
         raise ValueError("SOURCE_REFERENCES_MISSING")
-    ids = set()
+    qualifications = {}
     for row in rows:
         for field in ("source_id", "source_ref", "validation_ref"):
             _text(row.get(field))
@@ -79,21 +79,18 @@ def _sources(rows: object, cutoff_ms: int) -> set[str]:
             _clock(row.get(field))
             if row[field] > cutoff_ms:
                 raise ValueError("SOURCE_NOT_VISIBLE_AT_CUTOFF")
-        if row["observed_at_ms"] > row["available_at_ms"]:
-            raise ValueError("SOURCE_CLOCK_ORDER_INVALID")
-        if row["retrieved_at_ms"] > row["validated_at_ms"]:
-            raise ValueError("SOURCE_CLOCK_ORDER_INVALID")
-        if row["available_at_ms"] > row["validated_at_ms"]:
+        if not (row["observed_at_ms"] <= row["available_at_ms"]
+                <= row["retrieved_at_ms"] <= row["validated_at_ms"]):
             raise ValueError("SOURCE_CLOCK_ORDER_INVALID")
         if row.get("quality_state") not in {"VALID", "RESEARCH_ONLY", "BLOCKED", "STALE"}:
             raise ValueError("UPSTREAM_QUALIFICATION_REQUIRED")
-        if row["source_ref"] in ids:
+        if row["source_ref"] in qualifications:
             raise ValueError("DUPLICATE_SOURCE_REFERENCE")
-        ids.add(row["source_ref"])
-    return ids
+        qualifications[row["source_ref"]] = row["quality_state"]
+    return qualifications
 
 
-def _anchor(anchor: dict, refs: set[str], cutoff_ms: int) -> None:
+def _anchor(anchor: dict, refs: dict[str, str], cutoff_ms: int) -> None:
     value = anchor.get("price")
     if (isinstance(value, bool) or not isinstance(value, (int, float))
             or not math.isfinite(value) or value <= 0):
@@ -103,7 +100,8 @@ def _anchor(anchor: dict, refs: set[str], cutoff_ms: int) -> None:
     if anchor.get("price_basis") not in {"COMPLETED_CLOSE", "SPOT_OBSERVATION", "BID_ASK"}:
         raise ValueError("PRICE_BASIS_REQUIRED")
     _clock(anchor.get("observed_at_ms"))
-    if anchor["observed_at_ms"] > cutoff_ms or anchor.get("source_ref") not in refs:
+    if (anchor["observed_at_ms"] > cutoff_ms
+            or refs.get(anchor.get("source_ref")) not in {"VALID", "RESEARCH_ONLY"}):
         raise ValueError("PRICE_ANCHOR_SOURCE_INVALID")
 
 
@@ -200,7 +198,6 @@ def freeze_post(store: ObservationStore, post: dict, *, now_ms: int) -> dict:
     if (not isinstance(reviews, list) or len(reviews) != len(targets)
             or {row.get("claim_id") for row in reviews} != set(targets)):
         raise ValueError("POST_MUST_REVIEW_EACH_ORIGINAL_CLAIM")
-    quality = {row["source_ref"]: row["quality_state"] for row in post["sources"]}
     observed = {row["source_ref"]: row["observed_at_ms"] for row in post["sources"]}
     for row in reviews:
         if set(row) != {"claim_id", "result", "source_refs", "reason"}:
@@ -209,10 +206,10 @@ def freeze_post(store: ObservationStore, post: dict, *, now_ms: int) -> dict:
         if row.get("result") not in {"SUPPORTED", "REFUTED", "INCONCLUSIVE", "PENDING"}:
             raise ValueError("REVIEW_RESULT_INVALID")
         used = row.get("source_refs")
-        if not isinstance(used, list) or not set(used) <= refs:
+        if not isinstance(used, list) or not set(used) <= set(refs):
             raise ValueError("REVIEW_SOURCE_UNKNOWN")
         if row["result"] in {"SUPPORTED", "REFUTED"}:
-            if not used or any(quality[ref] not in {"VALID", "RESEARCH_ONLY"} for ref in used):
+            if not used or any(refs[ref] not in {"VALID", "RESEARCH_ONLY"} for ref in used):
                 raise ValueError("REVIEW_EVIDENCE_BLOCKED")
             required_time = (targets[row["claim_id"]] if row["result"] == "SUPPORTED"
                              else pre["recorded_at_ms"])

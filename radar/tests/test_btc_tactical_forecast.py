@@ -165,9 +165,10 @@ class TacticalForecastTests(unittest.TestCase):
             freeze_post(self.store, post, now_ms=post["generated_at_ms"])
 
     def test_blocked_sources_preserved_but_cannot_prove_outcome(self):
-        self.pre["sources"][0]["quality_state"] = "BLOCKED"
+        auxiliary = dict(self.source, source_ref="fixture:blocked", quality_state="BLOCKED")
+        self.pre["sources"].append(auxiliary)
         pre = freeze_pre(self.store, self.pre, now_ms=self.now)
-        self.assertEqual(pre["content"]["sources"][0]["quality_state"], "BLOCKED")
+        self.assertEqual(pre["content"]["sources"][1]["quality_state"], "BLOCKED")
         post = self.post(pre)
         post["sources"][0]["quality_state"] = "BLOCKED"
         post["reviews"][0]["result"] = "REFUTED"
@@ -175,6 +176,72 @@ class TacticalForecastTests(unittest.TestCase):
             freeze_post(self.store, post, now_ms=post["generated_at_ms"])
         post["reviews"][0]["result"] = "INCONCLUSIVE"
         freeze_post(self.store, post, now_ms=post["generated_at_ms"])
+
+    def test_retrieval_before_publication_rejected_across_callers(self):
+        pre = freeze_pre(self.store, self.pre, now_ms=self.now)
+        post = self.post(pre)
+        revision = self.revision(pre)
+        cases = ((freeze_pre, deepcopy(self.pre), self.now),
+                 (freeze_post, post, post["generated_at_ms"]),
+                 (revise_price_anchor, revision, revision["changed_at_ms"]))
+        for call, payload, now in cases:
+            with self.subTest(call=call.__name__):
+                payload["id"] += ":clock-counterexample"
+                source = payload["sources"][0]
+                source["available_at_ms"] = source["validated_at_ms"]
+                self.assertGreater(source["available_at_ms"], source["retrieved_at_ms"])
+                with self.assertRaisesRegex(ValueError, "SOURCE_CLOCK_ORDER_INVALID"):
+                    call(self.store, payload, now_ms=now)
+        self.assertEqual(read_pre(self.store, self.pre["id"], pre["content_hash"]), pre)
+
+    def test_blocked_and_stale_price_anchors_rejected_in_pre_and_revision(self):
+        pre = freeze_pre(self.store, self.pre, now_ms=self.now)
+        for quality in ("BLOCKED", "STALE"):
+            for call, payload, now in (
+                (freeze_pre, deepcopy(self.pre), self.now),
+                (revise_price_anchor, self.revision(pre), self.now + 1000),
+            ):
+                with self.subTest(quality=quality, call=call.__name__):
+                    payload["id"] += ":" + quality
+                    payload["sources"][0]["quality_state"] = quality
+                    with self.assertRaisesRegex(ValueError, "PRICE_ANCHOR_SOURCE_INVALID"):
+                        call(self.store, payload, now_ms=now)
+        self.assertEqual(self.store.conn.execute(
+            "SELECT count(*) FROM btc_research_events").fetchone()[0], 1)
+
+    def test_qualified_anchor_with_blocked_auxiliary_preserves_source_qualifications(self):
+        for quality in ("VALID", "RESEARCH_ONLY"):
+            with self.subTest(quality=quality):
+                payload = deepcopy(self.pre)
+                payload["id"] += ":" + quality
+                payload["sources"][0]["quality_state"] = quality
+                payload["sources"].extend(
+                    dict(self.source, source_ref="fixture:" + state, quality_state=state)
+                    for state in ("BLOCKED", "STALE"))
+                record = freeze_pre(self.store, payload, now_ms=self.now)
+                self.assertEqual([row["quality_state"] for row in record["content"]["sources"]],
+                                 [quality, "BLOCKED", "STALE"])
+                self.assertEqual(record["assessment_authority"], "RESEARCH_ONLY")
+                self.assertEqual(record["content"]["price_anchor"], self.anchor)
+
+    def test_post_unknown_source_rejected_then_valid_chain_succeeds(self):
+        pre = freeze_pre(self.store, self.pre, now_ms=self.now)
+        post = self.post(pre)
+        post["reviews"][0]["source_refs"] = ["fixture:unknown"]
+        with self.assertRaisesRegex(ValueError, "REVIEW_SOURCE_UNKNOWN"):
+            freeze_post(self.store, post, now_ms=post["generated_at_ms"])
+        self.assertIsNone(self.store.research_event(post["id"], kind=POST))
+        post["reviews"][0]["source_refs"] = ["fixture:btc"]
+        record = freeze_post(self.store, post, now_ms=post["generated_at_ms"])
+        self.assertEqual(record["content"]["linkage_state"], "PRE_LINK_VERIFIED")
+        self.assertEqual(record["content"]["pre_hash"], pre["content_hash"])
+
+    def test_equal_source_clocks_are_accepted(self):
+        for field in ("observed_at_ms", "available_at_ms", "retrieved_at_ms", "validated_at_ms"):
+            self.pre["sources"][0][field] = self.now
+        self.pre["price_anchor"]["observed_at_ms"] = self.now
+        record = freeze_pre(self.store, self.pre, now_ms=self.now)
+        self.assertEqual(record["content"]["sources"], self.pre["sources"])
 
     def test_late_import_not_misrepresented_as_prospective_pre(self):
         result = freeze_pre(self.store, self.pre, now_ms=self.schedule["open_ms"] + 1)
