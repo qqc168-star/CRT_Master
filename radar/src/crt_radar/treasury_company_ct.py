@@ -405,6 +405,9 @@ def _events(raw: Any, issuer: str, as_of: int, coverage: Any, *, management: boo
             _block(out, claim, "EVENT_IDENTITY_OR_ROUTE_INVALID")
             continue
         row.update(event_id=key, **{f: record[f] for f in fields})
+        if record.get("execution_time", "UNSPECIFIED") is None or record.get("aggregation_role") == "CUMULATIVE_NOT_ADDITIVE_WITH_CONTAINED_EVENTS":
+            _block(out, claim, "PERIOD_AGGREGATE_NOT_REALIZED_CONVERSION")
+            continue
         if "funding_stage" in record and not (
                 record["funding_stage"] == "SETTLED" and _time(record.get("settlement_time"))
                 and record["settlement_time"] <= record["effective_time"]
@@ -590,6 +593,22 @@ def build_treasury_company_ct(*, issuer_id: str, as_of_ms: int,
         "capital_conversion": _events(capital_conversion_events, issuer_id, as_of_ms, coverage.get("capital_conversion"), management=False),
         "management_evidence": _events(management_events, issuer_id, as_of_ms, coverage.get("management"), management=True),
     }
+    if isinstance(source_binding, dict):
+        facts = []
+        observations = source_binding.get("observations", [])
+        if not isinstance(observations, list):
+            _block(organs["funding_engine"], "reported_financing_fact", "SOURCE_BINDING_OBSERVATIONS_INVALID")
+            observations = []
+        for fact in observations:
+            if not isinstance(fact, dict) or fact.get("claim") not in {
+                    "ATM_PROGRAM_TERMS", "REPORTED_FINANCING_CASH_FLOWS", "SATS_RESERVE_TERMS"}:
+                continue
+            if _metadata(fact, organs["funding_engine"], "reported_financing_fact", issuer_id, as_of_ms, "AUDIT_REPLAY"):
+                facts.append(deepcopy(fact))
+        if facts:
+            organs["funding_engine"]["reported_financing_facts"] = facts
+        if organs["funding_engine"]["state"] == "AVAILABLE" and organs["funding_engine"]["blockers"]:
+            organs["funding_engine"]["state"] = "PARTIAL"
     if preferred_funding_events is not None:
         organs["funding_engine"]["preferred_funding_attribution"] = build_preferred_funding_attribution(
             events=preferred_funding_events, issuer_id=issuer_id, as_of_ms=as_of_ms)
@@ -822,7 +841,7 @@ def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms
         key = raw.get("event_id")
         if (not _text(key) or ids[key] != 1 or raw.get("source_class") not in OFFICIAL_CLASSES
                 or meta["source_semantic"]["identity"] in {RESEARCH_IDENTITY, LEGACY_RESEARCH_IDENTITY}
-                or (raw.get("active_for_calculation") is not True and raw.get("funding_stage") not in {"ANNOUNCED", "PRICED"})
+                or (raw.get("active_for_calculation") is not True and raw.get("funding_stage") not in {"ANNOUNCED", "PRICED", "SETTLED"})
                 or not _text(raw.get("consequence_basis_ref"))):
             _block(out, "preferred_event", "PREFERRED_EVENT_UNBOUND")
             continue
@@ -832,17 +851,25 @@ def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms
         stage = raw.get("funding_stage", "LEGACY_UNSPECIFIED")
         row["funding_stage"] = stage
         row["settlement_time"] = raw.get("settlement_time")
+        if stage == "SETTLED":
+            row["component_evidence"] = {}
         if stage != "LEGACY_UNSPECIFIED":
             row["conditional_terms"] = deepcopy(raw.get("conditional_terms"))
             settled = (stage == "SETTLED" and _time(raw.get("settlement_time"))
                 and raw["settlement_time"] <= raw["effective_time"]
                 and _text(raw.get("settlement_basis_ref")))
-            row["realized_accounting_state"] = "AVAILABLE" if settled else "BLOCKED"
-            if not settled:
+            accounting_qualified = (settled and raw.get("active_for_calculation") is True
+                and raw.get("net_proceeds_verification_state") == "VALIDATED"
+                and _text(raw.get("net_proceeds_basis_ref"))
+                and _number(raw.get("verified_net_proceeds_usd")) and raw["verified_net_proceeds_usd"] > 0)
+            row["realized_accounting_state"] = "AVAILABLE" if accounting_qualified else "BLOCKED"
+            if not settled or raw.get("active_for_calculation") is not True:
                 row["components"] = {k: None for k in (
                     "ASSET_ACTION", "CLAIM_ACTION", "CARRY", "RESERVE_ACTION", "SHARE_DENOMINATOR")}
-                _block(out, key + ".settlement", "SETTLED_SOURCE_REQUIRED" if stage in {
-                    "ANNOUNCED", "PRICED", "SETTLED"} else "FUNDING_STAGE_UNKNOWN")
+                if stage == "SETTLED":
+                    row.update(deployment_attribution_state="BLOCKED", round_accounting=deepcopy(raw.get("round_accounting")))
+                _block(out, key + ".settlement", "SETTLED_NET_ACCOUNTING_UNBOUND" if settled else
+                    "SETTLED_SOURCE_REQUIRED" if stage in {"ANNOUNCED", "PRICED", "SETTLED"} else "FUNDING_STAGE_UNKNOWN")
                 out["events"].append(row)
                 continue
         else:
@@ -850,7 +877,27 @@ def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms
         for label, field in (("ASSET_ACTION", "btc_change"), ("CLAIM_ACTION", "senior_claim_change_usd"),
                 ("CARRY", "annual_carry_change_usd"), ("RESERVE_ACTION", "liquidity_change_usd"),
                 ("SHARE_DENOMINATOR", "diluted_share_change")):
-            row["components"][label] = _numeric(raw, field, out, key, signed=True)
+            # A closing/net receipt is not proof of each economic consequence.
+            # Reuse CT source/four-clock validation per fact, independently of
+            # the round's net accounting and financing-to-deployment causality.
+            qualified = True
+            if stage == "SETTLED":
+                inputs = raw.get("input_evidence")
+                proof = inputs.get(field) if isinstance(inputs, dict) else None
+                evidence = _metadata(proof, out, key + "." + field, issuer_id, as_of_ms, "AUDIT_REPLAY")
+                qualified = bool(evidence and proof.get("source_class") in OFFICIAL_CLASSES
+                    and evidence["source_semantic"]["identity"] not in {RESEARCH_IDENTITY, LEGACY_RESEARCH_IDENTITY}
+                    and proof.get("event_id") == key
+                    and evidence["effective_time"] == row["effective_time"]
+                    and _text(proof.get("basis_ref"))
+                    and _number(proof.get("value")) and _number(raw.get(field))
+                    and proof["value"] == raw[field])
+                if qualified:
+                    row["component_evidence"][label] = {**evidence, "source_class": proof["source_class"],
+                        "event_id": key, "basis_ref": proof["basis_ref"], "value": proof["value"]}
+                else:
+                    _block(out, key + "." + field, "COMPONENT_SOURCE_SCOPE_OR_VALUE_UNPROVEN")
+            row["components"][label] = _numeric(raw, field, out, key, signed=True) if qualified else None
             row["calculation_inputs"][field] = row["components"][label]
         proceeds = raw.get("verified_net_proceeds_usd")
         annual = raw.get("annual_preferred_distributions_usd")
@@ -1185,7 +1232,7 @@ def compact_treasury_valuation_context(pack: dict) -> dict:
                 "claim_adjusted_reserve_delta_usd")} for e in funding["events"]]}
         for compact, event in zip(row["preferred_funding_attribution_summary"]["events"], funding["events"]):
             for field in ("funding_stage", "settlement_time", "realized_accounting_state", "conditional_terms",
-                          "deployment_attribution_state", "round_accounting"):
+                          "deployment_attribution_state", "round_accounting", "component_evidence"):
                 if field in event:
                     compact[field] = deepcopy(event[field])
         row.update(quality_state=context["state"], context_hash=digest,

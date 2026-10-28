@@ -81,6 +81,47 @@ def aggregate(data, asset_id):
 
 
 class CompanyHealthTests(unittest.TestCase):
+    def test_settled_fact_and_deployment_qualifications_survive_ct_health_and_bridge(self):
+        from test_treasury_valuation_context import settled_funding
+        from crt_radar.gpt_handoff import _bridge_market_context
+        for case in ("UNVERIFIED_WITHOUT_FACT_PROOF", "UNVERIFIED_WITH_FACT_PROOF", "UNRECONCILED"):
+            with self.subTest(case=case):
+                event = settled_funding()
+                if case == "UNRECONCILED":
+                    event["round_accounting"]["undeployed_cash_usd"] = 16
+                else:
+                    event["net_proceeds_verification_state"] = "BLOCKED"
+                if case == "UNVERIFIED_WITHOUT_FACT_PROOF":
+                    event.pop("input_evidence")
+                data = scenario()
+                data.update(as_of_ms=NOW, preferred_funding_events=[event])
+                with tempfile.TemporaryDirectory() as folder:
+                    p = build_evidence_pack(gate(0), observation_db=Path(folder)/"funding.sqlite3",
+                        generated_at_ms=NOW, treasury_company_ct_inputs={"MSTR": data},
+                        treasury_valuation_inputs={"MSTR": dict(valuation_inputs(), preferred_funding_events=[event])})
+                ct_row = next(r["evidence"] for r in p["asset_facts"]["items"]
+                    if r.get("ct_section") == "funding_engine")["preferred_funding_attribution"]["events"][0]
+                projected = _bridge_market_context(p)
+                health_row = projected["common_equity_health"]["assets"]["MSTR"]["company_health"]["capital_engine"]["funding_lifecycle"][0]
+                valuation_row = projected["treasury_valuation_context"]["MSTR"]["preferred_funding_attribution_summary"]["events"][0]
+                for row in (ct_row, health_row, valuation_row):
+                    self.assertEqual(row["deployment_attribution_state"], "BLOCKED")
+                    self.assertEqual(row["realized_accounting_state"],
+                        "AVAILABLE" if case == "UNRECONCILED" else "BLOCKED")
+                    if case == "UNVERIFIED_WITHOUT_FACT_PROOF":
+                        self.assertTrue(all(v is None for v in row["components"].values()))
+                    else:
+                        self.assertEqual(row["components"], ct_row["components"])
+                        self.assertEqual(row["components"]["ASSET_ACTION"], 5)
+                        self.assertEqual(row["components"]["RESERVE_ACTION"], 90)
+                        self.assertEqual(row["components"]["CLAIM_ACTION"], 100)
+                        self.assertEqual(row["components"]["SHARE_DENOMINATOR"], 0)
+                        self.assertEqual(row["component_evidence"], ct_row["component_evidence"])
+                        self.assertEqual(row["component_evidence"]["ASSET_ACTION"]["basis_ref"],
+                            event["input_evidence"]["btc_change"]["basis_ref"])
+                company = projected["common_equity_health"]["assets"]["MSTR"]["company_health"]
+                self.assertEqual(len(company["dimensions"]), 6)
+
     def test_principal_source_scope_survives_health_and_compact_projection(self):
         from test_treasury_company_ct import DAY, principal_proof
         data = scenario()

@@ -75,7 +75,54 @@ def funding():
         net_proceeds_basis_ref="net-after-fees", cost_basis_ref="current-annual-run-rate")
 
 
+def settled_funding():
+    raw = funding()
+    raw.update(funding_stage="SETTLED", settlement_time=NOW, settlement_basis_ref="synthetic-closing",
+        round_accounting=dict(funding_round_id="synthetic-round", attribution_basis_ref="synthetic-official-use",
+            gross_proceeds_usd=100, fees_usd=10, new_claims_usd=120, extinguished_claims_usd=20,
+            btc_purchase_usd=50, other_asset_deployment_usd=5, old_claim_retirement_cash_usd=20,
+            undeployed_cash_usd=15))
+    raw["input_evidence"] = {field: metadata("MSTR", NOW, event_id=raw["event_id"],
+        basis_ref="synthetic:independent-" + field, value=raw[field]) for field in (
+            "btc_change", "senior_claim_change_usd", "annual_carry_change_usd",
+            "liquidity_change_usd", "diluted_share_change")}
+    return raw
+
+
 class TreasuryValuationTests(unittest.TestCase):
+    def test_settled_unverified_net_without_independent_facts_cannot_emit_realized_components(self):
+        for field, value in (("net_proceeds_verification_state", None),
+                             ("net_proceeds_verification_state", "BLOCKED"),
+                             ("net_proceeds_basis_ref", None)):
+            with self.subTest(field=field, value=value):
+                raw = settled_funding()
+                raw.pop("input_evidence")
+                raw[field] = value
+                original = deepcopy(raw)
+                row = build_preferred_funding_attribution(events=[raw], issuer_id=ISSUERS["MSTR"], as_of_ms=NOW)["events"][0]
+                self.assertEqual(row["realized_accounting_state"], "BLOCKED")
+                self.assertEqual(row["deployment_attribution_state"], "BLOCKED")
+                self.assertTrue(all(v is None for v in row["components"].values()))
+                self.assertIsNone(row["claim_adjusted_reserve_delta_usd"])
+                self.assertIsNone(row["effective_preferred_funding_cost"])
+                self.assertEqual(raw, original)
+
+    def test_settled_component_proof_checks_source_clocks_event_and_value_independently(self):
+        for change in ({"issuer_id": ISSUERS["ASST"]}, {"retrieval_time": NOW+1},
+                       {"first_seen_time": None}, {"verification_state": "BLOCKED"},
+                       {"source_class": "RESEARCH_SECONDARY"}, {"event_id": "different-event"},
+                       {"effective_time": NOW-1}, {"basis_ref": " "}, {"value": 6}):
+            with self.subTest(change=change):
+                raw = settled_funding()
+                raw["net_proceeds_verification_state"] = "BLOCKED"
+                raw["input_evidence"]["btc_change"].update(change)
+                row = build_preferred_funding_attribution(events=[raw], issuer_id=ISSUERS["MSTR"], as_of_ms=NOW)["events"][0]
+                self.assertIsNone(row["components"]["ASSET_ACTION"])
+                self.assertEqual(row["components"]["CLAIM_ACTION"], 100)
+                self.assertEqual(row["components"]["RESERVE_ACTION"], 90)
+                self.assertEqual(row["components"]["SHARE_DENOMINATOR"], 0)
+                self.assertEqual(row["claim_adjusted_reserve_delta_usd"], -10)
+
     def test_priced_or_announced_cannot_smuggle_realized_cash_or_cost(self):
         for stage in ("ANNOUNCED", "PRICED", "UNKNOWN", "SETTLED"):
             raw = funding()
@@ -87,18 +134,15 @@ class TreasuryValuationTests(unittest.TestCase):
             self.assertIsNone(row["claim_adjusted_reserve_delta_usd"])
 
     def test_settled_round_reconciles_net_uses_and_claims_without_duplicate_deduction(self):
-        raw = funding()
-        raw.update(funding_stage="SETTLED", settlement_time=NOW, settlement_basis_ref="synthetic-closing",
-            round_accounting=dict(funding_round_id="synthetic-round", attribution_basis_ref="synthetic-official-use",
-                gross_proceeds_usd=100, fees_usd=10, new_claims_usd=120, extinguished_claims_usd=20,
-                btc_purchase_usd=50, other_asset_deployment_usd=5, old_claim_retirement_cash_usd=20,
-                undeployed_cash_usd=15))
+        raw = settled_funding()
         def result():
             return build_preferred_funding_attribution(events=[raw], issuer_id=ISSUERS["MSTR"], as_of_ms=NOW)["events"][0]
         self.assertEqual(result()["deployment_attribution_state"], "SOURCE_BOUND_RECONCILED")
         self.assertAlmostEqual(result()["effective_preferred_funding_cost"], 10/90)
         raw["round_accounting"]["undeployed_cash_usd"] = 16
         self.assertEqual(result()["deployment_attribution_state"], "BLOCKED")
+        self.assertEqual(result()["realized_accounting_state"], "AVAILABLE")
+        self.assertEqual(result()["components"]["ASSET_ACTION"], 5)
         raw["round_accounting"]["undeployed_cash_usd"] = 15
         raw["round_accounting"].pop("attribution_basis_ref")
         self.assertEqual(result()["deployment_attribution_state"], "BLOCKED")
@@ -106,12 +150,7 @@ class TreasuryValuationTests(unittest.TestCase):
         self.assertEqual(result()["realized_accounting_state"], "BLOCKED")
 
     def test_balanced_round_requires_verified_net_proceeds_basis(self):
-        raw = funding()
-        raw.update(funding_stage="SETTLED", settlement_time=NOW, settlement_basis_ref="synthetic-closing",
-            round_accounting=dict(funding_round_id="synthetic-round", attribution_basis_ref="synthetic-official-use",
-                gross_proceeds_usd=100, fees_usd=10, new_claims_usd=120, extinguished_claims_usd=20,
-                btc_purchase_usd=50, other_asset_deployment_usd=5, old_claim_retirement_cash_usd=20,
-                undeployed_cash_usd=15))
+        raw = settled_funding()
         for field, value in (("net_proceeds_verification_state", None),
                              ("net_proceeds_verification_state", "BLOCKED"),
                              ("net_proceeds_basis_ref", None), ("net_proceeds_basis_ref", " ")):
