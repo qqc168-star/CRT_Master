@@ -851,6 +851,8 @@ def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms
         stage = raw.get("funding_stage", "LEGACY_UNSPECIFIED")
         row["funding_stage"] = stage
         row["settlement_time"] = raw.get("settlement_time")
+        if stage == "SETTLED":
+            row["component_evidence"] = {}
         if stage != "LEGACY_UNSPECIFIED":
             row["conditional_terms"] = deepcopy(raw.get("conditional_terms"))
             settled = (stage == "SETTLED" and _time(raw.get("settlement_time"))
@@ -875,7 +877,27 @@ def build_preferred_funding_attribution(*, events: Any, issuer_id: str, as_of_ms
         for label, field in (("ASSET_ACTION", "btc_change"), ("CLAIM_ACTION", "senior_claim_change_usd"),
                 ("CARRY", "annual_carry_change_usd"), ("RESERVE_ACTION", "liquidity_change_usd"),
                 ("SHARE_DENOMINATOR", "diluted_share_change")):
-            row["components"][label] = _numeric(raw, field, out, key, signed=True)
+            # A closing/net receipt is not proof of each economic consequence.
+            # Reuse CT source/four-clock validation per fact, independently of
+            # the round's net accounting and financing-to-deployment causality.
+            qualified = True
+            if stage == "SETTLED":
+                inputs = raw.get("input_evidence")
+                proof = inputs.get(field) if isinstance(inputs, dict) else None
+                evidence = _metadata(proof, out, key + "." + field, issuer_id, as_of_ms, "AUDIT_REPLAY")
+                qualified = bool(evidence and proof.get("source_class") in OFFICIAL_CLASSES
+                    and evidence["source_semantic"]["identity"] not in {RESEARCH_IDENTITY, LEGACY_RESEARCH_IDENTITY}
+                    and proof.get("event_id") == key
+                    and evidence["effective_time"] == row["effective_time"]
+                    and _text(proof.get("basis_ref"))
+                    and _number(proof.get("value")) and _number(raw.get(field))
+                    and proof["value"] == raw[field])
+                if qualified:
+                    row["component_evidence"][label] = {**evidence, "source_class": proof["source_class"],
+                        "event_id": key, "basis_ref": proof["basis_ref"], "value": proof["value"]}
+                else:
+                    _block(out, key + "." + field, "COMPONENT_SOURCE_SCOPE_OR_VALUE_UNPROVEN")
+            row["components"][label] = _numeric(raw, field, out, key, signed=True) if qualified else None
             row["calculation_inputs"][field] = row["components"][label]
         proceeds = raw.get("verified_net_proceeds_usd")
         annual = raw.get("annual_preferred_distributions_usd")
@@ -1210,7 +1232,7 @@ def compact_treasury_valuation_context(pack: dict) -> dict:
                 "claim_adjusted_reserve_delta_usd")} for e in funding["events"]]}
         for compact, event in zip(row["preferred_funding_attribution_summary"]["events"], funding["events"]):
             for field in ("funding_stage", "settlement_time", "realized_accounting_state", "conditional_terms",
-                          "deployment_attribution_state", "round_accounting"):
+                          "deployment_attribution_state", "round_accounting", "component_evidence"):
                 if field in event:
                     compact[field] = deepcopy(event[field])
         row.update(quality_state=context["state"], context_hash=digest,

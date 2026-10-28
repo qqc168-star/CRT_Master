@@ -299,9 +299,10 @@ def compact_health_dimensions(context):
         "as_of_ms": context["as_of_ms"], "context_hash": context["context_hash"],
     }
     if "funding_lifecycle" in engine:
-        result["capital_engine"]["funding_lifecycle"] = [{k: deepcopy(e.get(k)) for k in (
+        result["capital_engine"]["funding_lifecycle"] = [{**{k: deepcopy(e.get(k)) for k in (
             "event_id", "source_ref", "funding_stage", "settlement_time", "realized_accounting_state",
-            "conditional_terms", "components", "effective_preferred_funding_cost", "deployment_attribution_state")}
+            "conditional_terms", "components", "effective_preferred_funding_cost", "deployment_attribution_state")},
+            **({"component_evidence": deepcopy(e["component_evidence"])} if "component_evidence" in e else {})}
             for e in engine["funding_lifecycle"]]
     if "reported_financing_facts" in engine:
         result["capital_engine"]["reported_financing_facts"] = deepcopy(engine["reported_financing_facts"])
