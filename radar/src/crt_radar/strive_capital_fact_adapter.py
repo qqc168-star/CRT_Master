@@ -53,15 +53,21 @@ def _sats_offering(text, source_ref, accepted, retrieved, issuer_id):
     shares = number(r"Amount Offered\s+([\d,]+) shares of SATS Stock")
     price = number(r"Public Offering Price\s+\$([\d,.]+) per share of SATS Stock")
     if shares is None and "Amount Offered" not in text:
-        shares = number(r"underwritten offering.{0,35}?of ([\d,]+) shares")
+        shares = number(r"(?:underwritten offering|initial public offering).{0,35}?of ([\d,]+) shares")
     if price is None and "Public Offering Price $" not in text:
         price = number(r"public offering price of \$([\d,.]+) per share")
     stated = number(r"Stated Amount\s+\$([\d,.]+) per share of SATS Stock")
+    if stated is None:
+        stated = number(r"stated amount of \$([\d,.]+) per share")
     rate = number(r"rate per annum equal to ([\d.]+)% on the Stated Amount")
     initial_claim = number(r"Liquidation Preference\s+Initially,\s*\$([\d,.]+) per share")
+    if initial_claim is None:
+        initial_claim = number(r"initially has a liquidation preference of \$([\d,.]+) per share")
     expected_close = date(r"Settlement Date\s+([A-Za-z]+ \d{1,2}, \d{4})")
     trade_date = date(r"Trade Date\s+([A-Za-z]+ \d{1,2}, \d{4})")
     closed = date(r"issuance and sale of the SATS Stock (?:was|were) completed on ([A-Za-z]+ \d{1,2}, \d{4})")
+    if closed is None and re.search(r"announced today the closing of its upsized initial public offering", text, re.I):
+        closed = date(r"DALLAS,? TX,? ([A-Za-z]+ \d{1,2}, \d{4})")
     stage = ("SETTLED" if closed and closed <= accepted else "PRICED" if price is not None and shares is not None
         else "ANNOUNCED" if re.search(r"SUBJECT TO COMPLETION|Proposed Initial Public Offering", text, re.I)
         else "UNRESOLVED")
@@ -76,6 +82,7 @@ def _sats_offering(text, source_ref, accepted, retrieved, issuer_id):
         conditional_annual_dividends_usd=shares*stated*rate/100 if None not in (shares, stated, rate) else None,
         scheduled_settlement_date_ms=expected_close, reported_settlement_date_ms=closed,
         proposed_trade_date_ms=trade_date, listing_effective_date_ms=listing,
+        reported_closed_shares=shares if stage == "SETTLED" else None,
         listing_qualification="REPORTED_LISTED" if listing and listing <= accepted else "NOT_PROVEN",
         cusip=cusip.group(1).replace(" ", "") if cusip else None,
         isin=cusip.group(2) if cusip else None,
@@ -83,6 +90,8 @@ def _sats_offering(text, source_ref, accepted, retrieved, issuer_id):
         # No regex or offer price can prove net cash, actual outstanding or deployment.
         settled_net_proceeds_usd=None, actual_outstanding_shares=None,
         actual_deployment_usd=None, evidence_authority="REPORTED_TERMS_ONLY",
+        current_liquidation_claims_usd=None,
+        liquidation_qualification="DYNAMIC_PREFERENCE_AND_ACCRUALS_NOT_VERIFIED",
         disclosure_time=accepted, first_seen_time=retrieved, retrieval_time=retrieved,
         source_ref=source_ref, date_precision="UTC_DATE_NOT_INTRADAY_EFFECTIVE_TIME")
     for field in ("offered_shares", "offering_price_usd", "stated_amount_usd", "annual_dividend_rate_pct",

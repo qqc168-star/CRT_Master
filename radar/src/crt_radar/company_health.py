@@ -243,6 +243,8 @@ def build_health_dimensions(*, organs, issuer_id, as_of_ms, residual_change=None
     }
     # Context remains separate from all six dimension directions and rail tilts.
     attribution = funding.get("preferred_funding_attribution")
+    if funding.get("reported_financing_facts"):
+        migration["reported_financing_facts"] = [deepcopy(r) for r in funding["reported_financing_facts"] if valid(r)]
     if isinstance(attribution, dict):
         migration["funding_lifecycle"] = [deepcopy(r) for r in attribution.get("events", []) if valid(r)]
     windows = burden.get("fixed_obligation_windows")
@@ -301,6 +303,8 @@ def compact_health_dimensions(context):
             "event_id", "source_ref", "funding_stage", "settlement_time", "realized_accounting_state",
             "conditional_terms", "components", "effective_preferred_funding_cost", "deployment_attribution_state")}
             for e in engine["funding_lifecycle"]]
+    if "reported_financing_facts" in engine:
+        result["capital_engine"]["reported_financing_facts"] = deepcopy(engine["reported_financing_facts"])
     windows = context["dimensions"]["liquidity_buffer"].get("fixed_obligation_windows")
     if windows:
         result["dimensions"]["liquidity_buffer"]["fixed_obligation_windows"] = {k: deepcopy(windows[k]) for k in (

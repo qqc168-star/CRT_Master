@@ -4,6 +4,8 @@ import hashlib
 import json
 import tempfile
 import unittest
+from copy import deepcopy
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 from crt_radar.issuer_ratio_market_health_source import build_archived_issuer_ct_inputs, _document_url, ASSETS, parse_strategy_shares
@@ -576,3 +578,210 @@ class IssuerCtBindingTests(unittest.TestCase):
         data = kwargs()
         data['burden_current']['source_evidence'] = None
         self.assertIsNotNone(build_treasury_company_ct(**data)['organs']['capital_burden_resilience']['current'])
+
+    # P0 vectors are synthetic contract tests, not evidence of real financing.
+    def p0_document(self, text, number, accepted='2026-10-26T12:00:00Z'):
+        self.p0_now = int(datetime(2026, 10, 28, tzinfo=timezone.utc).timestamp() * 1000)
+        item = self.add('ASST', text, number)
+        item.update(accepted=accepted, retrieved_at_ms=self.p0_now-1000)
+        return item
+
+    def p0_exhibit(self, parent, primary, text):
+        raw = text.encode()
+        item = dict(parent, primary=primary,
+            source_url=_document_url(ASSETS['ASST']['cik'], parent['accession'], primary),
+            raw_sha256=hashlib.sha256(raw).hexdigest(),
+            parent_document={k: parent[k] for k in ('primary', 'raw_sha256', 'retrieved_at_ms')})
+        (self.root/'sec-disclosures'/f"ASST-{parent['accession']}-{primary}.html").write_bytes(raw)
+        self.items.append(item)
+        return item
+
+    def p0_atm(self):
+        self.items = []
+        names = ('exhibit101-test.htm', 'exhibit102-test.htm')
+        parent = self.p0_document('0001920406 <a href="'+names[0]+'">10.1</a>'
+            '<a href="'+names[1]+'">10.2</a>', 70, '2026-06-05T23:22:49Z')
+        for primary, security in zip(names, ('Class A common stock', 'Variable Rate Series A Perpetual Preferred Stock')):
+            self.p0_exhibit(parent, primary, 'Strive, Inc. AMENDED AND RESTATED CONTROLLED EQUITY OFFERING '
+                'SALES AGREEMENT June 5, 2026 '+security+'. An amount up to 3.0% of the aggregate gross '
+                'proceeds from each sale of Placement Shares.')
+        return self.inputs(self.p0_now)['ASST']
+
+    def p0_closing(self):
+        self.items = []
+        parent = self.p0_document('0001920406 Strive, Inc. '
+            '<a href="dp255260_ex9901.htm">99.1</a> '
+            'Series A Perpetual SATS Preferred Stock. '
+            'Underwritten offering of 7,000,000 shares. '
+            'SATS Stock accumulates dividends at a rate per annum equal to 15.00% on the stated amount of $100 per share. '
+            'It initially has a liquidation preference of $100 per share subject to daily adjustment. '
+            'Strive deposited an equivalent of $22.50 per share of SATS Stock into an account funded by the Company '
+            'with a combination of existing cash on hand and securities.', 71, '2026-10-20T13:09:05Z')
+        self.p0_exhibit(parent, 'dp255260_ex9901.htm', 'DALLAS, TX, October 20, 2026 '
+            'Strive, Inc. announced today the closing of its upsized initial public offering of 7,000,000 shares '
+            'of Series A Perpetual SATS Preferred Stock at a public offering price of $90 per share.')
+        return self.inputs(self.p0_now)['ASST']
+
+    def test_p0_commission_caps_cannot_apply_before_effective_date(self):
+        from crt_radar.treasury_company_ct import validate_pit_replay
+        data = self.p0_atm()
+        rows = [r for r in data['source_binding']['observations'] if r.get('claim') == 'ATM_PROGRAM_TERMS']
+        self.assertEqual({r['security_id'] for r in rows}, {'ASST', 'SATA'})
+        for row in rows:
+            self.assertEqual(row['commission_cap_pct'], 3)
+            self.assertEqual(row['source_semantic']['effective_from'], row['effective_time'])
+            older = deepcopy(row)
+            older['effective_time'] -= 86400000
+            self.assertEqual(validate_pit_replay(older, issuer_id=data['issuer_id'],
+                replay_at=self.p0_now, mode='AUDIT_REPLAY')['state'], 'BLOCKED')
+
+    def test_p0_atm_authorization_cannot_be_cash(self):
+        from crt_radar.treasury_company_ct import build_preferred_funding_attribution
+        self.items = []
+        self.p0_document('0001920406 Strive, Inc. Series A Perpetual SATS Preferred Stock. '
+            'On October 26, 2026, the Company entered into a Controlled Equity Offering Sales Agreement '
+            'having an aggregate sales price of up to $1,000,000,000. The Agents receive a commission of up to '
+            '2.0% of the aggregate gross proceeds from each sale.', 72)
+        data = self.inputs(self.p0_now)['ASST']
+        row = next(r for r in data['source_binding']['observations'] if r.get('claim') == 'ATM_PROGRAM_TERMS')
+        self.assertEqual(row['authorized_capacity_usd'], 1e9)
+        self.assertEqual(row['commission_cap_pct'], 2)
+        self.assertIsNone(row['verified_net_proceeds_usd'])
+        fake = dict(row, event_id='synthetic-atm-cash', source_class='SEC', funding_stage='ANNOUNCED',
+            consequence_basis_ref=row['source_ref'], active_for_calculation=True,
+            verified_net_proceeds_usd=1e9, net_proceeds_verification_state='VALIDATED', net_proceeds_basis_ref='fake')
+        result = build_preferred_funding_attribution(events=[fake], issuer_id=data['issuer_id'], as_of_ms=self.p0_now)['events'][0]
+        self.assertEqual(result['realized_accounting_state'], 'BLOCKED')
+        self.assertTrue(all(v is None for v in result['components'].values()))
+
+    def test_p0_closing_proves_stage_not_exact_net_receipt(self):
+        data = self.p0_closing()
+        ct = build_treasury_company_ct(**data)
+        event = ct['organs']['funding_engine']['preferred_funding_attribution']['events'][0]
+        terms = event['conditional_terms']
+        self.assertEqual(event['funding_stage'], 'SETTLED')
+        self.assertEqual(terms['reported_closed_shares'], 7000000)
+        self.assertEqual(terms['conditional_gross_proceeds_usd'], 630e6)
+        self.assertIsNone(terms['settled_net_proceeds_usd'])
+        self.assertEqual(event['realized_accounting_state'], 'BLOCKED')
+        self.assertIsNone(event['effective_preferred_funding_cost'])
+        self.assertEqual(terms['related_parent_terms']['conditional_annual_dividends_usd'], 105e6)
+        self.assertNotEqual(terms['source_ref']['evidence_hash'], terms['related_parent_source']['raw_sha256'])
+
+    def test_p0_dynamic_liquidation_not_completed_from_initial_amount(self):
+        data = self.p0_closing()
+        event = data['preferred_funding_events'][-1]
+        terms = event['conditional_terms']
+        self.assertEqual(terms['related_parent_terms']['conditional_initial_claims_usd'], 700e6)
+        self.assertIsNone(terms['current_liquidation_claims_usd'])
+        self.assertEqual(terms['liquidation_qualification'], 'DYNAMIC_PREFERENCE_AND_ACCRUALS_NOT_VERIFIED')
+
+    def test_p0_existing_cash_and_securities_reserve_is_not_new_usable_assets(self):
+        data = self.p0_closing()
+        reserve = next(r for r in data['source_binding']['observations'] if r.get('claim') == 'SATS_RESERVE_TERMS')
+        self.assertEqual(reserve['reserve_per_share_usd'], 22.5)
+        self.assertEqual(reserve['reserve_nonoverlap_state'], 'UNPROVEN')
+        self.assertIsNone(reserve['additional_usable_assets_usd'])
+        self.assertNotIn('burden_current', data)
+        self.assertIsNone(build_treasury_company_ct(**data)['organs']['capital_burden_resilience']['current'])
+
+    def p0_cash_flow(self, units='in thousands'):
+        self.items = []
+        self.p0_document('0001920406 Strive, Inc. STATEMENTS OF CASH FLOWS ('+units+') '
+            '<table><tr><td></td><td>Six Months Ended June 30, 2026</td><td>Six Months Ended June 30, 2025</td></tr>'
+            '<tr><td>Proceeds from issuance of Class A common stock</td><td>306,248</td><td>7</td></tr>'
+            '<tr><td>Proceeds from issuance of preferred stock</td><td>475,460</td><td>8</td></tr>'
+            '<tr><td>Payment of issuance costs</td><td>( 14,943 )</td><td>9</td></tr>'
+            '<tr><td>Net cash provided by financing activities</td><td>702,736</td><td>10</td></tr></table>',
+            73, '2026-08-10T11:01:03Z')
+        return self.inputs(self.p0_now)['ASST']
+
+    def test_p0_cumulative_quarter_cannot_be_added_to_contained_period(self):
+        data = self.p0_cash_flow()
+        # A separately reported contained-period fact remains independently visible.
+        period = dict(data['source_binding']['observations'][0], claim='PERIOD_CAPITAL_FLOW',
+            amount_usd=100, period_start_date='2026-06-01', period_end_date='2026-06-05', execution_time=None)
+        data['source_binding']['observations'].append(period)
+        ct = build_treasury_company_ct(**data)
+        rows = ct['organs']['funding_engine']['reported_financing_facts']
+        current = next(r for r in rows if r['period_end_date'] == '2026-06-30')
+        self.assertEqual(current['reported_fields']['common_issuance_proceeds_usd'], 306248000)
+        self.assertEqual(current['reported_fields']['issuance_costs_paid_usd'], -14943000)
+        self.assertIsNone(current['net_proceeds_by_security'])
+        self.assertIsNone(current['execution_time'])
+        self.assertEqual(current['aggregation_role'], 'CUMULATIVE_NOT_ADDITIVE_WITH_CONTAINED_EVENTS')
+        self.assertEqual(ct['organs']['capital_conversion']['events'], [])
+        self.assertNotIn('aggregate_financing_proceeds_usd', ct['organs']['funding_engine'])
+        attempted = dict(current, event_id='quarter-plus-week', source='COMMON_ISSUANCE',
+            destination='CASH', amount_usd=306248100, active_for_calculation=True,
+            consequence_basis_ref=current['source_ref'])
+        data['capital_conversion_events'] = [attempted]
+        rejected = build_treasury_company_ct(**data)['organs']['capital_conversion']
+        self.assertEqual(rejected['events'], [])
+        self.assertIn('PERIOD_AGGREGATE_NOT_REALIZED_CONVERSION', str(rejected['blockers']))
+
+    def test_p0_unknown_cash_flow_unit_is_not_scaled_into_dollars(self):
+        data = self.p0_cash_flow('unit unspecified')
+        rows = [r for r in data['source_binding']['observations'] if r.get('claim') == 'REPORTED_FINANCING_CASH_FLOWS']
+        self.assertTrue(rows)
+        self.assertTrue(all(v is None for r in rows for v in r['reported_fields'].values()))
+        self.assertEqual(rows[0]['qualification'], 'BLOCKED_UNIT_UNVERIFIED')
+
+    def test_p0_future_disclosure_cannot_enter_october_23_replay(self):
+        self.items = []
+        self.p0_document(ASST.replace('September 18, 2026', 'October 16, 2026')
+            .replace('September 25, 2026', 'October 23, 2026'), 74)
+        cutoff = int(datetime(2026, 10, 23, 23, tzinfo=timezone.utc).timestamp()*1000)
+        data = self.inputs(cutoff)['ASST']
+        self.assertEqual(data['asset_history'], [])
+        self.assertEqual(data['source_binding']['observations'], [])
+        self.assertIn('NOT_LOCALLY_VISIBLE_AT_REPLAY', str(data['source_binding']['blockers']))
+
+    def test_p0_unattributed_research_balance_is_not_atm_proceeds(self):
+        from crt_radar.treasury_company_ct import build_preferred_funding_attribution
+        data = self.p0_atm()
+        row = next(r for r in data['source_binding']['observations'] if r.get('claim') == 'ATM_PROGRAM_TERMS')
+        fake = dict(row, claim='UNATTRIBUTED_BALANCE_DIFFERENCE', event_id='research-gap',
+            source_class='RESEARCH_SECONDARY', active_for_calculation=True,
+            verified_net_proceeds_usd=346700000, consequence_basis_ref='research-ledger')
+        result = build_preferred_funding_attribution(events=[fake], issuer_id=data['issuer_id'], as_of_ms=self.p0_now)
+        self.assertEqual(result['events'], [])
+        self.assertIn('PREFERRED_EVENT_UNBOUND', str(result['blockers']))
+
+    def test_p0_reported_financing_facts_reach_health_without_new_scores(self):
+        from crt_radar.company_health import build_health_dimensions, compact_health_dimensions, DIMENSIONS
+        data = self.p0_atm()
+        ct = build_treasury_company_ct(**data)
+        health = build_health_dimensions(organs=ct['organs'], issuer_id=data['issuer_id'], as_of_ms=self.p0_now)
+        compact = compact_health_dimensions(health)
+        rows = compact['capital_engine']['reported_financing_facts']
+        self.assertEqual({r['security_id'] for r in rows}, {'ASST', 'SATA'})
+        self.assertEqual(set(compact['dimensions']), set(DIMENSIONS))
+        for row in rows:
+            self.assertLessEqual(row['effective_time'], row['disclosure_time'])
+            self.assertLessEqual(row['disclosure_time'], row['first_seen_time'])
+            self.assertLessEqual(row['first_seen_time'], row['retrieval_time'])
+            self.assertEqual(len(row['source_evidence']['raw_sha256']), 64)
+
+    def test_p0_exhibit_requires_unchanged_parent_hash_and_link(self):
+        self.p0_atm()
+        child = next(r for r in self.items if r.get('parent_document'))
+        child['parent_document']['raw_sha256'] = 'f'*64
+        data = self.inputs(self.p0_now)['ASST']
+        rows = [r for r in data['source_binding']['observations'] if r.get('claim') == 'ATM_PROGRAM_TERMS']
+        self.assertEqual([r['security_id'] for r in rows], ['SATA'])
+        self.assertIn('SEC_EXHIBIT_PARENT_PROOF_INVALID', str(data['source_binding']['blockers']))
+
+    def test_p0_financing_facts_reach_existing_pack_health_and_bridge(self):
+        from crt_radar.evidence_pack import build_evidence_pack
+        from crt_radar.portfolio_allocation_context import build_common_equity_health
+        data = self.p0_atm()
+        pack = build_evidence_pack(gate(0), observation_db=self.root/'isolated.db',
+            generated_at_ms=self.p0_now, treasury_company_ct_input=data)
+        pack['common_equity_health'] = build_common_equity_health(pack)
+        projected = _bridge_market_context(pack)
+        health = projected['common_equity_health']['assets']['ASST']['company_health']
+        rows = health['capital_engine']['reported_financing_facts']
+        self.assertEqual({r['security_id'] for r in rows}, {'ASST', 'SATA'})
+        self.assertTrue(all(r['verified_net_proceeds_usd'] is None for r in rows))
+        self.assertEqual(pack['common_equity_health']['action_output'], 'NONE')
