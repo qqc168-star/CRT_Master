@@ -6,7 +6,6 @@ Upstream source qualification is retained; a local hash is not source truth.
 from __future__ import annotations
 
 import argparse
-import calendar
 from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
@@ -33,6 +32,7 @@ SCHEMA = "CRT_DAILY_QUANTITATIVE_REPORT_V0.1"
 SECTIONS = ("BTC 市場", "週線／鏈上", "宏觀", "ETF／現貨", "槓桿",
             "Strive ①", "Strive ②", "Strive ③", "Strive ④", "Strive ⑤", "結論")
 DAY = 86_400_000
+COMPARISON_WEEKS = (("quarter", 13), ("month", 4), ("week", 1))
 
 
 def _number(v):
@@ -51,7 +51,8 @@ def _provenance(record):
         "quality_state", "basis_ref", "source_semantic", "share_basis", "currency",
         "unit", "source_as_of_date", "source_as_of_precision", "availability_semantics",
         "dilution_scope", "coverage_state", "raw_sha256", "evidence_authority",
-        "share_settlement_scope", "economic_qualification", "field_conflicts")}
+        "share_settlement_scope", "economic_qualification", "field_conflicts",
+        "initial_preferred_claims_scope", "verification_state")}
 
 
 def _ct_visible(record, cutoff):
@@ -76,17 +77,26 @@ def _fact(pack, kind, section=None):
     return rows[0].get("evidence", {}) if rows else {}
 
 
-def _reference_date(at, months=0, days=0):
+def _reference_date(at, days=0):
     d = datetime.fromtimestamp((at-days*DAY)/1000, timezone.utc)
-    month = d.year*12+d.month-1-months
-    year, m = divmod(month, 12)
-    return f"{year:04d}-{m+1:02d}-{min(d.day, calendar.monthrange(year,m+1)[1]):02d}"
+    return d.date().isoformat()
 
 
-def _exact_reference(rows, current, months=0, days=0):
-    wanted = _reference_date(current["effective_time"], months, days)
+def _exact_reference(rows, current, weeks):
+    wanted = _reference_date(current["effective_time"], days=7*weeks)
     found = [r for r in rows if _reference_date(r["effective_time"]) == wanted]
     return found[0] if len(found) == 1 else None
+
+
+def _weekly_rsi(closes):
+    if len(closes) < 15:
+        return None
+    changes = [b-a for a,b in zip(closes,closes[1:])]
+    gain = math.fsum(max(x,0) for x in changes[:14])/14
+    loss = math.fsum(max(-x,0) for x in changes[:14])/14
+    for change in changes[14:]:
+        gain, loss = (13*gain+max(change,0))/14, (13*loss+max(-change,0))/14
+    return 100-100/(1+gain/loss) if loss else 100 if gain else 50
 
 
 def _frozen_forecast(record, original_pre, cutoff, generated):
@@ -226,34 +236,44 @@ def build_report(pack, *, context=None, forecast=None, original_pre=None, genera
                         or datetime.fromisoformat(b["available_at"].replace("Z","+00:00")).timestamp()*1000 > captured):
                     raise ValueError("WEEKLY_COMPLETION_NOT_VISIBLE_AT_ACQUISITION")
             completed = _visible_completed_weekly_bars(bars, as_of=datetime.fromtimestamp(captured/1000,timezone.utc))
+            if any((b["week_closed_at_dt"]-a["week_closed_at_dt"]).total_seconds()!=7*DAY/1000
+                    for a,b in zip(completed,completed[1:])):
+                raise ValueError("COMPLETED_WEEKLY_ARCHIVE_GAP")
             closes = [b["close"] for b in completed]
             latest_ms = int(datetime.fromisoformat(completed[-1]["week_closed_at"].replace("Z","+00:00")).timestamp()*1000)
             stale = cutoff-latest_ms > 7*DAY
             state = "STALE" if stale else "RESEARCH_ONLY"
+            def weekly_comparison(name, latest, previous, unit, basis, inputs=None):
+                details = dict(inputs or {}, latest_week_closed_at=completed[-1]["week_closed_at"],
+                    previous_week_closed_at=completed[-2]["week_closed_at"] if len(completed)>1 else None,
+                    previous_value=previous,
+                    difference=latest-previous if latest is not None and previous is not None else None)
+                for label, value in ((name,latest),(name+" previous completed week",previous),
+                        (name+" weekly difference",details["difference"])):
+                    add("週線／鏈上", label, value, unit, evidence=[ref], basis=basis,
+                        state=state if value is not None else "BLOCKED", inputs=details)
             for n, fn in ((50,build_long_horizon_50wma_context),(200,build_long_horizon_200wma_context)):
                 result = fn(bars, as_of=_iso(captured), provenance=ref["source_ref"])
                 average = result.get(f"latest_completed_{n}wma")
-                add("週線／鏈上", f"{n}WMA", average, currency, evidence=[ref],
-                    basis="完整週收盤算術平均；不代表完整 KEY_WEEKLY_STRUCTURE", state=state if average is not None else "BLOCKED", inputs=result)
+                prior_bars = [{**{k:b[k] for k in ("week_closed_at","available_at","close")},
+                    "is_complete":True} for b in completed[:-1]]
+                prior = fn(prior_bars, as_of=_iso(captured), provenance=ref["source_ref"]).get(f"latest_completed_{n}wma")
+                weekly_comparison(f"{n}WMA",average,prior,currency,
+                    "同一封存完整週收盤算術平均；差額=本週−前週；非完整 KEY_WEEKLY_STRUCTURE",result)
                 add("週線／鏈上", f"weekly close / {n}WMA deviation", (closes[-1]/average-1)*100 if average else None,
                     "%", evidence=[ref], basis="相同完整週線截止", state=state if average else "BLOCKED")
             add("週線／鏈上", "weekly close", closes[-1], currency, evidence=[ref], state=state)
             add("週線／鏈上", "weekly change", (closes[-1]/closes[-2]-1)*100 if len(closes)>1 else None,
                 "%", evidence=[ref], state=state)
-            rsi = None
-            if len(closes) >= 15:
-                changes = [b-a for a,b in zip(closes,closes[1:])]
-                gain = math.fsum(max(x,0) for x in changes[:14])/14
-                loss = math.fsum(max(-x,0) for x in changes[:14])/14
-                for change in changes[14:]:
-                    gain, loss = (13*gain+max(change,0))/14, (13*loss+max(-change,0))/14
-                rsi = 100-100/(1+gain/loss) if loss else 100 if gain else 50
-            add("週線／鏈上", "RSI(14)", rsi, "index", evidence=[ref],
-                basis="Wilder週線RSI；以最初14筆變化均值初始化，非轉季分類器", state=state if rsi is not None else "BLOCKED")
+            weekly_comparison("RSI(14)",_weekly_rsi(closes),_weekly_rsi(closes[:-1]),"index points",
+                "Wilder週線RSI；最初14筆變化均值初始化；差額為點數，非轉季分類器")
         except (ValueError, KeyError, TypeError, IndexError) as exc:
             add("週線／鏈上", "weekly archive", reason=str(exc))
     else:
-        for name in ("RSI(14)", "50WMA", "200WMA", "weekly change", "price deviation"):
+        for name in ("RSI(14)", "50WMA", "200WMA", "weekly change", "price deviation",
+                "RSI(14) previous completed week", "RSI(14) weekly difference",
+                "50WMA previous completed week", "50WMA weekly difference",
+                "200WMA previous completed week", "200WMA weekly difference"):
             add("週線／鏈上", name, reason="COMPLETED_WEEKLY_ARCHIVE_NOT_SUPPLIED")
 
     etf = context.get("btc_etf_archive")
@@ -291,14 +311,15 @@ def build_report(pack, *, context=None, forecast=None, original_pre=None, genera
     current = assets[-1] if assets else {}
     add("Strive ③", "BTC / diluted share", current.get("btc_per_diluted_share"), "BTC/share",
         evidence=[current] if current else [], basis="公司截面；不與當日價格時鐘混合")
-    for name, months, days in (("quarter",3,0),("month",1,0),("week",0,7)):
-        prev = _exact_reference(assets,current,months,days) if current else None
+    for name, weeks in COMPARISON_WEEKS:
+        prev = _exact_reference(assets,current,weeks) if current else None
         comparable = bool(prev and prev.get("basis_ref") == current.get("basis_ref") and current.get("basis_ref")
             and "UNRESOLVED" not in current["basis_ref"]
             and prev.get("share_settlement_scope") == current.get("share_settlement_scope")
             and _number(prev.get("btc_per_diluted_share")) and prev["btc_per_diluted_share"]>0)
         add("Strive ③", f"BTC/share {name} growth", (current["btc_per_diluted_share"]/prev["btc_per_diluted_share"]-1)*100 if comparable else None,
-            "%", evidence=[r for r in (prev,current) if r], basis="精確日曆參照；同稀釋／交割口徑；無插值",
+            "%", evidence=[r for r in (prev,current) if r], basis=f"{weeks}週={weeks*7}日；同稀釋／交割口徑；無插值",
+            inputs={"weeks":weeks,"reference_date":_reference_date(current["effective_time"],days=weeks*7) if current else None},
             reason=None if comparable else "EXACT_COMPARABLE_COMPANY_SNAPSHOT_REQUIRED")
 
     valuation = _fact(pack,"TREASURY_VALUATION_CONTEXT")
@@ -308,11 +329,12 @@ def build_report(pack, *, context=None, forecast=None, original_pre=None, genera
             raise ValueError("REPORT_VALUATION_CONTEXT_HASH_INVALID")
     history = [r for r in valuation.get("mnav_observations",[]) if r and _ct_visible(r,cutoff)]
     current_mnav = valuation.get("current_observation") or {}
-    for name, months, days in (("quarter",3,0),("month",1,0),("week",0,7)):
-        prior = _exact_reference(history,current_mnav,months,days) if current_mnav else None
+    for name, weeks in COMPARISON_WEEKS:
+        prior = _exact_reference(history,current_mnav,weeks) if current_mnav else None
         comparable = bool(prior and _same_valuation_basis(prior,current_mnav))
         add("Strive ③", f"historical mNAV {name}", prior["mnav"] if comparable else None, "",
-            evidence=[prior] if prior else [], basis="公司歷史截面原值；不加X、不加%；不以當日價格重估",
+            evidence=[prior] if prior else [], basis=f"{weeks}週={weeks*7}日公司歷史截面原值；不加X、不加%；不以當日價格重估",
+            inputs={"weeks":weeks,"reference_date":_reference_date(current_mnav["effective_time"],days=weeks*7) if current_mnav else None},
             reason=None if comparable else "EXACT_COMPARABLE_MNAV_SNAPSHOT_REQUIRED")
     trial = context.get("mnav_trial") or {k:current_mnav.get(k) for k in (
         "input_evidence","share_basis_ref","evidence_alignment_state")}
@@ -367,23 +389,57 @@ def build_report(pack, *, context=None, forecast=None, original_pre=None, genera
     add("Strive ②", "declared / confirmed payments", [{k:r.get(k) for k in ("payment_reference","due_at_ms","amount_usd","recognition")} for r in confirmed] if confirmed is not None else None,
         "USD by due date", evidence=confirmed or [], basis="已確認付款與未宣告年化條款分開；未知不填零")
     btc_price, btc_refs, _ = metric_value("btc_spot_price_usd")
-    claims = burden.get("preferred_liquidation_claims_usd")
-    btc = current.get("btc_holdings")
-    coverage = btc_price*btc/claims if (btc_refs and btc_refs[0].get("currency")=="USD"
-        and current.get("effective_time")==burden.get("effective_time")
-        and all(_number(v) and v>0 for v in (btc_price,btc,claims))) else None
-    add("Strive ①", "BTC asset / preferred claims", coverage, "ratio", evidence=btc_refs+[r for r in (current,burden) if r],
-        basis="研究覆蓋；忽略其他債權順位及變現折價，不代表償付能力")
+    # Research asset coverage is NOT formal mNAV or dynamic solvency. Read each
+    # component from independently source-bound CT facts; never substitute a
+    # dynamic claim balance or silently degrade this metric to BTC-only.
+    coverage_components = {}
+    coverage_refs = list(btc_refs)
+    coverage_sources = {"btc_price_usd":list(btc_refs),"btc_holdings":[current] if current else []}
+    coverage_components["btc_price_usd"] = btc_price if btc_refs and btc_refs[0].get("currency")=="USD" else None
+    coverage_components["btc_holdings"] = current.get("btc_holdings") if (_has_raw_hash(current)
+        and current.get("quality_state") not in {"BLOCKED","STALE","INVALID","PARTIAL"}) else None
+    if current: coverage_refs.append(current)
+    for component, field in (("cash_usd","cash_and_cash_equivalents_usd"),
+            ("strc_market_value_usd","strc_fair_value_usd"),
+            ("initial_preferred_claims_usd","initial_preferred_claims_usd")):
+        candidates = [r for r in observations if r.get("effective_time")==current.get("effective_time")
+            and field in r.get("reported_fields",{}) and not r.get("field_conflicts")
+            and _has_raw_hash(r) and r.get("quality_state") not in {"BLOCKED","STALE","INVALID","PARTIAL"}
+            and (r.get("initial_preferred_claims_scope")=="COMPLETE_INITIAL_PREFERENCE"
+                if component=="initial_preferred_claims_usd"
+                else r.get("claim")=="REPORTED_CAPITAL_STRUCTURE_SNAPSHOT")]
+        value = candidates[0]["reported_fields"][field] if len(candidates)==1 else None
+        coverage_components[component] = value if _number(value) and value>=0 else None
+        coverage_sources[component] = candidates
+        coverage_refs.extend(candidates)
+    btc = coverage_components["btc_holdings"]
+    claims = coverage_components["initial_preferred_claims_usd"]
+    cash_value = coverage_components["cash_usd"]
+    strc_value = coverage_components["strc_market_value_usd"]
+    complete = all(_number(v) and v>=0 for v in coverage_components.values()) and claims>0 and btc_price>0
+    coverage = (btc_price*btc+cash_value+strc_value)/claims if complete else None
+    coverage_basis = "(BTC持有量 × BTC價格 + 合格來源現金總額 + STRC市值) / 初始優先股索取額；Reserve不另加；非動態索取權、正式償付能力或mNAV"
+    coverage_inputs = {"components":coverage_components,"reserve_added_usd":0,
+        "component_evidence":{k:[_provenance(r) for r in refs] for k,refs in coverage_sources.items()},
+        "cash_basis":"REPORTED_CASH_TOTAL_RESERVE_NOT_ADDED",
+        "denominator_basis":"INITIAL_PREFERENCE_NOT_DYNAMIC_LIQUIDATION_CLAIMS",
+        "missing_components":[k for k,v in coverage_components.items() if v is None],
+        "substitution":f"({btc} * {btc_price} + {cash_value} + {strc_value}) / {claims}" if complete else None}
+    add("Strive ①", "research asset coverage / initial preferred claims", coverage, "ratio", evidence=coverage_refs,
+        basis=coverage_basis+(" = "+coverage_inputs["substitution"] if complete else "；缺項不得改為BTC-only"), inputs=coverage_inputs,
+        reason=None if complete else "COMPLETE_SOURCE_BOUND_ASSET_AND_INITIAL_PREFERENCE_INPUTS_REQUIRED")
+    add("Strive ①", "dynamic preferred liquidation claims", burden.get("preferred_liquidation_claims_usd"), "USD",
+        evidence=[burden] if burden else [], basis="原CT當期動態索取權；不代替研究覆蓋的初始優先額")
     scenarios = context.get("btc_price_scenarios", [])
     if not isinstance(scenarios,list) or any(not isinstance(r,dict) or not _number(r.get("price_usd"))
             or r["price_usd"]<=0 or not isinstance(r.get("assumption_ref"),str) or not r["assumption_ref"].strip() for r in scenarios):
         raise ValueError("EXPLICIT_RESEARCH_PRICE_SCENARIO_REQUIRED")
-    add("Strive ①", "BTC pressure comparison", [{**r,"coverage":r["price_usd"]*btc/claims} for r in scenarios]
+    add("Strive ①", "BTC pressure comparison", [{**r,"coverage":(r["price_usd"]*btc+cash_value+strc_value)/claims} for r in scenarios]
         if scenarios and coverage is not None else None,
-        "scenario", evidence=btc_refs+[r for r in (current,burden) if r],
+        "scenario", evidence=coverage_refs, inputs=coverage_inputs,
         state="RESEARCH_ONLY" if scenarios and coverage is not None else "BLOCKED" if scenarios else "NOT_RUN",
         reason=None if scenarios and coverage is not None else "QUALIFIED_COVERAGE_INPUTS_REQUIRED" if scenarios else "NO_EXPLICIT_RESEARCH_SCENARIO",
-        basis="僅代入既有明示研究假設；不自創BTC價位或交易門檻")
+        basis=coverage_basis+"；僅代入明示價格假設，其他資產不變；不自創交易門檻")
     funding = organs["funding_engine"]
     for r in funding.get("reported_financing_facts",[]):
         if not _ct_visible(r,cutoff): continue
@@ -458,18 +514,78 @@ def build_report_from_store(pack, store, *, pre_id, pre_hash, post_id=None, cont
 def render_markdown(report):
     def cell(value):
         return str(value).replace("|","\\|").replace("\n"," ")
+    def display(row):
+        value=row["value"]
+        if row["metric"].startswith("historical mNAV") and _number(value): return f"{value:.3f}"
+        if isinstance(value,(dict,list)): return json.dumps(value,ensure_ascii=False,sort_keys=True)
+        return "—" if value is None else str(value)
     lines=["# CRT 每日 PRE／POST 量化決策報告", "",
         f"市場截止：{_iso(report['market_cutoff_ms'])}；產生：{_iso(report['generated_at_ms'])}",
         f"報告狀態：{report['report_state']}；本機唯讀投影，非完整投資推理驗收。",
         f"Evidence Pack：`{report['evidence_pack_hash']}`；報告：`{report['report_hash']}`", "",
+        "以下為投資人主報告；各項原始來源、時鐘、計算口徑及資格見後方詳細稽核附表。", ""]
+    def table(selected):
+        notes=[]
+        lines.extend(["| 項目 | 數值 | 單位 | 解讀與資格 |", "|---|---|---|---|"])
+        for row in selected:
+            qualification=row["qualification"]+(":"+row["reason"] if row["reason"] else "")
+            shown=display(row)
+            if row["metric"]=="company health contradictions" and row["value"]:
+                shown="；".join(f"{k}: {v.get('direction')} / {v.get('reason')}" for k,v in row["value"]["dimensions"].items())
+                shown+="；矛盾="+str(row["value"]["contradictions"])
+            lines.append("| "+" | ".join(map(cell,(row["metric"],shown,row["unit"],qualification+"；"+row["basis"])))+" |")
+            if row["metric"].startswith("ETF ") and row.get("inputs"):
+                w=row["inputs"]
+                notes.append(f"{row['metric']} 前期：{w.get('previous_value')} USD；變化：{w.get('change_usd')} USD；同範圍基金：{cell(w.get('scope_ids'))}。")
+        lines.append("")
+        lines.extend(note+"\n" for note in notes)
+    def selected(*sections):
+        return [r for r in report["rows"] if r["section"] in sections]
+    lines.append("## 1. BTC 市場總覽及數值\n")
+    table([r for r in selected("BTC 市場","宏觀") if r["metric"]!="1–3 week scenario / original conditions"])
+    lines.append("## 2. 1～3 週戰術情境\n")
+    table([r for r in report["rows"] if r["metric"]=="1–3 week scenario / original conditions"])
+    original=report.get("forecast",{}).get("original_pre")
+    if original:
+        lines.append("原 PRE 主劇本："+cell(original["content"]["main_scenario"])+"\n")
+    lines.append("## 3. 鏈上、RSI、50WMA、200WMA\n")
+    table(selected("週線／鏈上"))
+    lines.append("## 4. ETF 5／20／60 交易日與現貨需求\n")
+    table(selected("ETF／現貨"))
+    lines.append("## 5. 槓桿、Funding、強平及逐項解讀\n")
+    table(selected("槓桿"))
+    lines.append("## 6. Strive 五項健康度\n")
+    for section,title in (("Strive ①","資產覆蓋與價格壓力"),("Strive ②","現金、股息與已宣告付款"),
+            ("Strive ③","每股BTC與稀釋mNAV"),("Strive ④","融資、成本、市場承接與資本轉換"),
+            ("Strive ⑤","BTC市價與整體取得成本")):
+        lines.append(f"### {section}｜{title}\n")
+        table(selected(section))
+    lines.append("## 7. N.S. 市場與公司聯合裁決\n")
+    lines.append("聯合裁決：NOT_RUN，須由 N.S. 根據證據形成；程式不捏造因果、方向、配置或交易建議。\n")
+    table([r for r in selected("結論") if r["metric"]=="company health contradictions"])
+    lines.append("## 8. PRE／POST 驗證與失效條件\n")
+    forecast=report.get("forecast",{})
+    if forecast.get("record"):
+        record=forecast["record"];text=record["content"]
+        lines.extend([f"原凍結分析者：{cell(text.get('analyst_ref'))}；存取：{report['forecast_access']}。",
+            f"原文：{cell(text['original_text'])}",
+            f"紀錄：{cell(text['id'])}；內容雜湊：`{record['content_hash']}`。",
+            f"形成：{_iso(text['generated_at_ms'])}；提交：{_iso(record['recorded_at_ms'])}。"])
+        for key in ("price_anchor","invalidation_line","strongest_counterevidence","change_conditions","claims","reviews","pre_id","pre_hash"):
+            if key in text:
+                lines.append(f"{key}：{cell(json.dumps(text[key],ensure_ascii=False,sort_keys=True))}")
+        if original:
+            lines.append("連結的原 PRE（原文、價格錨、到期與失效條件，未改寫）：")
+            for key in ("original_text","price_anchor","claims","invalidation_line","strongest_counterevidence","change_conditions"):
+                lines.append(f"{key}：{cell(json.dumps(original['content'][key],ensure_ascii=False,sort_keys=True))}")
+    else:
+        lines.append("NOT_RUN：沒有本次已凍結 PRE／POST；不產生預測、改判或核驗結論。")
+    lines.extend(["", "## 詳細量化證據稽核附表", "",
         "| 區塊 | 指標 | 數值 | 單位 | 資格／限制 | 觀測／公開／取得 | 依據與來源 |",
-        "|---|---|---|---|---|---|---|"]
+        "|---|---|---|---|---|---|---|"])
     for section in SECTIONS:
         for row in (r for r in report["rows"] if r["section"]==section):
-            value=row["value"]
-            if row["metric"].startswith("historical mNAV") and _number(value): value=f"{value:.3f}"
-            elif isinstance(value,(dict,list)): value=json.dumps(value,ensure_ascii=False,sort_keys=True)
-            elif value is None: value="—"
+            value=display(row)
             if row["metric"].startswith("ETF ") and row.get("inputs",{}):
                 funds=row["inputs"].get("by_fund",{})
                 value=str(value)+"; "+"; ".join(f"{t}: {v['current_usd']} / 前期 {v['previous_usd']}" for t,v in sorted(funds.items()))

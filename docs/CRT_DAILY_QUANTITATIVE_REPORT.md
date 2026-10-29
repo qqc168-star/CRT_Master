@@ -26,6 +26,13 @@ optional hash-linked local context and exported frozen PRE/POST records.
 existing ObservationStore and `read_pre()` interfaces, without creating or
 changing research events. No second database or schema is introduced.
 
+Markdown presents eight investor-facing sections before the full quantitative
+audit appendix: BTC overview (including macro), 1–3-week scenarios, weekly/on-chain,
+ETF/spot demand, leverage, Strive's five health views, N.S. joint review, and
+PRE/POST verification/invalidation. The joint-review slot remains NOT_RUN until
+N.S. forms the judgment; the renderer does not invent it. Frozen PRE/POST originals
+and linked PRE anchors/targets remain visible, not replaced by generated advice.
+
 The local CLI only reads explicit input files and creates a new JSON/Markdown
 report pair. Existing inputs/outputs are never overwritten:
 
@@ -59,6 +66,10 @@ Context must name the exact `evidence_pack_hash`.
   complete a bar. Research RSI uses Wilder smoothing with an initial 14-change
   arithmetic mean; flat history is 50, a no-loss rising history is 100. Neither
   RSI nor WMA defines a formal season or complete KEY_WEEKLY_STRUCTURE.
+  Each WMA and RSI displays the latest and preceding completed-week values and
+  their arithmetic difference from this same acquisition-limited archive. RSI
+  differences are index points, not percentage returns. Weekly close distances
+  to 50/200WMA are percentages; stale sources stay STALE for all these values.
 - `btc_etf_archive`: existing TFTC envelope, with the same hash already present in
   pack facts. Every 5/20/60-session comparison uses one constant fund scope over
   both nonoverlapping periods. Missing funds remain null in daily detail and are
@@ -76,8 +87,19 @@ Context must name the exact `evidence_pack_hash`.
   permission is produced. Expired/unproven current-price validity cannot be
   displayed as a qualified current valuation.
 - `btc_price_scenarios`: optional explicit research prices with `assumption_ref`.
-  There are no default BTC thresholds. Coverage is a research BTC-value/preferred-
-  claim comparison, not solvency, complete residual value or a trade trigger.
+  There are no default BTC thresholds. Research coverage is
+  `(BTC holdings * BTC price + cash + STRC market value) / initial preferred claims`,
+  not solvency, formal mNAV, dynamic liquidation claims or a trade trigger.
+  Every component keeps separate source/clocks/qualification. Cash is the
+  source-bound cash-and-equivalents total; Reserve is never added again. The
+  denominator must explicitly represent complete **initial** preference, not an
+  unspecified preferred balance. The source-bound CT observations must contain
+  `reported_fields.initial_preferred_claims_usd` and
+  `initial_preferred_claims_scope = COMPLETE_INITIAL_PREFERENCE` with original
+  hash and existing CT clock validation. This projection does not create that
+  fact from conditional offer terms or dynamic claims. Missing any necessary
+  component blocks the named ratio instead of falling back to BTC-only. Price
+  stress keeps the independently evidenced cash and STRC amounts unchanged.
 
 Local input hashes do not certify external source truth. Existing intake/source
 qualification remains necessary; a caller cannot certify a new formal source
@@ -88,7 +110,7 @@ the numeric table and clocks; UNKNOWN is not replaced by a guessed timestamp.
 ## Company time lines and limits
 
 Company snapshots and the current market-price trial are different time lines.
-BTC/share changes use exact calendar-quarter/month/week reference dates on a
+BTC/share changes use exact 13/4/1-week (91/28/7-day) reference dates on a
 comparable dilution/settlement basis; no nearest-date assumption or interpolation
 is silently introduced. Missing references block only that comparison. Historical
 mNAV uses the existing same-formula/same-scope comparison and prints three-decimal
@@ -96,6 +118,8 @@ levels such as `0.777`, without X or %. It is not a percentage change or a valua
 recomputed using today's price. Current mNAV displays all four actual substitutions:
 
 `(diluted_shares * equity_price_usd) / (btc_holdings * btc_price_usd)`.
+For a company snapshot ending 2026-10-23, references are 2026-07-24,
+2026-09-25 and 2026-10-16. Calendar-month alternatives do not fill missing windows.
 
 Existing CT handles Reserve/cash non-overlap, use qualifications, fixed payments,
 financing stage, independent components and deployment attribution. The report
