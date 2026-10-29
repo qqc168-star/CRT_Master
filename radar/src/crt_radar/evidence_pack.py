@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from copy import deepcopy
 from pathlib import Path
@@ -474,6 +475,30 @@ def build_evidence_pack(
             "capital_strategy": None,
         },
     }
+    # Preserve existing FRED level observations for read-only reports. These
+    # are facts, not additional scoring inputs or a substitute for DXY/10Y nominal.
+    for family, fields in (("MACRO_CONTEXT", ("effective_fed_funds_rate_pct", "effective_fed_funds_change_bp")),
+            ("RATES_CONTEXT", ("broad_usd_index", "real_10y_yield_pct", "nominal_2y_yield_pct"))):
+        parsed = source_gate.get("parsed", {}).get(family, {})
+        evidence = evidence_by_family.get(family, {})
+        if not str(evidence.get("quality_state", "")).startswith("VALID"):
+            continue
+        for field in fields:
+            value = parsed.get(field)
+            if type(value) not in (int, float) or not math.isfinite(value):
+                continue
+            observed = (parsed.get("fed_funds_observed_at_ms") if family == "MACRO_CONTEXT"
+                else parsed.get("level_observed_at_ms", {}).get(field))
+            pack["asset_facts"]["items"].append({"fact_type": "MACRO_REPORTED_LEVEL", "metric_id": field,
+                "asset_fact_id": evidence["source_id"]+":"+field, "value": value,
+                "as_of_ms": observed, "source_id": evidence["source_id"], "evidence_hash": evidence["evidence_hash"],
+                "quality_state": evidence["quality_state"], "formal_model_input": False,
+                "comparison_observed_at_ms": parsed.get("fed_funds_previous_at_ms") if field.endswith("change_bp") else None})
+            facts = pack["asset_facts"]
+            if "overlay_hash" in facts:
+                facts["upstream_overlay_hash"] = facts.pop("overlay_hash")
+            facts.pop("empty_reason", None)
+            facts.update(section_state="PARTIAL", coverage_state="PARTIAL")
     if dvol_regime_watch is not None:
         pack["dvol_regime_watch"] = deepcopy(dvol_regime_watch)
     if reanalysis_wake is not None:

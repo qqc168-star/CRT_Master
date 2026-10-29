@@ -151,6 +151,56 @@ def normalize(envelope, *, as_of_ms):
             "farside": {"role": "NON_BLOCKING_CROSS_CHECK", "state": "LOCAL_FETCH_BLOCKED"}}
 
 
+def trading_session_windows(envelope, *, as_of_ms):
+    """Research 5/20/60-session comparisons; leave legacy calendar sums intact.
+
+    Both periods use the same explicitly reported basket. An unpublished/null
+    fund is excluded from both periods, never converted to zero. Publication
+    time is still unknown: this is the existing retrieval-vintage archive.
+    """
+    normalized = normalize(envelope, as_of_ms=as_of_ms)
+    data = json.loads(envelope["raw_json"])
+    calendar = _contract("CRT_ETP_PROSPECTIVE_CAPTURE_CONTRACT_V0.1.json")["market_calendar"]
+    members = _contract("CRT_PUBLIC_SOURCE_AUTHORITY_LOCK_V0.1.json")["decisions"]["US_SPOT_BTC_ETP_POINT_IN_TIME"]["universe"]["members"]
+    membership = {r["ticker"]: date.fromisoformat(r["membership_effective_from"]) for r in members}
+    latest = date.fromisoformat(data["updatedThrough"])
+    closed = set(calendar["full_close_dates"])
+    start = max(date.fromisoformat(calendar["valid_from"]), latest-timedelta(days=200))
+    dates = [start+timedelta(days=i) for i in range((latest-start).days+1)
+        if (start+timedelta(days=i)).weekday() < 5
+        and (start+timedelta(days=i)).isoformat() not in closed]
+    rows = {date.fromisoformat(r["date"]): r["perEtfUsd"] or {} for r in data["days"]}
+    expected = {t for t, effective in membership.items() if effective <= latest}
+    stale = normalized["horizons"]["1D"]["reason"] == "STALE_SOURCE"
+    result = {"metadata": normalized["metadata"], "windows": {},
+        "fund_daily": deepcopy(data["days"]), "formal_model_input": False}
+    for n in (5, 20, 60):
+        window = dates[-2*n:]
+        scope = {t for t in expected if len(window) == 2*n and membership[t] <= window[0]
+            and all(_number(rows.get(d, {}).get(t)) for d in window)}
+        unexpected = {t for d in window for t in rows.get(d, {}) if t not in membership}
+        if unexpected:
+            raise ValueError("TFTC_TRADING_WINDOW_UNIVERSE_CONFLICT")
+        scope = sorted(scope)
+        current, previous = window[-n:], window[:-n]
+        qualified = len(window) == 2*n and bool(scope) and not stale
+        by_fund = {t: {"current_usd": math.fsum(rows[d][t] for d in current),
+                       "previous_usd": math.fsum(rows[d][t] for d in previous)}
+                   for t in scope} if qualified else {}
+        now = math.fsum(v["current_usd"] for v in by_fund.values()) if qualified else None
+        prior = math.fsum(v["previous_usd"] for v in by_fund.values()) if qualified else None
+        result["windows"][str(n)] = {"value": now, "previous_value": prior,
+            "change_usd": now-prior if qualified else None, "unit": "USD",
+            "coverage_state": "BLOCKED" if not qualified else "COMPLETE" if set(scope) == expected else "PARTIAL",
+            "scope_ids": scope, "missing_fund_ids": sorted(expected-set(scope)),
+            "current_session_dates": [d.isoformat() for d in current],
+            "previous_session_dates": [d.isoformat() for d in previous], "by_fund": by_fund,
+            "window_semantics": "NONOVERLAPPING_COMPLETED_TRADING_SESSIONS_CONSTANT_FUND_SCOPE",
+            "reason": "STALE_SOURCE" if stale else "INSUFFICIENT_COMPARABLE_SESSION_HISTORY" if not qualified
+                      else "MISSING_FUNDS_EXCLUDED_FROM_BOTH_PERIODS" if set(scope) != expected else None}
+    return result
+
+
 def add_to_pack(pack, envelope):
     """Append only to the contract's existing facts/blockers sections before pack hashing."""
     try:

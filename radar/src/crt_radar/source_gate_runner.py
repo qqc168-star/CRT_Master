@@ -294,7 +294,8 @@ def parse_macro_context(payload: Any) -> dict[str, Any]:
     row = _require_mapping(payload, "macro context payload")
     cpi = _last_values(_fred_history(row.get("core_cpi"), "CPILFESL"), 13, "CPILFESL")
     unemployment = _last_values(_fred_history(row.get("unemployment"), "UNRATE"), 15, "UNRATE")
-    effr = _fred_history(row.get("effr"), "EFFR")[-1]
+    effr_history = _fred_history(row.get("effr"), "EFFR")
+    effr = effr_history[-1]
     core_pce = _last_values(_fred_history(row.get("core_pce"), "PCEPILFE"), 13, "PCEPILFE")
 
     cpi_values = [value for _, value in cpi]
@@ -317,6 +318,11 @@ def parse_macro_context(payload: Any) -> dict[str, Any]:
 
     return {
         "as_of_ms": max(cpi[-1][0], unemployment[-1][0], effr[0], core_pce[-1][0]),
+        "effective_fed_funds_rate_pct": effr[1],
+        "effective_fed_funds_change_bp": 100.0 * (effr[1] - effr_history[-2][1])
+            if len(effr_history) >= 2 else None,
+        "fed_funds_observed_at_ms": effr[0],
+        "fed_funds_previous_at_ms": effr_history[-2][0] if len(effr_history) >= 2 else None,
         "core_inflation_acceleration": core_inflation_acceleration,
         "unemployment_deterioration": unemployment_deterioration,
         "real_policy_rate": real_policy_rate,
@@ -331,6 +337,11 @@ def parse_rates_context(payload: Any) -> dict[str, Any]:
     nominal_2y = _last_values(_fred_history(row.get("nominal_2y"), "DGS2"), 21, "DGS2")
     return {
         "as_of_ms": max(usd[-1][0], real_10y[-1][0], nominal_2y[-1][0]),
+        "broad_usd_index": usd[-1][1],
+        "real_10y_yield_pct": real_10y[-1][1],
+        "nominal_2y_yield_pct": nominal_2y[-1][1],
+        "level_observed_at_ms": {"broad_usd_index": usd[-1][0],
+            "real_10y_yield_pct": real_10y[-1][0], "nominal_2y_yield_pct": nominal_2y[-1][0]},
         "broad_usd_20d_log_change": 100.0 * math.log(usd[-1][1] / usd[0][1]),
         "real_10y_yield_20d_change_bp": 100.0 * (real_10y[-1][1] - real_10y[0][1]),
         "nominal_2y_yield_20d_change_bp": 100.0 * (nominal_2y[-1][1] - nominal_2y[0][1]),
