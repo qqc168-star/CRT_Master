@@ -1124,7 +1124,7 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
     def block(asset, claim, code):
         outputs[asset]["source_binding"]["blockers"].append(dict(claim=claim, code=code))
     manifest = json.loads((root / "sec-disclosures" / "manifest.json").read_text(encoding="utf-8-sig"))
-    if not isinstance(manifest, list):
+    if not isinstance(manifest, list) or any(not isinstance(row,dict) for row in manifest):
         raise ValueError("SEC archive manifest must be a list")
     seen = set()
     for item in manifest:
@@ -1183,7 +1183,8 @@ def build_archived_issuer_ct_inputs(archive: str | Path, *, as_of_ms: int) -> di
             seen.add(identity)
             text = _plain(raw)
             index_digest = None
-            if parent_evidence is None and ASSETS[asset]["cik"] not in raw.decode("utf-8"):
+            if parent_evidence is None and (ASSETS[asset]["cik"] not in raw.decode("utf-8")
+                    or "issuer_index_raw_sha256" in item):
                 # Some official FWP term sheets omit a CIK in the document.
                 # Reuse the CIK/name-verified SEC index, never a ticker match.
                 from .issuer_announcement_runner import load_registry, default_registry_path, parse_sec_submissions

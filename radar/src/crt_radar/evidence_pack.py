@@ -399,6 +399,8 @@ def build_evidence_pack(
     btc_control_transfer_validation_evidence: dict[str, Any] | None = None,
     treasury_company_ct_input: dict[str, Any] | None = None,
     treasury_company_ct_inputs: dict[str, Any] | None = None,
+    issuer_ct_archive: str | Path | None = None,
+    issuer_source_verification_required: bool = False,
     treasury_valuation_inputs: dict[str, Any] | None = None,
     btc_long_horizon_context: dict[str, Any] | None = None,
     portfolio_allocation_inputs: dict[str, Any] | None = None,
@@ -637,10 +639,32 @@ def build_evidence_pack(
             if (previous_history.get("warning_lifecycle") != lifecycle
                     or previous_history.get("ground_truth_outcome") != warning["historical_replay"].get("ground_truth_outcome")):
                 research_store.record_research_event("warning_snapshot:"+warning["overlay_hash"], "warning_snapshot", warning)
+    from .issuer_fact_history import guard_company_source_versions
+    if treasury_company_ct_input is not None and treasury_company_ct_inputs is not None:
+        raise ValueError("Supply singular or per-asset CT inputs, not both")
     if treasury_company_ct_input is not None:
-        if treasury_company_ct_inputs is not None:
-            raise ValueError("Supply singular or per-asset CT inputs, not both")
-        add_treasury_company_ct(pack, treasury_company_ct_input)
+        issuer_asset = {"CIK-0001050446":"MSTR","CIK-0001920406":"ASST"}.get(treasury_company_ct_input.get("issuer_id"))
+        if issuer_asset is None: raise ValueError("CT issuer binding mismatch")
+        treasury_company_ct_inputs={issuer_asset:treasury_company_ct_input}
+        treasury_company_ct_input=None
+    with ObservationStore(observation_db) as issuer_store:
+        treasury_company_ct_inputs, treasury_valuation_inputs, freshness = guard_company_source_versions(
+            issuer_store,ct_inputs=treasury_company_ct_inputs,valuation_inputs=treasury_valuation_inputs,
+            archive=issuer_ct_archive,as_of_ms=generated_at,require_archive=issuer_source_verification_required)
+    for asset, status in freshness.items():
+        pack["asset_facts"]["items"].append(dict(fact_type="ISSUER_SOURCE_FRESHNESS",asset_id=asset,
+            issuer_id=status["issuer_id"],evidence=status))
+        for field,code in status["blocked_fields"].items():
+            pack["blockers"]["items"].append(dict(scope="CALCULATION",issuer_id=status["issuer_id"],
+                section="issuer_source_freshness",claim=field,reason=code,
+                affected_ids=[status["issuer_id"]+":"+field]))
+    if freshness:
+        for name in ("asset_facts","blockers"):
+            section=pack[name]
+            section.pop("empty_reason",None)
+            if "overlay_hash" in section:
+                section["upstream_overlay_hash"]=section.pop("overlay_hash")
+            if section.get("section_state")=="READY": section["section_state"]="PARTIAL"
     if treasury_company_ct_inputs is not None:
         issuers = {"MSTR": "CIK-0001050446", "ASST": "CIK-0001920406"}
         if not isinstance(treasury_company_ct_inputs, dict) or set(treasury_company_ct_inputs) - set(issuers):

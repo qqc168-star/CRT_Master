@@ -12,7 +12,7 @@ from unittest.mock import patch
 from crt_radar.gpt_bridge_outbox import enqueue_bridge_payload
 from crt_radar.gpt_transport_worker import validate_transport_payload
 from crt_radar.gpt_handoff import (
-    _compact_field_names, _compact_tranche_fields, _inherit_equal_authority,
+    _compact_field_names, _compact_tranche_fields, _inherit_equal_authority, _share_authority_fields,
     build_minimized_bridge_payload,
     build_full_decision_bridge_payload,
     expand_bridge_field_names, run_gpt_handoff_gate,
@@ -575,6 +575,16 @@ class FullBridgeBudgetTests(unittest.TestCase):
         expanded = expand_bridge_field_names(payload)
         self.assertEqual(expanded, original)
         self.assertEqual(set(expanded["market_context"]["child"]), set(subset))
+
+    def test_shared_health_qualification_objects_roundtrip_without_duplicate_mutation(self):
+        shared = {"reason": "SOURCE_QUALIFICATION_UNRESOLVED_" * 4,
+                  "direction": "BLOCKED", "missing_evidence": ["DILUTION_SCOPE_UNPROVEN"]}
+        payload = {"market_context": {"first": shared, "second": shared,
+                                      "independent": deepcopy(shared)}}
+        original = canonical_bytes(payload)
+        _share_authority_fields(payload["market_context"])
+        self.assertIn("authority_field_values", payload["market_context"])
+        self.assertEqual(canonical_bytes(expand_bridge_field_names(payload)), original)
 
     def test_authority_inheritance_never_coalesces_boolean_false_with_numeric_zero(self):
         top = {"action_output": "NONE", "external_action_authority": "NONE",

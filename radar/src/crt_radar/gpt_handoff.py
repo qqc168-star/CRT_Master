@@ -564,6 +564,18 @@ def _bridge_market_context(
         result.update(portfolio)
     if "qualified_equity_daily_source" in pack:
         result["qualified_equity_prices"] = _bridge_qualified_equity_prices(pack)
+    freshness = {}
+    for row in pack.get("asset_facts",{}).get("items",[]):
+        if row.get("fact_type")!="ISSUER_SOURCE_FRESHNESS": continue
+        source=row["evidence"]
+        # The enclosing event already binds the complete Evidence Pack hash;
+        # do not duplicate a second proof pointer/hash for each company here.
+        freshness[row["asset_id"]]=dict(state=source["state"],
+            blocked_fields=deepcopy(source["blocked_fields"]),
+            source_blocker_codes=sorted({b["code"] for b in source["source_blockers"]}),
+            effective_dates={k:v["effective_time"] for k,v in source["watermarks"].items()})
+    if freshness:
+        result["company_source_freshness"] = freshness
     return result
 
 
@@ -1686,9 +1698,23 @@ def _share_authority_fields(market: dict[str, Any]) -> None:
         "formal_model_authority", "formal_threshold_authority", "formal_weight_authority",
         "machine_may_confirm_bull_transition", "machine_may_output_trade_action",
         "score_may_determine_btc_season", "season_transition_authority", "formal_season_authority"}
+    # Reuse the existing reversible exact field/value references for repeated
+    # company-health qualifications. No value or blocker is omitted; expansion
+    # restores the same keys and literal values before downstream validation.
+    names.update({"direction", "interpretation_state", "reason", "claim_scope",
+                  "missing_evidence", "missing_claim_count", "state", "health_reasons",
+                  "health_direction", "limitation", "source_ref", "source_id", "evidence_hash",
+                  "machine_execution", "capital_decision_authority", "coverage_state", "scope"})
     occurrences: dict[str, list[dict[str, Any]]] = {}
     pairs: dict[str, list[Any]] = {}
+    visited: set[int] = set()
     def visit(value: Any) -> None:
+        # Existing projections can reuse the same nested dict at two paths.
+        # Record each mutable object once; deleting a field twice is invalid.
+        if isinstance(value, (dict, list)):
+            if id(value) in visited:
+                return
+            visited.add(id(value))
         if isinstance(value, dict):
             for key in sorted(value):
                 child = value[key]
@@ -1706,7 +1732,7 @@ def _share_authority_fields(market: dict[str, Any]) -> None:
     for token in sorted(occurrences):
         rows = occurrences[token]
         key, value = pairs[token]
-        if len(rows) >= 3 and (_bridge_size({key: value}) - 8) * len(rows) > _bridge_size(pairs[token]) + 40:
+        if len(rows) >= 2 and (_bridge_size({key: value}) - 8) * len(rows) > _bridge_size(pairs[token]) + 8:
             index = len(columns)
             columns.append(pairs[token])
             for row in rows:

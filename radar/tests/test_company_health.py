@@ -476,7 +476,7 @@ class CompanyHealthTests(unittest.TestCase):
                 fetch_overrides=fixture.overrides, liquidation_aggregate_payload=fixture.aggregate(),
                 now_ms=daily_fixtures.NOW_MS, generated_at_ms=daily_fixtures.NOW_MS,
                 treasury_company_ct_inputs={"MSTR": scenario(), "ASST": scenario(True)})
-        for a, direction in (("MSTR", "DETERIORATING"), ("ASST", "IMPROVING")):
+        for a, direction in (("MSTR", "BLOCKED"), ("ASST", "BLOCKED")):
             self.assertEqual(p["common_equity_health"]["assets"][a]["company_health"]["dimensions"]
                              ["per_share_asset_engine"]["direction"], direction)
         self.assertNotIn("portfolio_allocation_context", p)

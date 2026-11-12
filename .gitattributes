@@ -10,3 +10,7 @@ radar/registry/SOURCE_RESPONSIBILITY_MATRIX.md text eol=lf
 radar/tests/fixtures/issuer_disclosures_20261005/strategy.html -text
 radar/tests/fixtures/issuer_disclosures_20261005/strive.html -text
 radar/tests/fixtures/capital_second_real_output.json -text
+radar/tests/fixtures/issuer_disclosures_20261026/strive.html -text
+radar/tests/fixtures/issuer_disclosures_20261026/strive-submissions.json -text
+radar/tests/fixtures/issuer_disclosures_20261109/strive.html -text
+radar/tests/fixtures/issuer_disclosures_20261109/strive-submissions.json -text
