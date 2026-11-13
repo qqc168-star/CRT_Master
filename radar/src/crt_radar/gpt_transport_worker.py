@@ -7,17 +7,22 @@ No provider exactly-once guarantee is assumed from an idempotency header.
 from __future__ import annotations
 
 import argparse
+import hashlib
 from copy import deepcopy
+from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
 import os
 import re
 import time
+import tempfile
 from pathlib import Path
 from typing import Any, Callable
 from urllib import request as urlrequest
+from urllib.error import HTTPError
 
-from .gpt_bridge_outbox import _validate_bridge_payload
+from .gpt_bridge_outbox import (_validate_bridge_payload, canonical_bytes, build_transfer_manifest,
+    receive_transfer_part, reassemble_transfer)
 from .gpt_handoff import _assert_bridge_privacy, expand_bridge_field_names, build_minimized_bridge_payload
 from .gpt_commander_plan_closure import (
     _validate_bundle, _asset_facts, parse_commander_judgment_response,
@@ -38,6 +43,9 @@ ADAPTER_ID = "CRT_OPENAI_RESPONSES_WORKER_V0.1"
 LEASE_MS = 180_000
 TIMEOUT_SECONDS = 120
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+INLINE_REQUEST_BYTES = 64 * 1024  # Routing threshold, never a total-data ceiling.
+UPLOAD_PART_BYTES = 63 * 1024     # Leaves room for multipart request headers.
+INPUT_TRANSFER_ATTEMPTS = 3
 _PAYLOAD_FIELDS = {
     "schema_version", "privacy_contract_version", "state", "event",
     "market_context", "capital_state", "analysis_contract", "privacy",
@@ -47,7 +55,7 @@ _OPTIONAL_PAYLOAD_FIELDS = {"issuer_ratio_observation"}
 _SENSITIVE_TEXT = re.compile(
     r"(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\\\\[^\\\s]+\\|file://|/(?:home|Users|tmp|var)/|"
     r"\bsk-[A-Za-z0-9_-]{12,}|\bBearer\s+\S+|"
-    r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})", re.IGNORECASE
+    r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})", re.IGNORECASE
 )
 
 
@@ -96,15 +104,149 @@ def _requires_capital_contract(payload: dict[str, Any]) -> bool:
             or "BROKER_CAPITAL_STATE" in expanded["event"].get("wake", {}).get("wake_sources", []))
 
 
-def send_response(envelope: dict[str, Any]) -> dict[str, Any]:
+def send_response(envelope: dict[str, Any], *, transfer_root=None, before_inference=None) -> dict[str, Any]:
     """Send only the validated request body to the fixed TLS provider endpoint."""
     validate_request_envelope(envelope)
     if "capital_source" in envelope:
         raise ValueError("Capital model delivery requires independent approval; OFFLINE_ONLY")
-    return _post_response(envelope)
+    return _post_response(envelope, transfer_root=transfer_root, before_inference=before_inference)
 
 
-def _post_response(envelope: dict[str, Any]) -> dict[str, Any]:
+class InputTransferPending(Exception):
+    """No model request was started; the input journal can safely resume."""
+
+
+def _transfer_journal(path, state):
+    state = dict(state)
+    state.pop("journal_hash", None)
+    state["journal_hash"] = hashlib.sha256(canonical_bytes(state)).hexdigest()
+    path.parent.mkdir(parents=True,exist_ok=True)
+    fd,name=tempfile.mkstemp(dir=path.parent,prefix=".upload-")
+    try:
+        with os.fdopen(fd,"wb") as handle:
+            handle.write(canonical_bytes(state));handle.flush();os.fsync(handle.fileno())
+        os.replace(name,path)
+    finally:
+        Path(name).unlink(missing_ok=True)
+
+
+def _upload_response_input(raw, *, opener, key, root, part_bytes=UPLOAD_PART_BYTES):
+    """Official Uploads parts -> complete -> downloaded SHA256 -> input_file.
+
+    Only byte transfer retries here. The inference POST is never retried.
+    A lost part acknowledgement can leave an unused server part; the committed
+    ordered manifest includes exactly one part per position, never extra data.
+    """
+    manifest, chunks = build_transfer_manifest(raw,part_bytes=part_bytes)
+    root=Path(root); root.mkdir(parents=True,exist_ok=True)
+    for digest,data in chunks.items():
+        receive_transfer_part(root,manifest,digest,data)
+    if reassemble_transfer(root,manifest)!=raw:
+        raise ValueError("Input transfer local reassembly mismatch")
+    journal=root/(manifest["manifest_hash"]+".json")
+    if journal.exists():
+        state=_read_json(journal); check=dict(state); recorded=check.pop("journal_hash",None)
+        if (hashlib.sha256(canonical_bytes(check)).hexdigest()!=recorded
+                or state.get("manifest")!=manifest):
+            raise ValueError("Input transfer journal integrity invalid")
+    else:
+        state={"manifest":manifest,"parts":{},"attempt_history":[]}
+    filename="crt-"+manifest["sha256"]+".txt"
+
+    def call(path, data=None, content_type="application/json", *, binary=False, method="POST"):
+        if not (path=="/v1/uploads" or re.fullmatch(r"/v1/uploads/upload_[A-Za-z0-9_-]+/(?:parts|complete)",path)
+                or path=="/v1/files?purpose=assistants&limit=100&order=desc"
+                or re.fullmatch(r"/v1/files/file[-_][A-Za-z0-9_-]+/content",path)):
+            raise ValueError("Input transfer endpoint forbidden")
+        request=urlrequest.Request("https://api.openai.com"+path,data=data,
+            headers={"Authorization":"Bearer "+key,"Content-Type":content_type},method=method)
+        last=None
+        for _ in range(INPUT_TRANSFER_ATTEMPTS):
+            try:
+                with opener.open(request,timeout=TIMEOUT_SECONDS) as result:
+                    if result.status!=200: raise ValueError("Input transfer HTTP failure")
+                    body=result.read((len(raw) if binary else MAX_RESPONSE_BYTES)+1)
+                if binary:
+                    if len(body)!=len(raw) or hashlib.sha256(body).hexdigest()!=manifest["sha256"]:
+                        raise ValueError("Remote input reassembly SHA256 mismatch")
+                    return body
+                return json.loads(body)
+            except HTTPError as exc:
+                if exc.code==413: raise
+                if exc.code not in {408,429} and exc.code<500: raise
+                last=exc
+            except (TimeoutError,ConnectionError,OSError) as exc:
+                last=exc
+            except ValueError as exc:
+                if not binary:raise
+                last=exc
+        raise InputTransferPending("INPUT_PART_TRANSFER_INCOMPLETE") from last
+
+    if state.get("file_id"):
+        try:
+            call("/v1/files/"+state["file_id"]+"/content",binary=True,method="GET")
+            return state["file_id"]
+        except HTTPError as exc:
+            if exc.code!=404:raise
+            state["attempt_history"].append({k:state[k] for k in ("upload_id","file_id","expires_at","parts")})
+            state.pop("file_id");state.pop("upload_id");state["expires_at"]=0;state["parts"]={}
+    if state.get("expires_at",0)<=time.time():
+        if state.get("upload_id"):
+            state["attempt_history"].append({k:state[k] for k in ("upload_id","expires_at","parts")})
+        created=call("/v1/uploads",canonical_bytes({"purpose":"assistants","filename":filename,
+            "bytes":len(raw),"mime_type":"text/plain","expires_after":{"anchor":"created_at","seconds":3600}}))
+        upload_id=created.get("id")
+        if (not isinstance(upload_id,str) or re.fullmatch(r"upload_[A-Za-z0-9_-]+",upload_id) is None
+                or type(created.get("expires_at")) not in (int,float) or created["expires_at"]<=time.time()):
+            raise ValueError("Upload identity/expiry invalid")
+        state.update(upload_id=upload_id,expires_at=created["expires_at"],parts={})
+        _transfer_journal(journal,state)
+    upload_id=state["upload_id"]
+    for row in manifest["parts"]:
+        digest=row["sha256"]; data=chunks[digest]; position=str(row["index"])
+        if position in state["parts"]:
+            ack=state["parts"][position]
+            if ack.get("sha256")!=digest or ack.get("bytes")!=len(data):
+                raise ValueError("Input part acknowledgement mismatch")
+            continue
+        boundary="CRT-"+digest
+        body=("--"+boundary+'\r\nContent-Disposition: form-data; name="data"; filename="part.bin"\r\n'
+              'Content-Type: application/octet-stream\r\n\r\n').encode()+data+("\r\n--"+boundary+"--\r\n").encode()
+        ack=call("/v1/uploads/"+upload_id+"/parts",body,"multipart/form-data; boundary="+boundary)
+        if (not isinstance(ack.get("id"),str) or re.fullmatch(r"part_[A-Za-z0-9_-]+",ack["id"]) is None
+                or ack.get("upload_id")!=upload_id):
+            raise ValueError("Input part server identity invalid")
+        state["parts"][position]={"id":ack["id"],"sha256":digest,"bytes":len(data),"acknowledged_at_ms":int(time.time()*1000)}
+        _transfer_journal(journal,state)
+    try:
+        completed=call("/v1/uploads/"+upload_id+"/complete",canonical_bytes({
+            "part_ids":[state["parts"][str(p["index"])]["id"] for p in manifest["parts"]],
+            "md5":hashlib.md5(raw,usedforsecurity=False).hexdigest()}))
+    except (InputTransferPending,HTTPError):
+        # Completion may have succeeded despite a lost acknowledgement. Never
+        # infer success from the filename: download and verify the entire file.
+        listing=call("/v1/files?purpose=assistants&limit=100&order=desc",method="GET")
+        for item in listing.get("data",[]):
+            file_id=item.get("id")
+            if (item.get("filename")==filename and item.get("bytes")==len(raw)
+                    and isinstance(file_id,str) and re.fullmatch(r"file[-_][A-Za-z0-9_-]+",file_id)):
+                call("/v1/files/"+file_id+"/content",binary=True,method="GET")
+                completed={"id":upload_id,"status":"completed","file":{"id":file_id}}
+                break
+        else:
+            raise InputTransferPending("INPUT_COMPLETION_NOT_RECONCILED")
+    file_id=(completed.get("file") or {}).get("id")
+    if (completed.get("status")!="completed" or completed.get("id")!=upload_id
+            or not isinstance(file_id,str) or re.fullmatch(r"file[-_][A-Za-z0-9_-]+",file_id) is None):
+        raise ValueError("Input upload not completed")
+    call("/v1/files/"+file_id+"/content",binary=True,method="GET")
+    state["file_id"]=file_id;state["remote_sha256_verified"]=manifest["sha256"]
+    state["verified_at_ms"]=int(time.time()*1000)
+    _transfer_journal(journal,state)
+    return file_id
+
+
+def _post_response(envelope: dict[str, Any], *, transfer_root=None, before_inference=None, force_upload=False) -> dict[str, Any]:
     """Shared fixed-endpoint HTTP implementation; callers own authorization.
 
     The normal sender above continues to reject capital. The repository-only
@@ -121,24 +263,58 @@ def _post_response(envelope: dict[str, Any]) -> dict[str, Any]:
     key = os.environ.get(API_KEY_ENV_VAR, "").strip()
     if not key:
         raise ValueError("Provider credential unavailable")
+    body=deepcopy(envelope["request_body"])
+    opener = urlrequest.build_opener(urlrequest.ProxyHandler({}), _NoRedirect())
+    uploaded = force_upload or len(canonical_bytes(body))>INLINE_REQUEST_BYTES
+    if uploaded:
+        with tempfile.TemporaryDirectory(prefix="crt-input-") if transfer_root is None else _existing_transfer_root(transfer_root) as root:
+            part_bytes=UPLOAD_PART_BYTES
+            while True:
+                try:
+                    file_id=_upload_response_input(body["input"].encode("utf-8"),opener=opener,key=key,root=root,part_bytes=part_bytes)
+                    break
+                except HTTPError as exc:
+                    if exc.code==413 and part_bytes>1024:
+                        part_bytes//=2
+                        continue
+                    raise InputTransferPending("INPUT_SERVICE_CAPACITY_PENDING") from exc
+                except (InputTransferPending,ValueError,OSError) as exc:
+                    raise InputTransferPending("INPUT_INTEGRITY_OR_TRANSFER_PENDING") from exc
+            body["input"]=[{"role":"user","content":[{"type":"input_file","file_id":file_id},
+                {"type":"input_text","text":"Use the complete attached CRT JSON evidence, including exact references and all blockers. No omitted or inferred evidence."}]}]
     request = urlrequest.Request(
         "https://api.openai.com" + RESPONSES_PATH,
-        data=json.dumps(envelope["request_body"], ensure_ascii=False).encode("utf-8"),
+        data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
         headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
         method="POST",
     )
     # No ambient proxies, redirects, SDK retries, tools, or arbitrary endpoints.
-    opener = urlrequest.build_opener(urlrequest.ProxyHandler({}), _NoRedirect())
-    with opener.open(request, timeout=TIMEOUT_SECONDS) as result:
-        if result.status != 200:
-            raise ValueError("Provider HTTP failure")
-        raw = result.read(MAX_RESPONSE_BYTES + 1)
+    if before_inference is not None:
+        before_inference()
+    try:
+        with opener.open(request, timeout=TIMEOUT_SECONDS) as result:
+            if result.status != 200:
+                raise ValueError("Provider HTTP failure")
+            raw = result.read(MAX_RESPONSE_BYTES + 1)
+    except HTTPError as exc:
+        if exc.code==413:
+            if not uploaded:
+                return _post_response(envelope,transfer_root=transfer_root,
+                    before_inference=before_inference,force_upload=True)
+            raise InputTransferPending("PROVIDER_CONTEXT_CAPACITY_PENDING_NO_EVIDENCE_DROPPED") from exc
+        raise
     if len(raw) > MAX_RESPONSE_BYTES:
         raise ValueError("Provider response exceeds limit")
     response = json.loads(raw)
     if not isinstance(response, dict):
         raise ValueError("Provider response is not an object")
     return _ProviderHTTPResponse(response)
+
+
+@contextmanager
+def _existing_transfer_root(root):
+    Path(root).mkdir(parents=True,exist_ok=True)
+    yield root
 
 
 def _receipt(response: dict[str, Any], envelope: dict[str, Any]) -> dict[str, Any]:
@@ -306,6 +482,19 @@ def deliver_event(
             raise ValueError("Boundary identity mismatch")
         evidence_dir = state_dir / "responses"
         evidence_path = evidence_dir / f"{event_id}.json"
+        if capital_source is None and evidence_path.exists():
+            # A capacity/codec revision must not rewrite or resend a completed
+            # event under today's request version. Validate its original first.
+            saved_request=_read_json(evidence_path)["request"]
+            validate_request_envelope(saved_request)
+            saved_input=json.loads(saved_request["request_body"]["input"])
+            saved_payload=(saved_input["bridge_payload"] if "text" in saved_request["request_body"] else saved_input)
+            expected_input=json.loads(envelope["request_body"]["input"])
+            if (saved_payload!=payload or saved_request["event_id"]!=event_id
+                    or saved_request["bridge_payload_hash"]!=payload_hash
+                    or (context is not None and saved_input.get("commander_judgment_request")!=expected_input.get("commander_judgment_request"))):
+                raise ValueError("Persisted original request lineage mismatch")
+            envelope=saved_request
         if capital_source is not None and evidence_path.exists():
             # A schema refinement must not rewrite or resend a prior event.
             # Validate the immutable original request before replaying its receipt.
@@ -375,19 +564,39 @@ def deliver_event(
         persist_boundary_state(state_dir, state)
         token = state["claim"]["claim_token"]
         if receipt is None:
-            # Persist intent BEFORE any network call. Crash in this window blocks
-            # replay conservatively; it cannot cause a duplicate provider call.
-            state = _seal_state({**state, "request_hash": envelope["request_hash"],
-                                 "reason": "PROVIDER_SEND_STARTED"})
-            persist_boundary_state(state_dir, state)
+            # Input upload is resumable and does not invoke inference. The
+            # durable inference marker is set immediately before that POST.
+            def before_inference():
+                nonlocal state
+                state = _seal_state({**state, "request_hash": envelope["request_hash"],
+                                     "reason": "PROVIDER_SEND_STARTED"})
+                persist_boundary_state(state_dir, state)
             response = None
             try:
-                response = transport(envelope)
+                if transport is send_response:
+                    response = transport(envelope,transfer_root=state_dir/"input_transfers",
+                                         before_inference=before_inference)
+                else:
+                    before_inference()
+                    response = transport(envelope)
                 result["transport_performed"] = True
                 # Preserve the complete provider object before semantic validation,
                 # including refusals, malformed judgment text and incomplete output.
                 _write_no_clobber(evidence_path, {"request": envelope, "response": response})
                 receipt = validated_receipt(response)
+            except InputTransferPending:
+                # This exception is reserved for pre-inference transfer failure
+                # or an explicit 413 rejection, never an ambiguous model POST.
+                if transport is not send_response:
+                    state=mark_retryable(state,claim_token=token,reason="PROVIDER_RESULT_REQUIRES_RECONCILIATION")
+                    persist_boundary_state(state_dir,state)
+                    return {**result,"state":"RECONCILIATION_REQUIRED"}
+                state = mark_retryable(state,claim_token=token,reason="INPUT_TRANSFER_PENDING")
+                state.pop("request_hash",None)
+                persist_boundary_state(state_dir,_seal_state(state))
+                return {**result,"state":"INPUT_TRANSFER_PENDING","input_transfer_state":"PENDING",
+                        "input_transfer_activity":"PARTS_MAY_HAVE_BEEN_SENT",
+                        "inference_state":"NOT_STARTED_OR_EXPLICITLY_REJECTED"}
             except Exception as exc:
                 # Never persist exception text, headers, URLs, or credentials.
                 state = mark_retryable(state, claim_token=token,

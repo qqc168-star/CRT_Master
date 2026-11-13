@@ -138,7 +138,7 @@ class IssuerSourceFreshnessTests(unittest.TestCase):
         with ObservationStore(self.db) as store:
             self.assertEqual(store.latest_research_event('issuer_source_versions:CIK-0001920406')['fields']['btc_holdings']['value'],43153)
 
-    def test_real_october_sources_health_pack_bridge_and_16k_propagate_failure(self):
+    def test_real_october_sources_health_pack_bridge_preserve_full_failure_context(self):
         early=self.build(self.early)
         self.assertEqual(status(early)['state'],'SOURCE_BOUND')
         self.assertIsNotNone(early['common_equity_health']['assets']['ASST']['btc_per_diluted_share'])
@@ -158,7 +158,7 @@ class IssuerSourceFreshnessTests(unittest.TestCase):
         handoff=run_gpt_handoff_gate(old,build_plain_language_notice(old),ledger_path=self.root/'handoff.jsonl')
         payload=build_minimized_bridge_payload(old,handoff)
         encoded=json.dumps(payload,ensure_ascii=False,separators=(',',':'),sort_keys=True).encode()
-        self.assertLess(len(encoded),16384)
+        self.assertGreater(len(encoded),16384)  # Full evidence, not the former 16 KiB cap.
         self.assertIn(b'ISSUER_SOURCE_REGRESSION_BLOCKED',encoded)
         expanded=expand_bridge_field_names(payload)
         self.assertEqual(expanded['market_context']['company_source_freshness'],market['company_source_freshness'])

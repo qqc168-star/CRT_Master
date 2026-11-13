@@ -177,21 +177,25 @@ class StructuredWorkerTests(Fixture, unittest.TestCase):
                     current_main_sha=MAIN, asset="MSTR", now_ms=int(NOW.timestamp() * 1000))
         self.send.assert_not_called()
 
-    def test_native_schema_tampering_and_context_overflow_block(self):
+    def test_native_schema_tampering_blocks_and_large_context_is_preserved(self):
         env = build_request_envelope(self.payload, model=SMOKE_MODEL, judgment_context=self.context)
         bad = deepcopy(env); bad["request_body"]["text"]["format"]["strict"] = False
         bad.pop("request_hash"); bad["request_hash"] = _hash(bad)
         with self.assertRaises(ValueError): validate_request_envelope(bad)
         big = deepcopy(self.payload); big["market_context"]["test_padding"] = "x" * 16384
         big.pop("bridge_payload_hash"); big["bridge_payload_hash"] = _hash(big)
-        with self.assertRaises(ValueError): build_request_envelope(big, model=SMOKE_MODEL, judgment_context=self.context)
+        accepted=build_request_envelope(big,model=SMOKE_MODEL,judgment_context=self.context)
+        self.assertEqual(json.loads(accepted["request_body"]["input"])["bridge_payload"],big)
+        validate_request_envelope(accepted)
 
-    def test_original_full_source_projection_stays_fail_closed_over_budget(self):
+    def test_original_full_source_projection_preserves_facts_above_former_budget(self):
         inputs = source_inputs(); evidence = inputs["evidence_pack"]
         evidence["private_context"] = bridge_pack(evidence)["private_context"]
         evidence["private_context"]["profile"]["capital_state"]["as_of"] = NOW.isoformat()
         seal_field(evidence, "evidence_pack_hash")
         inputs["handoff"] = run_gpt_handoff_gate(evidence, build_plain_language_notice(evidence),
                                                 ledger_path=self.root / "full.jsonl")
-        with self.assertRaisesRegex(ValueError, "16 KiB"):
-            build_minimized_bridge_payload(evidence, inputs["handoff"])
+        from crt_radar.gpt_handoff import expand_bridge_field_names,_bridge_market_context
+        wire=build_minimized_bridge_payload(evidence,inputs["handoff"])
+        self.assertEqual(expand_bridge_field_names(wire)["market_context"],_bridge_market_context(evidence))
+        self.assertFalse(wire["authority"]["machine_may_execute_trade"])

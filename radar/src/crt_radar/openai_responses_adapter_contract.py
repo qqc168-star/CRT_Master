@@ -13,12 +13,13 @@ from .gpt_handoff import (
     REANALYSIS_SEQUENCE,
 )
 
-CONTRACT_VERSION = "CRT_OPENAI_RESPONSES_ADAPTER_CONTRACT_V0.1"
+LEGACY_CONTRACT_VERSION = "CRT_OPENAI_RESPONSES_ADAPTER_CONTRACT_V0.1"
+CONTRACT_VERSION = "CRT_OPENAI_RESPONSES_ADAPTER_CONTRACT_V0.2"
 SMOKE_GUARDRAILS_VERSION = "CRT_LIVE_SMOKE_TEST_GUARDRAILS_V0.1"
 RESPONSES_PATH = "/v1/responses"
 API_KEY_ENV_VAR = "OPENAI_API_KEY"
 SMOKE_MODEL = "gpt-5.6-luna"
-MAX_INPUT_UTF8_BYTES = 16 * 1024
+MAX_INPUT_UTF8_BYTES = None  # No CRT total analysis-data ceiling.
 MAX_OUTPUT_TOKENS = 1800
 MAX_ATTEMPTS = 1
 AUTO_RETRY = False
@@ -40,7 +41,7 @@ def _hash(value: Any) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def build_instructions(*, structured: bool = False) -> str:
+def build_instructions(*, structured: bool = False, legacy: bool = False) -> str:
     return ("Return only the requested Commander observation judgment JSON. Never invent missing "
             "prices, reasons, conditions or evidence. Refuse if evidence is insufficient. "
             "This is not a capital recommendation or permission to arm or trade.\n" if structured else "") + "\n".join(
@@ -50,7 +51,10 @@ def build_instructions(*, structured: bool = False) -> str:
             "Causal guardrails: " + " | ".join(CAUSAL_GUARDRAILS),
             "Evidence rules: " + " | ".join(EVIDENCE_RULES),
             "Governance guardrails: " + " | ".join(GOVERNANCE_GUARDRAILS),
-            "Use only the supplied minimized bridge payload.",
+            ("Use only the supplied minimized bridge payload." if legacy else
+             "Use only the supplied bridge payload. Exact evidence references are reversible; never infer missing evidence. "
+             "market_context.evidence_reference_encoding.objects maps each $crt_evidence_ref to its complete value and identity. "
+             "Each reference retains its original position and meaning. Different dates, sources and qualifications are independent evidence."),
             "Do not infer missing evidence. Do not perform external actions.",
         ]
     )
@@ -76,8 +80,6 @@ def build_request_envelope(
         sort_keys=True,
         separators=(",", ":"),
     )
-    if len(serialized_input.encode("utf-8")) > MAX_INPUT_UTF8_BYTES:
-        raise ValueError("Smoke input exceeds UTF-8 byte ceiling")
 
     envelope = {
         "contract_version": CONTRACT_VERSION,
@@ -122,7 +124,7 @@ def validate_request_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     from .capital_decision_closure import REQUEST_VERSION, FULL_REQUEST_VERSION, validate_envelope
     if envelope.get("contract_version") in {REQUEST_VERSION, FULL_REQUEST_VERSION}:
         return validate_envelope(envelope)
-    if envelope.get("contract_version") != CONTRACT_VERSION:
+    if envelope.get("contract_version") not in {CONTRACT_VERSION, LEGACY_CONTRACT_VERSION}:
         raise ValueError("Adapter contract version mismatch")
 
     transport = envelope.get("transport")
@@ -140,6 +142,8 @@ def validate_request_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
         "max_attempts": MAX_ATTEMPTS,
         "auto_retry": AUTO_RETRY,
     }
+    if envelope.get("contract_version") == LEGACY_CONTRACT_VERSION:
+        expected_guardrails["max_input_utf8_bytes"] = 16 * 1024  # immutable historical receipt
     if smoke_guardrails != expected_guardrails:
         raise ValueError("Smoke guardrails mismatch")
 
@@ -155,7 +159,8 @@ def validate_request_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Responses request body field set mismatch")
     if body.get("model") != SMOKE_MODEL:
         raise ValueError("Smoke request model mismatch")
-    if body.get("instructions") != build_instructions(structured=structured):
+    expected_instructions = build_instructions(structured=structured,legacy=envelope.get("contract_version")==LEGACY_CONTRACT_VERSION)
+    if body.get("instructions") != expected_instructions:
         raise ValueError("Smoke instructions mismatch")
     if body.get("max_output_tokens") != MAX_OUTPUT_TOKENS:
         raise ValueError("Smoke output token ceiling mismatch")
@@ -175,8 +180,6 @@ def validate_request_envelope(envelope: dict[str, Any]) -> dict[str, Any]:
     serialized_input = body.get("input")
     if not isinstance(serialized_input, str):
         raise ValueError("Smoke input must be serialized text")
-    if len(serialized_input.encode("utf-8")) > MAX_INPUT_UTF8_BYTES:
-        raise ValueError("Smoke input exceeds UTF-8 byte ceiling")
 
     decoded = json.loads(serialized_input)
     if structured:

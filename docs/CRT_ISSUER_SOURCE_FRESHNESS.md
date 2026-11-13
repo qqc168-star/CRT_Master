@@ -63,7 +63,10 @@ claim-scoped blockers. The existing GPT bridge retains all company qualification
 states, blocker codes and per-field dates. Original proofs are bound by the
 enclosing Evidence Pack hash. Existing exact field/value references and their
 decoder compact repeated health qualifications without dropping values. The
-16 KiB ceiling is unchanged and still rejects oversized requests.
+2026-11-12 user approval removes the total 16 KiB input limit. Exact evidence
+references and verified multipart transfer preserve complete data; see
+`CRT_BRIDGE_CAPACITY_AND_DEDUP_DOCTRINE_V0.1.md`. Source qualification and
+fail-closed financial decisions are unchanged.
 
 Acceptance uses the existing genuine 2026-10-05 fixtures plus genuine 2026-10-26
 and 2026-11-09 SEC originals. The latter reports the 2026-11-06 snapshot; dates
