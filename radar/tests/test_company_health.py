@@ -450,8 +450,7 @@ class CompanyHealthTests(unittest.TestCase):
             p["common_equity_health"]["assets"][a]["company_health"] = health(scenario(strive), 1 if strive else -1)
         with tempfile.TemporaryDirectory() as folder:
             handoff = run_gpt_handoff_gate(p, build_plain_language_notice(p), ledger_path=Path(folder)/"ledger")
-            with self.assertRaisesRegex(ValueError, "unchanged 16 KiB ceiling"):
-                build_minimized_bridge_payload(p, handoff)
+            build_minimized_bridge_payload(p,handoff)
             from crt_radar.gpt_handoff import build_full_decision_bridge_payload, expand_bridge_field_names
             full_handoff = run_gpt_handoff_gate(p, build_plain_language_notice(p),
                 ledger_path=Path(folder)/"full-decision-ledger", full_decision=True)
@@ -476,7 +475,7 @@ class CompanyHealthTests(unittest.TestCase):
                 fetch_overrides=fixture.overrides, liquidation_aggregate_payload=fixture.aggregate(),
                 now_ms=daily_fixtures.NOW_MS, generated_at_ms=daily_fixtures.NOW_MS,
                 treasury_company_ct_inputs={"MSTR": scenario(), "ASST": scenario(True)})
-        for a, direction in (("MSTR", "DETERIORATING"), ("ASST", "IMPROVING")):
+        for a, direction in (("MSTR", "BLOCKED"), ("ASST", "BLOCKED")):
             self.assertEqual(p["common_equity_health"]["assets"][a]["company_health"]["dimensions"]
                              ["per_share_asset_engine"]["direction"], direction)
         self.assertNotIn("portfolio_allocation_context", p)

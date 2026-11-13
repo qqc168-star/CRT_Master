@@ -65,7 +65,9 @@ class DailyCapitalSourceTests(unittest.TestCase):
         self.prepare(treasury_company_ct_inputs={"MSTR": scenario(), "ASST": scenario(True)},
                      portfolio_allocation_inputs=allocation_inputs())
         self.assertIn("portfolio_allocation_context", self.pack)
-        for asset, direction in (("MSTR", "DETERIORATING"), ("ASST", "IMPROVING")):
+        # Unarchived synthetic metadata can exercise the pure CT calculator,
+        # but the public daily entry must not certify it as issuer evidence.
+        for asset, direction in (("MSTR", "BLOCKED"), ("ASST", "BLOCKED")):
             self.assertEqual(self.pack["common_equity_health"]["assets"][asset]["company_health"]
                 ["dimensions"]["per_share_asset_engine"]["direction"], direction)
         self.inputs["posture_inputs"] = self.posture_inputs()

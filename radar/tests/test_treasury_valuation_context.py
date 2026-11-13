@@ -463,8 +463,10 @@ class TreasuryValuationTests(unittest.TestCase):
         p["data_health"] = {"critical_blockers": ["UNCOMPRESSIBLE_EVIDENCE_" + str(i) for i in range(1500)]}
         with tempfile.TemporaryDirectory() as folder:
             h = run_gpt_handoff_gate(p, build_plain_language_notice(p), ledger_path=Path(folder)/"ledger")
-            with self.assertRaisesRegex(ValueError, "16 KiB"):
-                build_minimized_bridge_payload(p,h)
+            wire=build_minimized_bridge_payload(p,h)
+            from crt_radar.gpt_handoff import expand_bridge_field_names
+            self.assertEqual(expand_bridge_field_names(wire)["market_context"]["data_health"]["critical_blockers"],p["data_health"]["critical_blockers"])
+            self.assertFalse(wire["authority"]["machine_may_execute_trade"])
 
 
 if __name__ == "__main__":

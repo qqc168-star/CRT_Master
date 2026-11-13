@@ -1,0 +1,13 @@
+{
+  "source_url": "https://www.sec.gov/Archives/edgar/data/1920406/000162828026071888/asst-20261109.htm",
+  "retrieved_at_ms": 1794456235748,
+  "first_seen_at_ms": 1794456235748,
+  "raw_sha256": "766b8499f94bb4e3a3e113d14b76fd5f6020de973773b7245845b530cce90f8b",
+  "length": 59100,
+  "asset": "ASST",
+  "accession": "0001628280-26-071888",
+  "primary": "asst-20261109.htm",
+  "accepted": "2026-11-09T12:59:19.000Z",
+  "issuer_index_raw_sha256": "384d9f9cd4065dd4b366f38cf30c241fec0d23cda95d6a226e161e80dfd488d1",
+  "issuer_index_retrieved_at_ms": 1794456235184
+}
