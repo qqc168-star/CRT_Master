@@ -148,21 +148,22 @@ class OpenAIResponsesAdapterContractTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     validate_request_envelope(env)
 
-    def test_oversized_input_is_rejected_before_envelope_creation(self) -> None:
+    def test_large_input_is_accepted_without_total_byte_ceiling(self):
         bad = payload()
-        bad["analysis"]["marker"] = "x" * MAX_INPUT_UTF8_BYTES
+        bad["analysis"]["marker"] = "x" * (1024 * 1024)
         bad.pop("bridge_payload_hash")
         bad["bridge_payload_hash"] = _hash(bad)
-        with self.assertRaises(ValueError):
-            build_request_envelope(bad, model=SMOKE_MODEL)
+        env=build_request_envelope(bad,model=SMOKE_MODEL)
+        self.assertIsNone(MAX_INPUT_UTF8_BYTES)
+        self.assertEqual(json.loads(env["request_body"]["input"]),bad)
+        validate_request_envelope(env)
 
-    def test_input_ceiling_counts_utf8_bytes_not_characters(self) -> None:
-        bad = payload()
-        bad["analysis"]["marker"] = "界" * (MAX_INPUT_UTF8_BYTES // 2)
-        bad.pop("bridge_payload_hash")
-        bad["bridge_payload_hash"] = _hash(bad)
-        with self.assertRaises(ValueError):
-            build_request_envelope(bad, model=SMOKE_MODEL)
+    def test_large_utf8_input_is_preserved_without_character_or_byte_truncation(self):
+        value=payload();value["analysis"]["marker"]="界"*20000
+        value.pop("bridge_payload_hash");value["bridge_payload_hash"]=_hash(value)
+        env=build_request_envelope(value,model=SMOKE_MODEL)
+        self.assertGreater(len(env["request_body"]["input"].encode()),60000)
+        self.assertEqual(json.loads(env["request_body"]["input"]),value)
 
     def test_one_shot_policy_never_classifies_retryable(self) -> None:
         self.assertEqual(

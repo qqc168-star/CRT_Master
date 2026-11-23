@@ -300,7 +300,7 @@ class BrokerCapitalTests(unittest.TestCase):
             if isinstance(observation, dict) and observation.get("reason"):
                 self.assertEqual(bridge["reason"], observation["reason"])
 
-    def test_full_bridge_with_issuer_etf_capital_and_qualified_prices_fits_existing_limit(self):
+    def test_full_bridge_retains_issuer_etf_capital_and_qualified_prices_above_former_limit(self):
         with tempfile.TemporaryDirectory() as td:
             pack = captured_pack(); at = pack["generated_at_ms"]
             observation = synthetic_observation(at)
@@ -311,7 +311,7 @@ class BrokerCapitalTests(unittest.TestCase):
             pack["qualified_equity_daily_source"] = synthetic_daily_price_source(at)
             bind_pack(pack)
             bridge = build_minimized_bridge_payload(pack, handoff_for(pack, Path(td)))
-            self.assertLessEqual(len(canonical_bytes(bridge)), 16_384)
+            self.assertGreater(len(canonical_bytes(bridge)), 16_384)
             validate_transport_payload(bridge)
             self.assertEqual(semantic_payload(bridge)["capital_state"]["reconciliation"]["analysis_cash_budget_usd"], 800)
             self.assertEqual(len(semantic_payload(bridge)["capital_state"]["holdings"]), 3)

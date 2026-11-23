@@ -115,7 +115,7 @@ Allocation destination（配置到站）可以領先 current posture（目前姿
 
 Evidence Pack（證據包）本地保存完整 `common_equity_health` 與 `portfolio_allocation_context`。
 
-GPT bridge（GPT 橋）只傳送 compact projection（精簡投影），避免原始私人帳戶資料與重複 Treasury 證據進入 bridge（橋接），並維持既有 16 KiB 上限。
+GPT bridge（GPT 橋）只傳送隱私允許的 projection，避免原始私人帳戶資料進入 bridge；相同證據使用可還原引用。2026-11-12 使用者已取消整體 16 KiB 上限，完整資料依目前 Bridge Capacity Doctrine 傳遞。
 
 `asset_strategy_delta` 在沒有新 context（脈絡）時保持舊輸出；只有 context 可用時才：
 

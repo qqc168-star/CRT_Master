@@ -143,20 +143,8 @@ def complete_capacity_diagnostic(root):
     inputs["current_rail"]["parent_evidence_pack_hash"] = evidence["evidence_pack_hash"]
     inputs["current_rail"]["valid_until_ms"] = at + 240_000
     posture = build_capital_posture_context(inputs, evidence, None)
-    seen, size = [], h._bridge_size
-    def observe(value):
-        if isinstance(value, dict) and "bridge_payload_hash" in value:
-            seen.append(deepcopy(value))
-        return size(value)
-    with patch.object(h, "_bridge_size", side_effect=observe):
-        try:
-            h.build_minimized_bridge_payload(evidence, handoff_for(evidence, root))
-        except ValueError as exc:
-            if "unchanged 16 KiB ceiling" not in str(exc):
-                raise
-        else:
-            raise AssertionError("Update capacity diagnosis: upstream now fits")
-    payload = seen[-1]
+    size=h._bridge_size
+    payload=h.build_minimized_bridge_payload(evidence,handoff_for(evidence,root))
     source = source_fixture(payload, at)
     source = c.build_source(payload=payload, posture_context=posture, at_ms=at,
         **{k: source[k] for k in ("source_main_sha", "broker_observation", "user_intent",
@@ -353,14 +341,14 @@ class TransportClosureTests(unittest.TestCase):
     def test_representative_full_projection_capacity_and_privacy(self):
         validate_request_envelope(self.envelope)
         size = len(self.envelope["request_body"]["input"].encode())
-        self.assertLessEqual(size, 16 * 1024)
+        self.assertGreater(size,16*1024)  # Full source evidence is accepted.
         data = json.loads(self.envelope["request_body"]["input"])
         self.assertEqual(data["market_context"], self.payload["market_context"])
         self.assertEqual(data["issuer_ratio_observation"], self.payload["issuer_ratio_observation"])
         self.assertNotIn("average_cost_usd", data["capital"]["holdings"][0])
         self.assertEqual(self.envelope["request_body"]["max_output_tokens"], 1800)
 
-    def test_complete_organs_offline_full_contract_preserves_smoke_capacity(self):
+    def test_complete_organs_offline_full_contract_preserves_qualification_and_authority(self):
         payload, source, measurement = complete_capacity_diagnostic(self.root / "complete-capacity")
         self.assertGreater(measurement["bridge_bytes"], measurement["ceiling_bytes"])
         self.assertGreater(measurement["capital_input_bytes"], measurement["ceiling_bytes"])
@@ -368,13 +356,12 @@ class TransportClosureTests(unittest.TestCase):
         expanded = expand_bridge_field_names(payload)["market_context"]
         for asset in ("MSTR", "ASST"):
             treasury = expanded["treasury_valuation_context"]
-            valuation = {**treasury["common"], **treasury["assets"][asset]}
+            valuation = ({**treasury["common"], **treasury["assets"][asset]} if "common" in treasury else treasury[asset])
             allocation = expanded["portfolio_allocation_context"]["valuation_evidence"][asset]
             self.assertEqual(allocation["formal_action_critical_state"], valuation["formal_action_critical_state"])
             self.assertEqual(allocation["diluted_mnav"], valuation["diluted_mnav"])
             self.assertEqual(valuation["formal_action_critical_state"], "BLOCKED")
-        with self.assertRaisesRegex(ValueError, "CAPACITY_EXCEEDED"):
-            c.build_envelope(payload, source, at_ms=NOW)
+        validate_request_envelope(c.build_envelope(payload,source,at_ms=NOW))
         envelope = c.build_envelope(payload, source, at_ms=NOW, full_decision=True)
         validate_request_envelope(envelope)
         self.assertEqual(envelope["delivery_mode"], "OFFLINE_ONLY")
@@ -611,10 +598,10 @@ class TransportClosureTests(unittest.TestCase):
                 send_response(c.build_envelope(self.payload, self.source, at_ms=NOW, full_decision=True))
             opener.assert_not_called()
 
-    def test_capacity_failure_does_not_trim_counterevidence(self):
+    def test_large_counterevidence_is_preserved_without_capacity_rejection(self):
         self.source["posture"]["contradictions"].append("重要反證" * 5000)
-        with self.assertRaisesRegex(ValueError, "CAPACITY"):
-            c.build_envelope(self.payload, self.source, at_ms=NOW)
+        env=c.build_envelope(self.payload,self.source,at_ms=NOW)
+        self.assertEqual(json.loads(env["request_body"]["input"])["posture"]["contradictions"],self.source["posture"]["contradictions"])
 
     def test_private_user_intent_and_local_paths_rejected(self):
         self.source["user_intent"]["name"] = "private name"

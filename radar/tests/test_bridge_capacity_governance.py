@@ -35,9 +35,7 @@ def full_wire():
     bind_pack(pack)
     with tempfile.TemporaryDirectory() as td:
         h = handoff_for(pack, Path(td))
-        # Test-only capacity oracle; no production changes.
-        with patch.object(gh, "BRIDGE_CEILING_BYTES", 10**9):
-            wire = gh.build_minimized_bridge_payload(pack, h)
+        wire = gh.build_minimized_bridge_payload(pack, h)
     return pack, wire
 
 class BridgeCapacityGovernanceTests(unittest.TestCase):
@@ -59,7 +57,7 @@ class BridgeCapacityGovernanceTests(unittest.TestCase):
         compact["market_context"].pop("premarket_ref_encoding", None)
         self.assertEqual(encoded(compact), encoded(original))
 
-    def test_actual_wire_has_no_large_exact_duplicate(self):
+    def test_actual_wire_shares_evidence_without_merging_distinct_identities(self):
         pack, wire = full_wire()
         self.assertEqual(
             gh.expand_bridge_field_names(wire)["market_context"][
@@ -81,21 +79,29 @@ class BridgeCapacityGovernanceTests(unittest.TestCase):
                 for child in v:
                     visit(child)
         visit(wire)
-        self.assertFalse([v for v in groups.values() if v > 1])
+        # Distinct inherited source/clock identities may have equal literal
+        # subobjects. Only complete evidence identities may share a reference.
+        expanded=gh.expand_bridge_field_names(wire)
+        self.assertEqual(expanded["market_context"],gh._bridge_market_context(pack))
+        from crt_radar.gpt_bridge_outbox import encode_evidence_references,expand_evidence_references
+        node={"source_id":"OFFLINE","observed_at_ms":123,"values":"same evidence "*100}
+        exact={"a":node,"b":deepcopy(node)}
+        encoded_exact=encode_evidence_references(exact)
+        self.assertEqual(len(encoded_exact["evidence_reference_encoding"]["objects"]),1)
+        self.assertEqual(expand_evidence_references(encoded_exact),exact)
 
-    def test_smoke_cap_remains_and_rejects_full_example(self):
-        self.assertEqual(gh.BRIDGE_CEILING_BYTES, 16 * 1024)
-        self.assertEqual(MAX_INPUT_UTF8_BYTES, 16 * 1024)
+    def test_no_crt_total_cap_and_full_example_is_accepted(self):
+        self.assertIsNone(gh.BRIDGE_CEILING_BYTES)
+        self.assertIsNone(MAX_INPUT_UTF8_BYTES)
         pack, wire = full_wire()
         self.assertEqual(
             wire["event"]["source_evidence_pack_hash"],
             pack["evidence_pack_hash"],
         )
         self.assertGreater(len(encoded(wire)), 16 * 1024)
-        # Structural/privacy validation is NOT request acceptance.
         validate_transport_payload(wire)
-        with self.assertRaisesRegex(ValueError, "byte ceiling"):
-            build_request_envelope(wire, model=SMOKE_MODEL)
+        envelope=build_request_envelope(wire,model=SMOKE_MODEL)
+        self.assertEqual(json.loads(envelope["request_body"]["input"]),wire)
 
     def test_contract_is_boot_discoverable(self):
         doctrine = DOC.read_text(encoding="utf-8")

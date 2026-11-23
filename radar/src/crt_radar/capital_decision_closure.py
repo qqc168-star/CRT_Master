@@ -30,7 +30,7 @@ SOURCE_FIELDS = {"source_main_sha", "bridge_payload_hash", "evidence_lineage",
                  "fees", "posture", "task", "governance", "evidence_validity"}
 SENSITIVE = re.compile(r"(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|file://|/(?:Users|home|tmp|var)/|"
                        r"\bsk-[A-Za-z0-9_-]{12,}|\bBearer\s+\S+|"
-                       r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|"
+                       r"(?<![A-Z0-9._%+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}|"
                        r"\b(?:bc1|0x)[A-Za-z0-9]{20,}|\b[UDF]\d{6,}\b)", re.I)
 
 
@@ -449,7 +449,8 @@ def semantic_evidence_catalog(projection):
                     add((section, index, key), row[key], asset=row["asset"], basis=basis,
                         role=role, ref=row["source_ref"], row=row)
 
-    market = projection.get("market_context", {})
+    from .gpt_bridge_outbox import expand_evidence_references
+    market = expand_evidence_references(projection.get("market_context", {}))
     # Section names below are existing explicit semantic mappings. Generic
     # synthetic directions, layer names and event wake sources grant no asset.
     btc_sections = {"btc_bull_validation", "btc_entry_gate", "btc_long_horizon_context", "btc_etf_evidence"}
@@ -975,15 +976,13 @@ def build_envelope(payload, source, *, at_ms, full_decision=False):
 
 def _build_envelope(payload, source, *, at_ms, full_decision=False, legacy_references=False,
                     legacy_semantics=False, legacy_two_layer=False):
-    from .openai_responses_adapter_contract import (SMOKE_MODEL, MAX_INPUT_UTF8_BYTES,
+    from .openai_responses_adapter_contract import (SMOKE_MODEL,
         MAX_OUTPUT_TOKENS, API_KEY_ENV_VAR, RESPONSES_PATH)
     projection = build_projection(payload, source, at_ms=at_ms)
     semantic_catalog = (semantic_evidence_catalog(projection)
                         if full_decision and not legacy_references and not legacy_semantics else None)
     two_layer = semantic_catalog is not None and not legacy_two_layer
     serialized = json.dumps(projection, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
-    if not full_decision:
-        require(len(serialized.encode("utf-8")) <= MAX_INPUT_UTF8_BYTES, "CAPITAL_INPUT_CAPACITY_EXCEEDED")
     result = {"contract_version": FULL_REQUEST_VERSION if full_decision else REQUEST_VERSION, "event_id": payload["event"]["event_id"],
         "bridge_payload_hash": payload["bridge_payload_hash"], "capital_bridge_payload": deepcopy(payload),
         "capital_source": _canonical_source(source), "request_at_ms": at_ms,
@@ -1008,6 +1007,12 @@ def _build_envelope(payload, source, *, at_ms, full_decision=False, legacy_refer
         result["decision_semantics_contract"] = DECISION_SEMANTICS_CONTRACT_VERSION
     if two_layer:
         result["two_layer_analysis_contract"] = TWO_LAYER_ANALYSIS_CONTRACT_VERSION
+    if "evidence_reference_encoding" in projection.get("market_context",{}):
+        result["request_body"]["instructions"] += (
+            "\nExact evidence reference encoding: $crt_evidence_ref selects the complete value from "
+            "market_context.evidence_reference_encoding.objects. Resolve references before interpreting facts. "
+            "Claim-catalog JSON pointers address that expanded view; the object pool and identity metadata "
+            "are transport metadata, not new market observations or investment evidence.")
     result["request_hash"] = digest(result)
     return result
 

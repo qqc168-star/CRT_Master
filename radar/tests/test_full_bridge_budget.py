@@ -12,8 +12,8 @@ from unittest.mock import patch
 from crt_radar.gpt_bridge_outbox import enqueue_bridge_payload
 from crt_radar.gpt_transport_worker import validate_transport_payload
 from crt_radar.gpt_handoff import (
-    _compact_field_names, _compact_tranche_fields, _inherit_equal_authority,
-    build_minimized_bridge_payload,
+    _compact_field_names, _compact_tranche_fields, _inherit_equal_authority, _share_authority_fields,
+    build_minimized_bridge_payload, _bridge_market_context,
     build_full_decision_bridge_payload,
     expand_bridge_field_names, run_gpt_handoff_gate,
 )
@@ -156,7 +156,8 @@ class FullBridgeBudgetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             pack = captured_pack()
             payload = build_minimized_bridge_payload(pack, handoff_for(pack, Path(td)))
-            candidate = deepcopy(payload)
+            candidate = semantic_payload(payload)
+            _compact_field_names(candidate)
             codec = candidate["market_context"]["key_encoding"]
             first_token = codec[0][0]
             codec[1] = "broker_account|" + codec[1].split("|", 1)[1]
@@ -165,7 +166,8 @@ class FullBridgeBudgetTests(unittest.TestCase):
             candidate["bridge_payload_hash"] = hashlib.sha256(canonical_bytes(candidate)).hexdigest()
             with self.assertRaises(ValueError):
                 validate_transport_payload(candidate)
-            candidate = deepcopy(payload)
+            candidate = semantic_payload(payload)
+            _compact_field_names(candidate)
             candidate["market_context"]["key_encoding"][2] = "private@example.test"
             candidate.pop("bridge_payload_hash")
             candidate["bridge_payload_hash"] = hashlib.sha256(canonical_bytes(candidate)).hexdigest()
@@ -201,7 +203,7 @@ class FullBridgeBudgetTests(unittest.TestCase):
             self.assertEqual(expanded["capital_state"]["snapshot_state"], "STALE")
             self.assertEqual(expanded["issuer_ratio_observation"], compact_issuer_ratio_observation(
                 pack["issuer_ratio_observation"], generated_at_ms=pack["generated_at_ms"]))
-            self.assertLess(len(canonical_bytes(payload)), 16384)
+            self.assertEqual(expanded["market_context"],_bridge_market_context(pack))
             validate_transport_payload(payload)
             self.assertEqual(build_request_envelope(payload, model=SMOKE_MODEL)["request_body"]["input"],
                              canonical_bytes(payload).decode("utf-8"))
@@ -256,19 +258,19 @@ class FullBridgeBudgetTests(unittest.TestCase):
             for row in payload["market_context"]["qualified_equity_prices"]["assets"].values():
                 self.assertEqual(row["session_date"], "2026-09-30")
 
-    def test_realistic_full_context_reaches_validated_outbox_with_headroom(self):
+    def test_realistic_full_context_reaches_validated_outbox_without_omission(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             pack = captured_pack()
             handoff = handoff_for(pack, root)
             payload = build_minimized_bridge_payload(pack, handoff)
             self.assertEqual(payload["state"], "BRIDGE_PAYLOAD_READY_LOCAL_ONLY")
-            self.assertLessEqual(len(canonical_bytes(payload)), 15 * 1024)
+            self.assertEqual(semantic_payload(payload)["market_context"],_bridge_market_context(pack))
             self.assertEqual(payload["event"]["source_evidence_pack_hash"], pack["evidence_pack_hash"])
             result = enqueue_bridge_payload(root / "outbox", payload)
             self.assertEqual(result["state"], "OUTBOX_ENQUEUED")
             self.assertEqual(result["bridge_payload_hash"], payload["bridge_payload_hash"])
-            stored = json.loads((root / "outbox" / (result["event_id"] + ".json")).read_text())
+            stored = json.loads((root / "outbox" / (result["event_id"] + ".json")).read_text(encoding="utf-8"))
             self.assertEqual(stored, payload)
             self.assertEqual(enqueue_bridge_payload(root / "outbox", payload)["state"], "DUPLICATE_SKIPPED")
 
@@ -317,86 +319,22 @@ class FullBridgeBudgetTests(unittest.TestCase):
 
     def test_market_health_states_blockers_dvol_etf_and_formal_locks_stay_literal(self):
         with tempfile.TemporaryDirectory() as td:
-            pack = captured_pack()
-            pack["layers"]["L1"]["status"] = "PARTIAL"
-            pack["distillation"]["divergences"] = [{"state": "PARTIAL", "reason": "CONTRADICTORY_FLOW_HORIZONS"}]
-            pack["distillation"]["formal_extremes"] = [{"state": "BLOCKED", "reason": "NOT_FORMALLY_QUALIFIED"}]
-            payload = build_minimized_bridge_payload(pack, handoff_for(pack, Path(td)))
-            payload = semantic_payload(payload)
-            market = payload["market_context"]
-            self.assertEqual(market["generated_at_ms"], pack["generated_at_ms"])
-            self.assertEqual(market["pack_state"], pack["pack_state"])
-            self.assertEqual(market["data_health"]["critical_blockers"], pack["data_health"]["critical_blockers"])
-            self.assertEqual(market["data_health"]["source_gate_state"], pack["data_health"]["source_gate_state"])
-            self.assertEqual(market["data_health"]["unusable_or_missing_evidence"], [
-                {"input_family": row.get("input_family"), "quality_state": row.get("quality_state")}
-                for row in pack["data_health"]["unusable_or_missing_evidence"]])
-            self.assertEqual(market["layers"]["L1"]["status"], "PARTIAL")
-            self.assertEqual(market["distillation"]["divergences"], pack["distillation"]["divergences"])
-            self.assertEqual(market["distillation"]["formal_extremes"], pack["distillation"]["formal_extremes"])
-            for layer, row in pack["layers"].items():
-                for name, metric in row.get("metrics", {}).items():
-                    eligible = (name in AUDIT_METRICS
-                                and name != pack["reanalysis_wake"].get("metric")
-                                and metric.get("quality_state") == "VALID_FRESH"
-                                and metric.get("value") is not None)
-                    if eligible:
-                        self.assertNotIn(name, market["layers"][layer]["metrics"])
-                        continue
-                    actual = metric_facts(market, layer, name)
-                    for key in ("value", "as_of_ms", "quality_state"):
-                        if key in metric:
-                            self.assertEqual(actual[key], metric[key], (layer, name, key))
-                if "missing_required_metrics" in row:
-                    self.assertEqual(market["layers"][layer]["missing_required_metrics"], row["missing_required_metrics"])
-            self.assertEqual(market["btc_entry_gate"]["state"], pack["btc_entry_gate"]["state"])
-            self.assertEqual(market["btc_entry_gate"]["reason"], pack["btc_entry_gate"]["reason"])
-            bull = market["btc_bull_validation"]
-            for key in ("state", "reason", "blocked_checks", "pending_checks", "mixed_checks", "adverse_checks", "supportive_checks"):
-                if key in pack["btc_bull_validation"]:
-                    self.assertEqual(bull[key], pack["btc_bull_validation"][key])
-            actual_checks = {row["check_id"]: row for row in bull["checks"]}
-            for check in pack["btc_bull_validation"]["checks"]:
-                if check["status"] == "BLOCKED":
-                    reason = (bull["blocked_check_reason"] if "blocked_check_reason" in bull
-                              else bull["blocked_check_reasons"][check["check_id"]])
-                    self.assertEqual(reason, check["reason"])
-                    self.assertIn(check["check_id"], bull["blocked_checks"])
-                    continue
-                if check["status"] == "PENDING":
-                    self.assertIn(check["check_id"], bull["pending_checks"])
-                    continue
-                actual = actual_checks[check["check_id"]]
-                self.assertEqual(actual["status"], check["status"])
-                self.assertEqual(actual["reason"], check["reason"])
-                if check["status"] in {"ADVERSE", "MIXED"}:
-                    expected_value = deepcopy(check["value"])
-                    if isinstance(expected_value, dict):
-                        # Descriptions and constant baseline labels are audit
-                        # detail; observed volume/proxy values remain literal.
-                        expected_value.pop("baseline_meaning", None)
-                        expected_value.pop("natural_research_baselines", None)
-                    self.assertEqual(actual["value"], expected_value)
-            dvol = market["dvol_regime_watch"]
-            for key in ("state", "reason", "current_dvol", "as_of_ms", "direction", "level_percentile_1y",
-                        "change_1d_pct", "change_7d_pct", "rebound_from_30d_low_pct"):
-                self.assertEqual(dvol[key], pack["dvol_regime_watch"][key])
-            self.assertIn("btc_etf_evidence", market)
-            serialized = canonical_bytes(payload).decode("utf-8")
-            self.assertIn("RELIABLE_FREE_BTC_BALANCE_HISTORY_UNAVAILABLE", serialized)
-            for key in ("btc_season_router", "locked_formal_scoring", "six_layer_evidence"):
-                expected = pack["model_status"][key]
-                actual = market["model_status"][key]
-                for field in ("state", "reason", "season", "candidate_weather_bucket", "formal_model",
-                              "layer_weights_percent", "light_thresholds", "blocked_reasons"):
-                    if field in expected:
-                        self.assertEqual(actual[field], expected[field], (key, field))
+            pack=captured_pack();pack["layers"]["L1"]["status"]="PARTIAL"
+            pack["distillation"]["divergences"]=[{"state":"PARTIAL","reason":"CONTRADICTORY_FLOW_HORIZONS"}]
+            payload=build_minimized_bridge_payload(pack,handoff_for(pack,Path(td)))
+            market=semantic_payload(payload)["market_context"]
+            self.assertEqual(market,_bridge_market_context(pack))
+            self.assertEqual(market["btc_bull_validation"],pack["btc_bull_validation"])
+            self.assertEqual(market["dvol_regime_watch"],pack["dvol_regime_watch"])
+            for layer,row in pack["layers"].items():
+                self.assertEqual(market["layers"][layer],row)
+            for key in ("btc_season_router","locked_formal_scoring","six_layer_evidence"):
+                self.assertEqual(market["model_status"][key],pack["model_status"][key])
             for fact in pack["asset_facts"]["items"]:
-                if fact["fact_type"] == "TREASURY_VALUATION_CONTEXT":
-                    self.assertIn(fact["evidence"]["context_hash"], serialized)
-                    self.assertIn('"formal_action_critical_state":"BLOCKED"', serialized)
-                    for blocker in fact["evidence"]["blockers"]:
-                        self.assertIn(blocker["code"], serialized)
+                if fact["fact_type"]=="TREASURY_VALUATION_CONTEXT":
+                    serialized=canonical_bytes(market).decode()
+                    self.assertIn(fact["evidence"]["context_hash"],serialized)
+                    for blocker in fact["evidence"]["blockers"]:self.assertIn(blocker["code"],serialized)
 
     def test_authority_privacy_and_required_analyst_behavior_unchanged(self):
         with tempfile.TemporaryDirectory() as td:
@@ -451,12 +389,12 @@ class FullBridgeBudgetTests(unittest.TestCase):
             payload = build_minimized_bridge_payload(pack, handoff)
             reordered = build_minimized_bridge_payload(reverse_dict_order(pack), reverse_dict_order(handoff))
             self.assertEqual(payload, reordered)
-            self.assertLessEqual(len(canonical_bytes(payload)), 15 * 1024)
+            self.assertEqual(semantic_payload(payload)["market_context"],_bridge_market_context(pack))
             self.assertEqual(payload["event"]["source_evidence_pack_hash"], pack["evidence_pack_hash"])
             serialized = canonical_bytes(payload).decode("utf-8")
-            self.assertIn("OMITTED_FROM_BRIDGE_NOT_ABSENT_FROM_EVIDENCE", serialized)
+            self.assertNotIn("OMITTED_FROM_BRIDGE_NOT_ABSENT_FROM_EVIDENCE", serialized)
             expanded = semantic_payload(payload)
-            self.assertIn("source_market_context_hash", expanded["market_context"]["minimization"])
+            self.assertEqual(expanded["market_context"]["changes"],pack["changes"])
             self.assertEqual(expanded["issuer_ratio_observation"], compact_issuer_ratio_observation(
                 pack["issuer_ratio_observation"], generated_at_ms=pack["generated_at_ms"]))
 
@@ -470,7 +408,7 @@ class FullBridgeBudgetTests(unittest.TestCase):
             for key in ("mstr_asst_market_health", "premarket_market_data"):
                 self.assertEqual(payload["market_context"][key], pack[key])
 
-    def test_additive_full_qualified_context_fails_closed_if_critical_facts_exceed_capacity(self):
+    def test_additive_full_qualified_context_is_retained_above_former_capacity(self):
         with tempfile.TemporaryDirectory() as td:
             pack = captured_pack()
             pack["mstr_asst_market_health"] = market_health()
@@ -491,10 +429,9 @@ class FullBridgeBudgetTests(unittest.TestCase):
             for layer, context in pack["layers"].items():
                 for name, row in context["metrics"].items():
                     self.assertEqual(full_market["layers"][layer]["metrics"][name]["value"], row["value"])
-            with self.assertRaisesRegex(ValueError, "byte ceiling"):
-                build_request_envelope(inspected, model=SMOKE_MODEL)
-            with self.assertRaisesRegex(ValueError, "16 KiB"):
-                build_minimized_bridge_payload(pack, handoff)
+            build_request_envelope(inspected,model=SMOKE_MODEL)
+            ordinary=build_minimized_bridge_payload(pack,handoff)
+            self.assertEqual(semantic_payload(ordinary)["market_context"],_bridge_market_context(pack))
             self.assertEqual(pack, original)
 
     def test_stale_partial_blocked_null_and_trigger_scoring_rows_cannot_be_omitted(self):
@@ -576,6 +513,16 @@ class FullBridgeBudgetTests(unittest.TestCase):
         self.assertEqual(expanded, original)
         self.assertEqual(set(expanded["market_context"]["child"]), set(subset))
 
+    def test_shared_health_qualification_objects_roundtrip_without_duplicate_mutation(self):
+        shared = {"reason": "SOURCE_QUALIFICATION_UNRESOLVED_" * 4,
+                  "direction": "BLOCKED", "missing_evidence": ["DILUTION_SCOPE_UNPROVEN"]}
+        payload = {"market_context": {"first": shared, "second": shared,
+                                      "independent": deepcopy(shared)}}
+        original = canonical_bytes(payload)
+        _share_authority_fields(payload["market_context"])
+        self.assertIn("authority_field_values", payload["market_context"])
+        self.assertEqual(canonical_bytes(expand_bridge_field_names(payload)), original)
+
     def test_authority_inheritance_never_coalesces_boolean_false_with_numeric_zero(self):
         top = {"action_output": "NONE", "external_action_authority": "NONE",
                "external_action_performed": False, "machine_may_execute_trade": False}
@@ -611,8 +558,10 @@ class FullBridgeBudgetTests(unittest.TestCase):
             pack["data_health"]["critical_blockers"] = ["UNRESOLVED_CRITICAL_EVIDENCE_" + "X" * (17 * 1024)]
             handoff = handoff_for(pack, Path(td))
             original = deepcopy(pack)
-            with self.assertRaisesRegex(ValueError, "16 KiB|16 KiB ceiling|16384|size limit|ceiling"):
-                build_minimized_bridge_payload(pack, handoff)
+            wire=build_minimized_bridge_payload(pack,handoff)
+            self.assertEqual(semantic_payload(wire)["market_context"],_bridge_market_context(pack))
+            self.assertGreater(len(canonical_bytes(wire)),17*1024)
+            validate_transport_payload(wire)
             self.assertEqual(pack, original)
 
 

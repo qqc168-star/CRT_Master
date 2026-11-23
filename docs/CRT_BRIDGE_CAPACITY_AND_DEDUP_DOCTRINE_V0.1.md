@@ -55,30 +55,54 @@ checked, privacy checked, and recognizable at the receiving boundary.
 A Python roundtrip does not establish that GPT interpreted the
 original meaning correctly.
 
-## 16 KiB scope
+## Current capacity approval (2026-11-12)
 
 16 KiB equals 16,384 UTF-8 bytes, not 16 bits and not the
 IBKR TWS market-data intake limit.
 
-Existing CRT one-shot Smoke Test requests keep their versioned
-16 KiB input ceiling and existing fail-closed behavior. Do not
-silently increase, bypass, or remove that contract.
+The user explicitly removed the CRT total-input limit for PR #171.
+New Bridge and Responses V0.2 requests have no 16 KiB (or replacement
+total byte) ceiling. Historical V0.1 receipts keep their original hash,
+instructions and declared guardrails; they are not rewritten or resent.
 
 Raw source captures, local Evidence Packs, source histories,
 Commander calculations, and full investment-decision evidence do
 not inherit the Smoke Test's budget as an intrinsic data limit.
 
-If decision-critical facts exceed the Smoke Test budget, block
-that request without deleting facts. A new full-decision delivery
-contract may be proposed only after a representative qualified
-fixture demonstrates the real byte size, model input tokens,
-provider/model limits, cost, latency, privacy, provenance,
-receiver comprehension, and independent approval boundaries.
+Size never authorizes omission of valid observations, history, blockers,
+company health, mNAV evidence or locks. Privacy allowlisting and existing
+financial/source qualification still apply. Exact content AND inherited
+source/asset/metric/clock/version/quality identity select reversible SHA256
+references; matching numeric values are not identity. No new financial model.
 
-The new contract must be versioned and tested separately.
-A hypothetical 32 KiB budget is not an accepted default.
-Do not turn on provider delivery or production permissions
-as a consequence of a successful offline test.
+The existing worker routes large input through the official Uploads API:
+numbered parts, local SHA256/length validation, durable acknowledgements,
+ordered completion with the provider MD5 check, and a downloaded whole-file
+SHA256 check before a single Responses inference uses the completed text file.
+The 64 KiB inline routing threshold and 63 KiB part data size are operational
+batch sizes, not total input limits. Explicit HTTP 413 reduces part size or
+routes inline data to parts. Input-byte retries are bounded to three attempts
+per operation; interruption retains INPUT_TRANSFER_PENDING and resumes missing
+parts. A lost completion acknowledgement is reconciled only by verified file
+content, never its name. Unknown inference outcomes keep the existing
+RECONCILIATION_REQUIRED lock and are never automatically sent again.
+
+Original source files and prior immutable receipts remain untouched. Within
+the Bridge each exact evidence object has one canonical content entry; local
+transfer parts use a content-addressed store. Distinct positions in a byte
+stream remain ordered positions, not invented distinct market evidence.
+
+The provider still has physical file/context limits. A provider rejection
+retains the entire job and evidence as pending; it cannot be called success or
+be repaired by dropping evidence. No finite model context is represented as
+unlimited. Input tokens, cost and receiver comprehension are NOT_MEASURED /
+NOT_YET_PROVEN without an approved live test. No provider, notification or
+production permission is enabled by this approval.
+
+Official API schemas: [Uploads](https://developers.openai.com/api/reference/resources/uploads/methods/create),
+[parts](https://developers.openai.com/api/reference/resources/uploads/subresources/parts/methods/create),
+[completion](https://developers.openai.com/api/reference/resources/uploads/methods/complete),
+[file inputs](https://developers.openai.com/api/docs/guides/file-inputs).
 
 ## Required comparisons
 
@@ -113,10 +137,9 @@ equal nested object repeats at or above 256 bytes. This does
 NOT prove absence of smaller, overlapping, or semantic
 duplicates in every live or future evidence combination.
 
-The 27,997-byte payload is deliberately NOT compatible with
-the unchanged 16 KiB smoke request. Offline bridge decoding
-is verified. End-to-end GPT semantic understanding and a
-live qualified full-decision delivery contract remain unproven.
+The 27,997-byte payload was incompatible with the then-current V0.1
+16 KiB request. That historical rejection no longer defines new V0.2
+input acceptance. End-to-end GPT semantic understanding remains unproven.
 
 All figures above are offline fixture results, not live
 qualified market acceptance or demonstrated investment alpha.
@@ -129,7 +152,7 @@ failure patterns using a representative source fixture.
 They must verify lossless reference expansion, non-merging of
 conflicting observations, no uncontrolled repeated large
 objects on the actual encoded wire, preserved authority and
-privacy rules, and proper smoke-request rejection.
+privacy rules, and acceptance above the former Smoke byte limit.
 
 A future source-structure change must compare the full
 decision-relevant semantic view, not only count PASS tests.

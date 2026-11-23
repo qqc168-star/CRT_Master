@@ -244,17 +244,11 @@ class SeasonThreeArmyGptE2ETests(unittest.TestCase):
                 ledger_path=td_path / "handoff.jsonl",
             )
             original_pack, original_handoff = deepcopy(pack), deepcopy(handoff)
-            # This fixture contains the entire duplicated Commander source map.
-            # Base main previously marked its 112,985-byte bridge ready without
-            # a Treasury section. Required critical overflow now fails closed.
-            with self.assertRaisesRegex(ValueError, "16 KiB"):
-                build_minimized_bridge_payload(pack, handoff)
+            # Complete Commander context uses lossless references; no size-based
+            # omission or rejection. Financial/authority qualification remains.
+            bridge=build_minimized_bridge_payload(pack,handoff)
             self.assertEqual(pack, original_pack)
             self.assertEqual(handoff, original_handoff)
-            # A test-only capacity oracle retains the original role/privacy and
-            # source-fact assertions below; it is never enqueueable acceptance.
-            with patch("crt_radar.gpt_handoff.BRIDGE_CEILING_BYTES", 10 ** 9):
-                bridge = build_minimized_bridge_payload(pack, handoff)
             self.assertGreaterEqual(len(json.dumps(
                 bridge, ensure_ascii=False, sort_keys=True,
                 separators=(",", ":")).encode("utf-8")), 16 * 1024)
@@ -284,7 +278,7 @@ class SeasonThreeArmyGptE2ETests(unittest.TestCase):
             )
             overlay = market["season_transition_warning_overlay"]
             source_overlay = pack["season_transition_warning_overlay"]
-            self.assertEqual(overlay["source_overlay_hash"], source_overlay["overlay_hash"])
+            self.assertEqual(overlay,source_overlay)
             for key in ("formal_season", "formal_season_status"):
                 self.assertEqual(overlay[key], source_overlay[key])
             resolved_authority = {**bridge["authority"], **overlay["authority"]}
@@ -292,7 +286,7 @@ class SeasonThreeArmyGptE2ETests(unittest.TestCase):
                 self.assertEqual(resolved_authority[key], value)
             self.assertEqual(overlay["inherited_locks"]["light_thresholds"],
                              source_overlay["inherited_locks"]["light_thresholds"])
-            self.assertIn("Omitted is not absent", market["minimization"]["omitted_detail"])
+            self.assertNotIn("minimization",market)
 
             unsafe_pack = deepcopy(pack)
             unsafe_pack["season_transition_warning_overlay"][

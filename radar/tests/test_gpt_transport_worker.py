@@ -208,39 +208,21 @@ class WorkerTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertIsNotNone(worker._SENSITIVE_TEXT.search(text))
 
-    def test_oversized_builder_preserves_facts_locks_lineage_and_declares_omissions(self):
-        evidence = bridge_pack(pack(evidence_hash="b" * 64, requested=True))
-        evidence["changes"] = {"historical_detail": "x" * 20000}
-        evidence["layers"] = {"L1": {
-            "status": "BLOCKED", "missing_required_metrics": ["unavailable"],
-            "required_metrics": ["actual", "unavailable"],
-            "metrics": {"actual": {"value": 12.5, "as_of_ms": 12345,
-                                    "quality_state": "VALID_FRESH", "evidence_hash": "c" * 64}},
-        }}
-        evidence["reanalysis_wake"]["current_value"] = 12.5
-        original = copy.deepcopy(evidence)
-        handoff = run_gpt_handoff_gate(evidence, build_plain_language_notice(evidence),
-                                      ledger_path=self.root / "large.jsonl")
-        # Inspect the unbounded oracle only; ordinary construction below still
-        # enforces the unchanged production ceiling and must never drop facts.
-        with patch("crt_radar.gpt_handoff._bound_bridge_detail"), \
-             patch("crt_radar.gpt_handoff.BRIDGE_CEILING_BYTES", 10 ** 9):
-            full = build_minimized_bridge_payload(evidence, handoff)
-        minimized = build_minimized_bridge_payload(evidence, handoff)
-        self.assertEqual(evidence, original)
-        for key in ("capital_state", "analysis_contract", "authority", "privacy", "event"):
-            self.assertEqual(minimized[key], full[key])
-        market = minimized["market_context"]
-        self.assertEqual(market["minimization"]["source_market_context_hash"],
-                         _canonical_hash(full["market_context"]))
-        self.assertIn("Omitted is not absent", market["minimization"]["omitted_detail"])
-        self.assertEqual(market["layers"]["L1"]["status"], "BLOCKED")
-        self.assertEqual(market["layers"]["L1"]["missing_required_metrics"], ["unavailable"])
-        self.assertEqual(market["layers"]["L1"]["metrics"]["actual"],
-                         {"value": 12.5, "as_of_ms": 12345, "quality_state": "VALID_FRESH"})
-        self.assertEqual(market["wake_observation"]["current_value"], 12.5)
-        envelope = build_request_envelope(minimized, model=SMOKE_MODEL)
-        self.assertLessEqual(len(envelope["request_body"]["input"].encode()), 16384)
+    def test_oversized_builder_preserves_complete_facts_locks_and_lineage(self):
+        from crt_radar.gpt_handoff import _bridge_market_context
+        evidence=bridge_pack(pack(evidence_hash="b"*64,requested=True))
+        evidence["changes"]={"historical_detail":"x"*20000}
+        evidence["layers"]={"L1":{"status":"BLOCKED","missing_required_metrics":["unavailable"],
+            "required_metrics":["actual","unavailable"],"metrics":{"actual":{"value":12.5,
+            "as_of_ms":12345,"quality_state":"VALID_FRESH","evidence_hash":"c"*64}}}}
+        original=copy.deepcopy(evidence)
+        handoff=run_gpt_handoff_gate(evidence,build_plain_language_notice(evidence),ledger_path=self.root/"large.jsonl")
+        wire=build_minimized_bridge_payload(evidence,handoff)
+        self.assertEqual(expand_bridge_field_names(wire)["market_context"],_bridge_market_context(evidence))
+        self.assertEqual(evidence,original)
+        env=build_request_envelope(wire,model=SMOKE_MODEL)
+        self.assertGreater(len(env["request_body"]["input"].encode()),20000)
+        self.assertNotIn("minimization",expand_bridge_field_names(wire)["market_context"])
 
     def test_required_analysis_is_never_truncated_to_force_size_acceptance(self):
         evidence = bridge_pack(pack(evidence_hash="b" * 64, requested=True))
@@ -248,8 +230,9 @@ class WorkerTests(unittest.TestCase):
                                       ledger_path=self.root / "required.jsonl")
         handoff["instruction_for_gpt"] = "x" * 20000
         original_evidence, original_handoff = copy.deepcopy(evidence), copy.deepcopy(handoff)
-        with self.assertRaisesRegex(ValueError, "16 KiB"):
-            build_minimized_bridge_payload(evidence, handoff)
+        wire=build_minimized_bridge_payload(evidence,handoff)
+        self.assertEqual(wire["analysis_contract"]["instruction_for_gpt"],"x"*20000)
+        build_request_envelope(wire,model=SMOKE_MODEL)
         self.assertEqual(evidence, original_evidence)
         self.assertEqual(handoff, original_handoff)
         self.assertEqual(handoff["instruction_for_gpt"], "x" * 20000)
@@ -311,28 +294,11 @@ class WorkerTests(unittest.TestCase):
         for key in ("capital_state", "analysis_contract", "authority", "privacy", "event"):
             self.assertEqual(expanded[key], full[key])
         market = expanded["market_context"]
-        self.assertEqual(market["minimization"]["source_market_context_hash"],
-                         _canonical_hash(full["market_context"]))
-        self.assertEqual(market["mstr_asst_market_health"], evidence["mstr_asst_market_health"])
-        for key, value in evidence["dvol_regime_watch"].items():
-            if key not in {"provenance", "research_parameters"}:
-                self.assertEqual(market["dvol_regime_watch"][key], value)
-        for name, layer in market["layers"].items():
-            self.assertEqual(layer["missing_required_metrics"], evidence["layers"][name]["missing_required_metrics"])
-            for metric, row in layer["metrics"].items():
-                restored = ({"value": row[0],
-                             **dict(zip(("as_of_ms", "quality_state"), market["metric_metadata"][row[1]]))}
-                            if isinstance(row, list) else row)
-                self.assertEqual(restored, evidence["layers"][name]["metrics"][metric])
-        compact_overlay = market["season_transition_warning_overlay"]
-        self.assertEqual(compact_overlay["source_overlay_hash"], overlay["overlay_hash"])
-        resolved_authority = {**reduced["authority"], **compact_overlay["authority"]}
-        for key, value in overlay["authority"].items():
-            self.assertEqual(resolved_authority[key], value)
-        self.assertEqual(compact_overlay["gate_core_veto"]["veto"], overlay["gate_core_veto"]["veto"])
-        self.assertEqual(compact_overlay["conflict_evidence"], overlay["lights"]["conflict_veto"]["raw_metrics"])
-        encoded = build_request_envelope(reduced, model=SMOKE_MODEL)["request_body"]["input"]
-        self.assertLess(len(encoded.encode("utf-8")), 16384)
+        from crt_radar.gpt_handoff import _bridge_market_context
+        self.assertEqual(market,_bridge_market_context(evidence))
+        self.assertEqual(market["season_transition_warning_overlay"],overlay)
+        encoded=build_request_envelope(reduced,model=SMOKE_MODEL)["request_body"]["input"]
+        self.assertGreater(len(encoded.encode()),16384)
 
     def test_receipt_tampering_rejected_on_replay(self):
         self.run_event()

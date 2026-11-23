@@ -1,0 +1,13 @@
+{
+  "asset": "ASST",
+  "accession": "0001628280-26-067141",
+  "primary": "asst-20261026.htm",
+  "form": "8-K",
+  "source_url": "https://www.sec.gov/Archives/edgar/data/1920406/000162828026067141/asst-20261026.htm",
+  "accepted": "2026-10-26T11:59:44.000Z",
+  "retrieved_at_ms": 1793187016567,
+  "raw_sha256": "2c17b321f14db8d69a69005895dc7e90b1a3e70ee872fa6ec0b6d28ec3361359",
+  "raw_length": 59584,
+  "issuer_index_raw_sha256": "ea2c261417c8cf7a01800227c9bceffebee156f155b740a98099502839994e7e",
+  "issuer_index_retrieved_at_ms": 1793186983351
+}

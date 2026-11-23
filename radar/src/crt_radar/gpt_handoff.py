@@ -10,7 +10,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
-from .gpt_bridge_outbox import enqueue_bridge_payload
+from .gpt_bridge_outbox import enqueue_bridge_payload, encode_evidence_references, expand_evidence_references
 from .issuer_announcement_runner import (
     compact_issuer_announcement_wake,
     validate_issuer_announcement_wake,
@@ -112,8 +112,9 @@ BRIDGE_FORBIDDEN_EXACT_KEYS = {
     "credentials",
 }
 
-BRIDGE_OPERATIONAL_BUDGET_BYTES = 15 * 1024
-BRIDGE_CEILING_BYTES = 16 * 1024
+# Deprecated compatibility names: no CRT total input byte ceiling.
+BRIDGE_OPERATIONAL_BUDGET_BYTES = None
+BRIDGE_CEILING_BYTES = None
 
 
 BRIDGE_OPTIONAL_MARKET_SECTIONS = (
@@ -233,6 +234,8 @@ def _bridge_data_health(
                 "quality_state": row.get(
                     "quality_state"
                 ),
+                **{k:deepcopy(row[k]) for k in ("reason","blockers","missing_reason","reason_code",
+                    "source_id","observed_at_ms","as_of_ms","available_at_ms","retrieved_at_ms","validated_at_ms") if k in row},
             }
         )
 
@@ -564,6 +567,20 @@ def _bridge_market_context(
         result.update(portfolio)
     if "qualified_equity_daily_source" in pack:
         result["qualified_equity_prices"] = _bridge_qualified_equity_prices(pack)
+    freshness = {}
+    for row in pack.get("asset_facts",{}).get("items",[]):
+        if row.get("fact_type")!="ISSUER_SOURCE_FRESHNESS": continue
+        source=row["evidence"]
+        freshness[row["asset_id"]]=dict(state=source["state"],
+            reason=source["reason"],issuer_id=source["issuer_id"],
+            blocked_fields=deepcopy(source["blocked_fields"]),
+            source_blocker_codes=sorted({b["code"] for b in source["source_blockers"]}),
+            source_blockers=deepcopy(source["source_blockers"]),
+            watermarks=deepcopy(source["watermarks"]),
+            version_validated_at_ms=source.get("version_validated_at_ms"),
+            effective_dates={k:v["effective_time"] for k,v in source["watermarks"].items()})
+    if freshness:
+        result["company_source_freshness"] = freshness
     return result
 
 
@@ -1259,12 +1276,7 @@ def build_minimized_bridge_payload(
     if full_decision:
         payload["analysis_contract"]["delivery_scope"] = "FULL_DECISION_OFFLINE"
     _assert_bridge_privacy(payload)
-    if full_decision:
-        # Share literal equal observations only. Full-decision evidence never
-        # inherits Smoke's capacity-triggered audit/history omissions.
-        _compact_premarket_refs(payload)
-    else:
-        _bound_bridge_detail(payload, pack)
+    _bound_bridge_detail(payload, pack)
 
     payload[
         "bridge_payload_hash"
@@ -1272,8 +1284,6 @@ def build_minimized_bridge_payload(
 
     _assert_bridge_privacy(expand_bridge_field_names(payload))
 
-    if not full_decision and _bridge_size(payload) >= BRIDGE_CEILING_BYTES:
-        raise ValueError("Decision-critical bridge exceeds the unchanged 16 KiB ceiling")
     return payload
 
 
@@ -1402,6 +1412,7 @@ def _compact_premarket_refs(payload: dict[str, Any]) -> None:
 
 def _restore_premarket_refs(payload: dict[str, Any]) -> None:
     """Expand only exact, declared reference paths."""
+    payload.get("market_context",{}).pop("premarket_ref_encoding",None)
     pre = payload.get("market_context", {}).get(
         "premarket_market_data"
     )
@@ -1600,6 +1611,8 @@ def expand_bridge_field_names(payload: dict[str, Any]) -> dict[str, Any]:
     result = deepcopy(payload)
     codec = result.get("market_context", {}).pop("key_encoding", None)
     if codec is None:
+        if "market_context" in result:
+            result["market_context"] = expand_evidence_references(result["market_context"])
         for plan in result.get("capital_state", {}).get("active_plans", []):
             _expand_tranche_fields(plan)
         _expand_authority_references(result)
@@ -1624,6 +1637,7 @@ def expand_bridge_field_names(payload: dict[str, Any]) -> dict[str, Any]:
         return value
 
     result = decode(result)
+    result["market_context"] = expand_evidence_references(result["market_context"])
     for plan in result.get("capital_state", {}).get("active_plans", []):
         _expand_tranche_fields(plan)
     _expand_authority_references(result)
@@ -1686,9 +1700,23 @@ def _share_authority_fields(market: dict[str, Any]) -> None:
         "formal_model_authority", "formal_threshold_authority", "formal_weight_authority",
         "machine_may_confirm_bull_transition", "machine_may_output_trade_action",
         "score_may_determine_btc_season", "season_transition_authority", "formal_season_authority"}
+    # Reuse the existing reversible exact field/value references for repeated
+    # company-health qualifications. No value or blocker is omitted; expansion
+    # restores the same keys and literal values before downstream validation.
+    names.update({"direction", "interpretation_state", "reason", "claim_scope",
+                  "missing_evidence", "missing_claim_count", "state", "health_reasons",
+                  "health_direction", "limitation", "source_ref", "source_id", "evidence_hash",
+                  "machine_execution", "capital_decision_authority", "coverage_state", "scope"})
     occurrences: dict[str, list[dict[str, Any]]] = {}
     pairs: dict[str, list[Any]] = {}
+    visited: set[int] = set()
     def visit(value: Any) -> None:
+        # Existing projections can reuse the same nested dict at two paths.
+        # Record each mutable object once; deleting a field twice is invalid.
+        if isinstance(value, (dict, list)):
+            if id(value) in visited:
+                return
+            visited.add(id(value))
         if isinstance(value, dict):
             for key in sorted(value):
                 child = value[key]
@@ -1706,7 +1734,7 @@ def _share_authority_fields(market: dict[str, Any]) -> None:
     for token in sorted(occurrences):
         rows = occurrences[token]
         key, value = pairs[token]
-        if len(rows) >= 3 and (_bridge_size({key: value}) - 8) * len(rows) > _bridge_size(pairs[token]) + 40:
+        if len(rows) >= 2 and (_bridge_size({key: value}) - 8) * len(rows) > _bridge_size(pairs[token]) + 8:
             index = len(columns)
             columns.append(pairs[token])
             for row in rows:
@@ -1718,133 +1746,15 @@ def _share_authority_fields(market: dict[str, Any]) -> None:
 
 
 def _bound_bridge_detail(payload: dict[str, Any], pack: dict[str, Any]) -> None:
-    """One bridge, fixed ceiling: omit audit detail, preserve decision semantics.
-
-    15 KiB is operational headroom, not a new CRT formal lock. The final hash
-    costs exactly 89 additional bytes. Critical inputs are never truncated.
-    """
-    source_market_hash = _canonical_hash(payload["market_context"])
+    """Lossless references only. Size never authorizes omission or rejection."""
     _compact_premarket_refs(payload)
-    if _bridge_size(payload) + 89 <= BRIDGE_OPERATIONAL_BUDGET_BYTES:
-        return
-    market = payload["market_context"]
-    original_hash = source_market_hash
-    # These are non-trigger history/ranking displays; current layer facts and
-    # the trigger's current/previous/change remain separately literal.
-    changes = market.get("changes", {})
-    market["changes"] = {"section_hash": _canonical_hash(changes),
-        "detail": "OMITTED_FROM_BRIDGE_NOT_ABSENT_FROM_EVIDENCE"}
-    for key in ("top_changes", "note"):
-        market.get("distillation", {}).pop(key, None)
-    scoring = market.get("model_status", {}).get("locked_formal_scoring", {})
-    for key in ("candidate_contract_hash", "candidate_output_hash", "candidate_score",
-                "candidate_threshold_bucket", "score"):
-        scoring.pop(key, None)
-    audit_metrics = {
-        "core_inflation_acceleration", "real_policy_rate", "unemployment_deterioration",
-        "market_cap_usd", "mvrv", "nupl", "realized_cap_30d_log_change", "realized_cap_usd",
-        "close_minus_sma200_over_atr20", "return_20d_over_atr_vol", "sma50_minus_sma200_over_atr20",
-        "mark_price", "open_interest_contracts",
-    }
-    trigger_metric = pack.get("reanalysis_wake", {}).get("metric")
-    for layer in market.get("layers", {}).values():
-        if not isinstance(layer, dict):
-            raise ValueError("Bridge layer must be an object")
-        layer.pop("required_metrics", None)
-        for name, row in list(layer.get("metrics", {}).items()):
-            # Only known non-trigger, fresh scoring support is audit-only.
-            # Unknown/missing/stale/partial/blocked observations never disappear.
-            if (name in audit_metrics and name != trigger_metric
-                    and row.get("quality_state") == "VALID_FRESH" and row.get("value") is not None):
-                del layer["metrics"][name]
-                continue
-            layer["metrics"][name] = {key: deepcopy(row[key]) for key in
-                ("value", "quality_state", "as_of_ms") if key in row}
-    diagnostic = market.get("transition_diagnostic")
-    if isinstance(diagnostic, dict):
-        for key in ("gpt_handoff", "wake", "mechanism_findings"):
-            diagnostic.pop(key, None)
-        diagnostic.get("data_health", {}).pop("provenance", None)
-    bull = market.get("btc_bull_validation")
-    if isinstance(bull, dict):
-        # Category lists retain every blocked/pending check. Contradictions keep
-        # their exact reason and current values; duplicate pending display goes.
-        retained = {key: deepcopy(bull[key]) for key in (
-            "generated_at_ms", "state", "reason", "scope", "authority", "blocked_checks",
-            "pending_checks", "mixed_checks", "adverse_checks", "supportive_checks",
-            "machine_may_confirm_bull_transition", "control_transfer_loop_closed") if key in bull}
-        blocked = [row for row in bull.get("checks", []) if row.get("status") == "BLOCKED"]
-        reasons = {row.get("reason") for row in blocked}
-        if len(reasons) == 1:
-            retained["blocked_check_reason"] = next(iter(reasons))
-        elif reasons:
-            retained["blocked_check_reasons"] = {row["check_id"]: row.get("reason") for row in blocked}
-        retained["checks"] = [row for row in bull.get("checks", [])
-            if row.get("status") in {"ADVERSE", "MIXED", "SUPPORTIVE"}]
-        for row in retained["checks"]:
-            value = row.get("value")
-            if isinstance(value, dict):
-                for key in ("baseline_meaning", "natural_research_baselines"):
-                    value.pop(key, None)
-        market["btc_bull_validation"] = retained
-    dvol = market.get("dvol_regime_watch")
-    if isinstance(dvol, dict):
-        for key in ("provenance", "research_parameters", "schema_version",
-                    "scale_normalization", "investment_threshold_authority"):
-            dvol.pop(key, None)
-        if "DVOL" not in str(pack.get("reanalysis_wake", {}).get("wake_sources", [])):
-            for key in ("baseline_count", "dvol_30d_low", "dvol_30d_low_as_of_ms",
-                        "hours_since_30d_low", "low_30d_percentile_1y",
-                        "recommended_wake_operational_percentile"):
-                dvol.pop(key, None)
-    wake = pack.get("reanalysis_wake", {})
-    market["wake_observation"] = {key: deepcopy(wake[key]) for key in (
-        "current_value", "previous_value", "percent_change", "historical_percentile",
-        "baseline_count", "metric", "input_family") if key in wake}
-    market["minimization"] = {
-        "source_market_context_hash": original_hash,
-        "source_evidence_pack_hash": payload["event"]["source_evidence_pack_hash"],
-        "provenance": "FULL_PROVENANCE_IN_EVIDENCE_PACK",
-        "omitted_detail": "OMITTED_FROM_BRIDGE_NOT_ABSENT_FROM_EVIDENCE; Omitted is not absent.",
-        "audit_only": "HISTORY_RANKINGS_NON_TRIGGER_SCORING_AND_TREASURY_BASELINE_CDF_BENCHMARK_COLUMNS",
-    }
-    if market["minimization"]["source_evidence_pack_hash"] == payload["event"]["source_evidence_pack_hash"]:
-        market["minimization"]["source_evidence_pack_hash"] = {"same_as": "event.source_evidence_pack_hash"}
-    if _bridge_size(payload) + 89 > BRIDGE_OPERATIONAL_BUDGET_BYTES:
-        _compact_supporting_context(market, payload["authority"])
-    role = (payload["analysis_contract"].get("season_three_army_role_separation", {})
-            if "treasury_valuation_context" in market else {})
-    role.pop("doctrine_artifact", None)
-    for child in role.values():
-        if isinstance(child, dict):
-            child.pop("source_section", None)
-            child.pop("source_sections", None)
-    _inherit_equal_authority(role, payload["authority"])
-    if role or "metric_encoding" in market:
-        market["metric_encoding"] = market.get("metric_encoding", "") + " authority_same_as=bits(sorted authority keys)."
-    if "treasury_valuation_context" in market:
-        _compact_treasury_bridge(payload)
-    if _bridge_size(payload) + 89 > BRIDGE_OPERATIONAL_BUDGET_BYTES:
-        _share_authority_fields(market)
-        _compact_tranche_fields(payload)
-        _compact_field_names(payload)
+    payload["market_context"] = encode_evidence_references(payload["market_context"])
 
 
 def _compact_treasury_bridge(payload: dict[str, Any]) -> None:
     """Shared exact-equal context only; critical states/values are not interned."""
     market = payload["market_context"]
     treasury = market["treasury_valuation_context"]
-    # Omit ONLY explicitly declared audit columns, bound to the original full
-    # market hash. Current mNAV/BTC-share values, clocks, quality/action states,
-    # context_hash and EVERY blocker remain literal. Direct helper calls without
-    # this declaration are completely lossless, including historical columns.
-    minimization = market.get("minimization", {})
-    if (minimization.get("audit_only") == "HISTORY_RANKINGS_NON_TRIGGER_SCORING_AND_TREASURY_BASELINE_CDF_BENCHMARK_COLUMNS"
-            and isinstance(minimization.get("source_market_context_hash"), str)):
-        for row in treasury.values():
-            for key in ("baseline_counts", "own_history_empirical_cdf_pct",
-                        "regime_empirical_cdf_pct", "benchmark_empirical_cdf_pct", "benchmark_identity"):
-                row.pop(key, None)
     assets = sorted(treasury)
     if not assets:
         return
@@ -1857,47 +1767,6 @@ def _compact_treasury_bridge(payload: dict[str, Any]) -> None:
     if _bridge_size(inherited) < _bridge_size(treasury):
         market["treasury_valuation_context"] = inherited
 
-
-def _compact_supporting_context(market: dict[str, Any], authority: dict[str, Any]) -> None:
-    """Only audited supporting displays go; states, contradictions and locks stay."""
-    overlay = market.get("season_transition_warning_overlay")
-    if isinstance(overlay, dict):
-        summary = {key: deepcopy(overlay[key]) for key in (
-            "generated_at_ms", "scope", "authority", "formal_season",
-            "formal_season_status", "research_season", "transition_warning", "evidence_momentum")
-            if key in overlay}
-        summary["source_overlay_hash"] = overlay.get("overlay_hash")
-        summary["lights"] = {name: {key: deepcopy(row[key]) for key in
-            ("light", "evidence_status") if key in row}
-            for name, row in sorted(overlay.get("lights", {}).items())}
-        gate = overlay.get("gate_core_veto", {})
-        summary["gate_core_veto"] = {name: {k: deepcopy(row[k]) for k in
-            ("state", "reason") if k in row} for name, row in sorted(gate.items())
-            if isinstance(row, dict)}
-        summary["gate_core_veto"]["veto"] = deepcopy(gate.get("veto", {}))
-        summary["conflict_evidence"] = deepcopy(overlay.get("lights", {}).get(
-            "conflict_veto", {}).get("raw_metrics", {}))
-        summary["inherited_locks"] = {k: deepcopy(v) for k, v in
-            overlay.get("inherited_locks", {}).items() if k != "light_buckets"}
-        market["season_transition_warning_overlay"] = summary
-    metadata: list[list[Any]] = []
-    for layer_name in sorted(market.get("layers", {})):
-        layer = market["layers"][layer_name]
-        for name, row in sorted(layer.get("metrics", {}).items()):
-            if set(row) == {"value", "as_of_ms", "quality_state"}:
-                pair = [row["as_of_ms"], row["quality_state"]]
-                if pair not in metadata:
-                    metadata.append(pair)
-                layer["metrics"][name] = [row["value"], metadata.index(pair)]
-    market["metric_metadata"] = metadata
-    market["metric_encoding"] = "Arrays=[value,metadata_index]; metric_metadata=[as_of_ms,quality_state]; objects=literal."
-    for key in BRIDGE_OPTIONAL_MARKET_SECTIONS:
-        _inherit_equal_authority(market.get(key), authority)
-    _inherit_equal_authority(market.get("model_status"), authority)
-    for key in ("btc_entry_gate", "transition_diagnostic"):
-        if isinstance(market.get(key), dict):
-            market[key].pop("schema_version", None)
-    # Literal issuer/capital/analysis/top-level authority/privacy are untouched.
 
 
 def _assert_optional_authority(

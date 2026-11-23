@@ -666,9 +666,6 @@ def run_daily_evidence(
     if issuer_ct_archive is not None:
         if treasury_company_ct_inputs is not None:
             raise ValueError("Supply retained issuer archive or normalized CT inputs, not both")
-        from .issuer_ratio_market_health_source import build_archived_issuer_ct_inputs
-        treasury_company_ct_inputs = build_archived_issuer_ct_inputs(
-            issuer_ct_archive, as_of_ms=generated_at_ms if generated_at_ms is not None else (now_ms if now_ms is not None else int(time.time() * 1000)))
     source_gate = run_source_gate(
         registry,
         fetch_overrides=fetch_overrides,
@@ -845,6 +842,8 @@ def run_daily_evidence(
         reflexivity_input=reflexivity_input,
         treasury_valuation_inputs=treasury_valuation_inputs if treasury_valuation_inputs is not None else {},
         treasury_company_ct_inputs=treasury_company_ct_inputs,
+        issuer_ct_archive=issuer_ct_archive,
+        issuer_source_verification_required=True,
         btc_long_horizon_context=btc_long_horizon_context,
         portfolio_allocation_inputs=portfolio_allocation_inputs,
         fixed_income_inputs=fixed_income_inputs,

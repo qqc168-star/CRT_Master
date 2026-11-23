@@ -60,7 +60,8 @@ class IssuerObservationGptClosureTests(unittest.TestCase):
             self.assertFalse(any("effective_at" in k for k in row))
             self.assertEqual(bridge["authority"]["production"],"NOT_APPROVED")
             self.assertEqual(bridge["authority"]["trading_authority"],"NONE")
-            self.assertLess(len(json.dumps(bridge,ensure_ascii=False,separators=(",",":")).encode()),16384)
+            from crt_radar.gpt_handoff import expand_bridge_field_names,_bridge_market_context
+            self.assertEqual(expand_bridge_field_names(bridge)["market_context"],_bridge_market_context(result))
             self.assertNotIn("never-export@example.com",json.dumps(bridge))
 
     def test_missing_commander_still_blocks_full_market_health(self):
@@ -157,7 +158,8 @@ class IssuerObservationGptClosureTests(unittest.TestCase):
             row=bridge["issuer_ratio_observation"]["observations"]["MSTR"]
             self.assertEqual(row["time_semantic"],"REPORTED_OBSERVATION_NOT_EFFECTIVE_TIME")
             self.assertEqual(row["current_reported_date"],"2026-09-28")
-            self.assertLess(len(json.dumps(bridge,ensure_ascii=False,separators=(",",":")).encode()),16384)
+            from crt_radar.gpt_handoff import expand_bridge_field_names,_bridge_market_context
+            self.assertEqual(expand_bridge_field_names(bridge)["market_context"],_bridge_market_context(result))
 
     def test_a_new_adjacent_reported_pair_is_not_deduplicated(self):
         from datetime import datetime, timezone

@@ -546,7 +546,7 @@ class FixedIncomeTests(unittest.TestCase):
             source["broker_observation"] = deepcopy(self.private["profile"]["capital_reconciliation"]["broker_observed"])
             source["qualification"]["observation_hash"] = source["broker_observation"]["observation_hash"]
             projection = c.build_projection(payload, source, at_ms=NOW)
-            market = projection["market_context"]
+            market = h.expand_bridge_field_names({"market_context":projection["market_context"]})["market_context"]
             self.assertEqual(market["asset_strategy_delta"]["income_engine"]["summary_hash"], income["summary_hash"])
             self.assertEqual(market["asset_strategy_delta"]["income_engine"]["totals"]["future_undeclared"]["state"], "ESTIMATE")
             self.assertEqual(source["governance"], c.LOCKS)
@@ -571,7 +571,7 @@ class FixedIncomeTests(unittest.TestCase):
             self.assertEqual(old_pack, original_pack)
             self.assertEqual(old_projection["capital"], projection["capital"])
             self.assertEqual(old_projection["spending_cap"], projection["spending_cap"])
-            claim_payload = deepcopy(payload)
+            claim_payload = h.expand_bridge_field_names(payload)
             claim_income = claim_payload["market_context"]["asset_strategy_delta"]["income_engine"]
             claim_income["assets"]["STRC"]["credited"].update(claimed_gross_usd=100, claimed_net_usd=90)
             claim_income["summary_hash"] = c.digest({k: v for k, v in claim_income.items() if k != "summary_hash"})
@@ -586,7 +586,7 @@ class FixedIncomeTests(unittest.TestCase):
                 h.build_full_decision_bridge_payload(old_pack, handoff)
             # A recomputed summary/bridge hash does not authenticate income or
             # create additional budget; legacy actual-credit claims are refused.
-            bad_payload = deepcopy(payload)
+            bad_payload = h.expand_bridge_field_names(payload)
             bad_income = bad_payload["market_context"]["asset_strategy_delta"]["income_engine"]
             for component, error in (("credited", "INCOME_ORIGINAL_LEDGER_UNVERIFIED"),
                                      ("receivable", "INCOME_ORIGINAL_ENTITLEMENT_UNVERIFIED")):
