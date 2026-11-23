@@ -74,6 +74,14 @@ def _metadata(raw: Any, section: dict, claim: str, issuer: str, as_of: int,
             or raw.get("verification_state") != "VALIDATED"):
         _block(section, claim, "SOURCE_OR_ISSUER_NOT_VALIDATED")
         return None
+    # Respect an upstream invalidation/expiry; VALIDATED is not permission to
+    # reuse stale facts as current comparisons. No default issuer TTL is invented.
+    if raw.get("quality_state") in {"STALE", "INVALID", "BLOCKED"}:
+        _block(section, claim, "SOURCE_QUALIFICATION_UNUSABLE")
+        return None
+    if "valid_until_ms" in raw and (not _time(raw["valid_until_ms"]) or as_of > raw["valid_until_ms"]):
+        _block(section, claim, "SOURCE_VALIDITY_EXPIRED_OR_INVALID")
+        return None
     # Four clocks are deliberately distinct.  Old `*_at_ms` names are not
     # accepted here: silently mapping them would make an audit look like a
     # decision-time observation and permits future-information leakage.
@@ -98,6 +106,7 @@ def _metadata(raw: Any, section: dict, claim: str, issuer: str, as_of: int,
         return None
     return {"issuer_id": raw["issuer_id"], "source_ref": raw["source_ref"],
             "verification_state": raw["verification_state"], **clocks,
+            **{key: raw[key] for key in ("quality_state", "valid_until_ms") if key in raw},
             **({"source_evidence": deepcopy(raw["source_evidence"])} if isinstance(raw.get("source_evidence"), dict) else {}),
             "source_semantic": {key: semantic[key] for key in ("identity", "version", "effective_from", "effective_to")}}
 
