@@ -515,6 +515,32 @@ Applicability（落地應用性）是本 Doctrine（分析準則）的納入前�
 新的永久知識仍必須完成必要驗證與使用者批准；本準則的存在不授權自動修改正式模型，也不改變任何既有治理鎖。
 
 
+### 13.4 New Evidence → Model Challenge → Capital Delta（新研究工作標準）
+
+收到任何新影片、指標、公告或市場資料，CRT 應在同一次分析完成以下四件事，而不是以「舊框架已包含」或「HOLD」結案：
+
+1. **Verify / Falsify**：保存原文、作者、時間碼、觀測／可得／檢索時鐘、來源版本、單位、完整算式；獨立驗算，指出強反證。資料不足時該主張 `BLOCKED`，不冒稱已驗證。
+2. **Challenge old CRT**：先查 GitHub current main，判定 `REUSE / EXTEND / REPLACE / RETIRE / NEW / REJECT`。**六層模型、權重、門檻、季節判斷及資本軌道都能接受新的競爭模型與正式替換提案**；不得因曾獲批准而免於比較。排除重複訊號與高度相關的假獨立證據。
+3. **Quantify investment benefit**：以同一資訊時點、同樣本金／持倉／風險、費用、現金與滑價比較原模型、候選模型及簡單基線（直接 BTC、分批買入、保留現金）。比較實際淨 BTC 購買力、回撤、最大下行損失、錯失反彈及資金占用。採合格點時資料的樣本外／前瞻測試；資料不足只能作明確假設的情境試算，**不能聲稱已實證新模型較好**。
+4. **Deliver two deltas**：每次至少交付 `Engineering Delta`（模組／公式／資料來源應改、刪、保留的精確清單與驗收）及 `Capital Delta`（新資訊是否改變 `BUY / SELL / ROTATE / HOLD / WAIT`，可支持的價格、金額／數量、失效條件與判錯代價）。若僅缺當期持股或合格報價，只封鎖精確股數；仍須給出可檢驗的條件式差異。無增量則 `NO_CHANGE / NO_BUILD`，停止消耗研究與工程資源。
+
+**模型可改、歷史不可竄改**：原始 PRE／POST、當期正式結果、凍結實驗規格保留，不可事後覆寫；但可平行建立具明確新版本、時點及驗證方法的 challenger，實證較優時提案調整／取代原權重、閾值或模型。舊版留下作歷史可重現基線，不是永遠不能改的神主牌。對正式模型的更動仍須使用者批准；本節不自行授權部署、交易、資料來源升格或修改正式規則。
+
+正式模型變更須經總工程師審查核准，並取得使用者批准。
+
+**停止條件**：若新方法無資訊獨立性、無可取得的資料路徑、未見合理可驗證的投資效益，裁決 `NO_BUILD`。只在高影響衝突時動用參謀長；不因收到影片便重新開全面紅隊工程。每篇研究須有 `CHANGE / NO_CHANGE / BLOCKED` 結果。
+
+### 13.5 Valuation Price Mapping Validation（鏈上估值反推價格驗算）
+
+外部研究以 Realized Price、CVDD、MVRV Z、Pi Cycle 推導底價時，沿用既有 CH03（價值）、CH04（投降）、CH05（止跌）；文件有定義不等於當日來源合格或已經運算。
+
+- **MVRV ratio 不等於 MVRV Z**。逐筆保存公式、觀測／可用時間、供給、已實現市值、標準差、計算窗、來源與幣別。常見 Z 定義：`Z=(MarketCap-RealizedCap)/StdDev(MarketCap)`。只在 `S`（供給）、`R`（已實現市值）及 `D>0`（標準差）都固定的靜態假設下，反推 `P(z)=(R+z*D)/S`；不能把不同日期的「當前 Z」與盤中插針當成同一觀測。
+- **價位表必須自洽**：以共同的 `observed_at / available_at / formula_version / S / R / D` 驗算每個價位。無法對齊則 `CONFLICT / BLOCKED`，禁止成為確定買單。
+- **CVDD 並非不可跌破的數學地板**，Realized Price 亦非每輪必觸；Pi Cycle 需確認兩條線的實際交叉，不能根據兩線距離推定交叉會／不會發生。價值錨共享 BTC 價格和市值變數，不可當多個獨立底部投票。
+- **投資連結**：把估值 V、投降 C、止跌 S、現貨買盤分開，對「現在／分批／等價值錨／先反彈／繼續破底」用同一資本比較 BTC 購買力及下行損失；不得因單一價位自動滿倉或無限期等待。
+
+本次阿貓研究逐字稿、原作者當期價位與反證案例見 `radar/research/CRT_PIONEER_AMAO_20261123_BOTTOM_PRICE_VALIDATION_V0.1.md`。其中價格是歷史研究座標，不是本節的永久交易門檻。
+
 ## BTC Long-Horizon + Strategic Acquisition Route?BTC ???????????
 
 Long-horizon BTC context?BTC ????????? supporting research context?????????200WMA?200 ?????historical drawdown compression????????? cycle envelope scenario???????????????? `BUY / SELL`????????????????? Season??????????
