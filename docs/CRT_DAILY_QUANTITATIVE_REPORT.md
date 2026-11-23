@@ -7,6 +7,55 @@ source, score, season, mNAV formula, capital rail, production or action authorit
 It is not an automatic forecasting or delivery service, nor a complete 360/Q5
 investment-reasoning acceptance. Missing inputs remain visible per claim.
 
+## Dual-company presentation (PR-B)
+
+The existing eight reading blocks are unchanged in order. Block 6 now presents
+Strategy/MSTR and Strive/ASST separately, using the existing
+`build_common_equity_health()` six dimensions, then retains all five Strive
+sections. Block 7 includes both issuers' contradictions and missing evidence;
+N.S. still supplies the causal and capital judgment. There is no report-side
+health score, BUY/SELL rule or new data collection.
+
+Company lookups require explicit `asset_id` and `issuer_id`. Missing identities,
+cross-issuer facts, future clocks and explicitly stale/expired records cannot be
+borrowed by the other company. An isolated calculation view is rechecked using
+the existing CT PIT validator. The original sealed pack and the full company
+facts remain in `company_source_audit`; exclusions are separately recorded.
+This is a presentation boundary, not a rewritten pack or new source authority.
+
+`companies` retains each original six-dimension result, provenance and comparison
+windows. Numeric claims, direction, known contradictions, missing comparisons
+and analyst counterevidence still NOT_RUN are shown separately. An older valid
+comparison is historical research; a newer unqualified reported snapshot blocks
+the current-health claim without erasing the older comparison. No corporate
+freshness interval is invented where the existing source has none.
+
+Both issuers use the existing mNAV calculator and matching CT receipt.
+`context.mnav_trials` optionally maps MSTR/ASST to their own four-component
+evidence; the original `mnav_trial` remains an ASST-only compatibility input.
+Each component preserves its original dilution scope, raw hash and clocks.
+Historical 13/4/1-week values remain company-specific, exact-date, comparable
+three-decimal levels, never substituted by today's trial. Same-formula research
+does not acquire formal valuation or buy eligibility.
+
+Strategy displays its independent BTC/share, dilution, funding, STRC repurchases,
+claims, cash/Reserve, debt, carry and conversion facts. Period disclosures retain
+`execution_time = null` and their original narrow research qualification; no
+extinguished claims, savings or execution date is inferred. Strive's initial
+preference coverage is never applied to Strategy. SATA and SATS remain separate.
+Unknown claim balances are not reconstructed, and Reserve is not added twice.
+
+A forecast's explicit `evidence_pack_hash`, when present in the immutable PRE or
+POST, must match that report's pack. The original PRE linked by a POST remains
+on its own earlier cutoff/pack timeline. Legacy records without a pack binding
+remain legacy caller-record/readback evidence, not proof of a shared cloud
+evidence channel. No forecast content, anchor, hash or revision is rewritten.
+
+PR-B is based only on current main and does not import the unmerged PR-A #169
+replay module or its CT change. Real archive demonstrations must re-use main's
+archive reader and pack builder; a prior archived cutoff is an audit replay,
+not newly collected current evidence or an actual PRE/POST forecast.
+
 ## Existing capabilities and the composition gap
 
 | Capability | Treatment |

@@ -37,8 +37,8 @@ def source(at=NOW, **changes):
     return row
 
 
-def metric(report, name):
-    return next(r for r in report["rows"] if r["metric"]==name)
+def metric(report, name, asset_id="ASST"):
+    return next(r for r in report["rows"] if r["metric"]==name and r.get("asset_id") in (None,asset_id))
 
 
 class DailyQuantitativeReportTests(unittest.TestCase):
@@ -334,7 +334,7 @@ class DailyQuantitativeReportTests(unittest.TestCase):
         r=build_report(p,context=ctx,generated_at_ms=NOW)
         text=render_markdown(r)
         titles=("## 1. BTC 市場總覽","## 2. 1～3 週戰術","## 3. 鏈上、RSI", "## 4. ETF 5／20／60",
-            "## 5. 槓桿、Funding","## 6. Strive 五項","## 7. N.S. 市場與公司聯合裁決",
+            "## 5. 槓桿、Funding","## 6. 雙公司六維","## 7. N.S. 市場與公司聯合裁決",
             "## 8. PRE／POST 驗證","## 詳細量化證據稽核附表")
         positions=[text.index(t) for t in titles]
         self.assertEqual(positions,sorted(positions))
@@ -443,6 +443,215 @@ class EtfTradingSessionReportTests(unittest.TestCase):
         r=build_report(p,context=dict(evidence_pack_hash=p["evidence_pack_hash"],btc_etf_archive=env),generated_at_ms=at)
         self.assertIsNotNone(metric(r,"ETF 5 completed sessions")["value"])
         self.assertIn("IBIT:",render_markdown(r))
+
+
+class DualCompanyReportTests(unittest.TestCase):
+    def fixture(self):
+        from test_company_health import scenario
+        from test_treasury_company_ct import T2
+        from crt_radar.treasury_company_ct import add_treasury_company_ct
+        p=pack(T2)
+        for strive in (False,True): add_treasury_company_ct(p,scenario(strive))
+        return seal(p),T2
+
+    def test_both_companies_reuse_six_dimensions_and_keep_eight_sections(self):
+        from crt_radar.portfolio_allocation_context import build_common_equity_health
+        p,at=self.fixture();before=deepcopy(p)
+        r=build_report(p,generated_at_ms=at)
+        self.assertEqual(r,build_report(p,generated_at_ms=at))
+        self.assertEqual(before,p)
+        engine=build_common_equity_health(p)
+        for asset in ("MSTR","ASST"):
+            self.assertEqual(r["companies"][asset]["health"]["company_health"],
+                engine["assets"][asset]["company_health"])
+            self.assertEqual(len([x for x in r["rows"] if x["section"]==asset+" 六維"]),6)
+            row=metric(r,"per_share_asset_engine",asset)
+            self.assertTrue(row["evidence"])
+            self.assertIn("comparison_windows",row["inputs"])
+            self.assertEqual(row["inputs"]["analyst_counterevidence"],"NOT_RUN")
+        text=render_markdown(r)
+        self.assertEqual(len([s for s in text.splitlines() if s.startswith("## ") and s[3:4].isdigit()]),8)
+        self.assertIn("Strategy（MSTR）",text);self.assertIn("Strive（ASST）",text)
+        self.assertIn("Strive ⑤",text)
+        self.assertEqual(len([x for x in r["rows"] if x["metric"]=="company health contradictions"]),2)
+        self.assertEqual(r["action_output"],"NONE")
+        self.assertEqual(r["production"],"NOT_APPROVED")
+
+    def test_cross_company_fact_and_nested_issuer_contamination_cannot_transfer(self):
+        p,at=self.fixture()
+        clean=build_report(p,generated_at_ms=at)
+        for direction in (("MSTR","ASST"),("ASST","MSTR")):
+            target,foreign=direction
+            for nested in (False,True):
+                bad=deepcopy(p)
+                from crt_radar.treasury_company_ct import ISSUERS
+                f=next(f for f in bad["asset_facts"]["items"] if f.get("ct_section")=="per_share_asset_engine"
+                    and f["issuer_id"]==ISSUERS[target])
+                if nested: f["evidence"]["current"]["issuer_id"]=ISSUERS[foreign]
+                else: f["asset_id"]=foreign
+                r=build_report(seal(bad),generated_at_ms=at)
+                self.assertEqual(r["companies"][target]["health"]["company_health"]["dimensions"]["per_share_asset_engine"]["direction"],"BLOCKED")
+                self.assertEqual(r["companies"][foreign],clean["companies"][foreign])
+                self.assertTrue(r["excluded_company_evidence"])
+
+    def test_one_stale_or_future_company_preserves_other_and_its_own_independent_facts(self):
+        p,at=self.fixture();good=build_report(p,generated_at_ms=at)
+        from crt_radar.treasury_company_ct import ISSUERS
+        for changes in ({"quality_state":"STALE"},{"disclosure_time":at+1},
+                {"valid_until_ms":at-1}):
+            q=deepcopy(p)
+            f=next(f for f in q["asset_facts"]["items"] if f.get("ct_section")=="per_share_asset_engine"
+                and f["issuer_id"]==ISSUERS["MSTR"])
+            f["evidence"]["current"].update(changes)
+            r=build_report(seal(q),generated_at_ms=at)
+            self.assertEqual(r["companies"]["ASST"],good["companies"]["ASST"])
+            self.assertEqual(metric(r,"per_share_asset_engine","MSTR")["qualification"],"BLOCKED")
+            self.assertIsNotNone(metric(r,"ATM / other financing","MSTR")["value"])
+
+    def test_reported_only_adso_and_newer_unqualified_snapshot_do_not_refresh_old_health(self):
+        from crt_radar.treasury_company_ct import ISSUERS
+        p,at=self.fixture()
+        issuer=ISSUERS["MSTR"]
+        f=next(f for f in p["asset_facts"]["items"] if f.get("ct_section")=="per_share_asset_engine"
+            and f["issuer_id"]==issuer)
+        current=f["evidence"]["current"]
+        current.pop("effective_time")
+        current["reported_date"]="2026-10-11"
+        r=build_report(seal(p),generated_at_ms=at)
+        self.assertEqual(metric(r,"per_share_asset_engine","MSTR")["qualification"],"BLOCKED")
+        p,at=self.fixture()
+        from test_treasury_valuation_context import metadata
+        newer=metadata("ASST",at+1,claim="REPORTED_CAPITAL_STRUCTURE_SNAPSHOT",
+            reported_fields={"btc_holdings":1000,"diluted_shares":1000},share_basis="UNRESOLVED")
+        p["generated_at_ms"]=at+2
+        p["asset_facts"]["items"].append(dict(fact_type="ISSUER_CT_SOURCE_BINDING",issuer_id=ISSUERS["ASST"],
+            evidence={"observations":[newer]}))
+        r=build_report(seal(p),generated_at_ms=at+2)
+        c=r["companies"]["ASST"]
+        self.assertEqual(c["current_health_state"],"BLOCKED")
+        self.assertEqual(c["current_comparison_effective_time"],at)
+        self.assertEqual(c["latest_reported_effective_time"],at+1)
+        self.assertEqual(metric(r,"per_share_asset_engine")["qualification"],"RESEARCH_ONLY")
+
+    def test_each_company_mnav_separates_trial_history_and_original_dilution_scope(self):
+        from crt_radar.treasury_company_ct import ISSUERS
+        at=int(datetime(2026,10,23,tzinfo=timezone.utc).timestamp()*1000)
+        histories={}
+        for asset in ISSUERS:
+            histories[asset]=dict(mnav_history=[observation(asset,at=at-days*DAY_MS,value=v)
+                for days,v in ((91,.777),(28,1.286),(7,1.018),(0,1.5))])
+            for row in histories[asset]["mnav_history"]:
+                for field in ("equity_price_usd","btc_price_usd"):
+                    row["input_evidence"][field]["valid_until_ms"]=at+DAY_MS
+        with tempfile.TemporaryDirectory() as d:
+            p=build_evidence_pack(gate(0),observation_db=Path(d)/"o.db",generated_at_ms=at,
+                treasury_valuation_inputs=histories)
+        trials={a:deepcopy(histories[a]["mnav_history"][-1]["input_evidence"]) for a in ISSUERS}
+        ctx=dict(evidence_pack_hash=p["evidence_pack_hash"],mnav_trials={a:dict(input_evidence=t,
+            share_basis_ref="same-basis",evidence_alignment_state="VALIDATED") for a,t in trials.items()})
+        r=build_report(p,context=ctx,generated_at_ms=at)
+        for asset in ISSUERS:
+            row=metric(r,"current diluted mNAV",asset)
+            self.assertEqual(row["value"],1.5);self.assertEqual(row["qualification"],"QUALIFIED")
+            self.assertEqual(len(row["evidence"]),4)
+            self.assertIn("SYNTHETIC_FULLY_DILUTED",row["evidence"][0]["dilution_scope"])
+            self.assertEqual(metric(r,"historical mNAV month",asset)["value"],1.286)
+        # Even a self-consistent existing context and calculator receipt cannot
+        # promote a company-tagged price from the other issuer at this boundary.
+        for field in ("equity_price_usd","btc_price_usd"):
+            bad=deepcopy(p);bad_ctx=deepcopy(ctx)
+            fact=next(f for f in bad["asset_facts"]["items"] if f.get("fact_type")=="TREASURY_VALUATION_CONTEXT"
+                and f.get("asset_id")=="MSTR")
+            val=fact["evidence"]
+            for record in (val["current_observation"],val["mnav_observations"][-1]):
+                record["input_evidence"][field]["issuer_id"]=ISSUERS["ASST"]
+            val.pop("context_hash");val["context_hash"]=content_hash(val)
+            seal(bad);bad_ctx["evidence_pack_hash"]=bad["evidence_pack_hash"]
+            bad_ctx["mnav_trials"]["MSTR"]["input_evidence"][field]["issuer_id"]=ISSUERS["ASST"]
+            projected=build_report(bad,context=bad_ctx,generated_at_ms=at)
+            self.assertEqual(metric(projected,"current diluted mNAV","MSTR")["qualification"],"BLOCKED")
+            self.assertIsNone(metric(projected,"current diluted mNAV","MSTR")["value"])
+            self.assertEqual(metric(projected,"current diluted mNAV","ASST")["value"],1.5)
+        ctx["mnav_trials"]["MSTR"]["input_evidence"]["diluted_shares"].pop("effective_time")
+        r=build_report(p,context=ctx,generated_at_ms=at)
+        self.assertIsNone(metric(r,"current diluted mNAV","MSTR")["value"])
+        self.assertEqual(metric(r,"current diluted mNAV","ASST")["value"],1.5)
+        wrong=deepcopy(ctx)
+        wrong["mnav_trials"]["ASST"]["input_evidence"]["diluted_shares"]["issuer_id"]=ISSUERS["MSTR"]
+        self.assertIsNone(metric(build_report(p,context=wrong,generated_at_ms=at),"current diluted mNAV")["value"])
+
+    def test_reserve_and_incomplete_claims_not_reconstructed_for_strategy(self):
+        from test_treasury_company_ct import kwargs,burden,T2
+        from crt_radar.treasury_company_ct import add_treasury_company_ct
+        for separate in (True,False):
+            data=kwargs();cash=burden();cash.pop("preferred_liquidation_claims_usd")
+            cash.update(usd_reserve_usd=50,usd_cash_usable_for_carry=True,cash_usability_basis_ref="carry",
+                reserve_usable_for_carry=True,reserve_separate_from_cash=separate)
+            data["burden_current"]=cash
+            p=pack(T2);add_treasury_company_ct(p,data)
+            r=build_report(seal(p),generated_at_ms=T2)
+            self.assertIsNone(metric(r,"preferred_liquidation_claims_usd","MSTR")["value"])
+            self.assertEqual(metric(r,"usd_cash_usd","MSTR")["value"],100)
+            self.assertEqual(metric(r,"usd_reserve_usd","MSTR")["value"],50)
+            available=metric(r,"usable_liquidity_usd","MSTR")["value"]
+            self.assertTrue(available is None or available <= (150 if separate else 100))
+            self.assertFalse(any(x["asset_id"]=="MSTR" and "initial preferred" in x["metric"] for x in r["rows"]))
+
+    def test_period_strategy_facts_survive_without_becoming_executed_conversion(self):
+        from crt_radar.treasury_company_ct import ISSUERS
+        p,at=self.fixture()
+        period=dict(issuer_id=ISSUERS["MSTR"],source_ref="synthetic:reported-period",raw_sha256="d"*64,
+            claim="PERIOD_CAPITAL_FLOW",disclosure_time=at,first_seen_time=at,retrieval_time=at,
+            evidence_qualification="VERIFIED_REPORTED_PERIOD_FACT",execution_time=None,
+            ct_binding_state="BLOCKED",active_for_calculation=False,amount_usd=192400000,
+            shares_repurchased=1932145,destination="STRC_REPURCHASE",source="FUNDING_SOURCE_UNRESOLVED")
+        p["asset_facts"]["items"].append(dict(fact_type="ISSUER_CT_SOURCE_BINDING",issuer_id=ISSUERS["MSTR"],
+            evidence={"observations":[period,dict(claim="DATED_ADSO_RESEARCH_OBSERVATION",qualification="RESEARCH_ONLY",
+                current=dict(as_of_date="2026-10-11",btc_holdings=848250,diluted_shares=451797000),
+                public_availability_state="UNPROVEN")]}))
+        r=build_report(seal(p),generated_at_ms=at)
+        row=metric(r,"source-bound reported fact","MSTR")
+        self.assertEqual(row["value"],period)
+        self.assertEqual(row["qualification"],"RESEARCH_ONLY")
+        self.assertIsNone(row["value"]["execution_time"])
+        self.assertEqual(row["value"]["source"],"FUNDING_SOURCE_UNRESOLVED")
+        dated=metric(r,"dated ADSO research (not CT)","MSTR")
+        self.assertEqual(dated["qualification"],"BLOCKED")
+        self.assertEqual(dated["value"]["current"]["btc_holdings"],848250)
+        period["disclosure_time"]=at+1
+        r=build_report(seal(p),generated_at_ms=at)
+        self.assertEqual(metric(r,"source-bound reported fact","MSTR")["qualification"],"BLOCKED")
+
+    def test_both_historical_mnav_windows_refuse_nearest_dates_and_scope_changes(self):
+        from crt_radar.treasury_company_ct import ISSUERS
+        at=NOW
+        for asset in ISSUERS:
+            with self.subTest(asset=asset):
+                history=[observation(asset,at=at-d*DAY_MS,value=v,basis=basis) for d,v,basis in (
+                    (90,.7,"same-basis"),(28,1.2,"different-basis"),(7,1.018,"same-basis"),(0,1.5,"same-basis"))]
+                with tempfile.TemporaryDirectory() as d:
+                    p=build_evidence_pack(gate(0),observation_db=Path(d)/"o.db",generated_at_ms=at,
+                        treasury_valuation_inputs={asset:dict(mnav_history=history)})
+                r=build_report(p,generated_at_ms=at)
+                self.assertIsNone(metric(r,"historical mNAV quarter",asset)["value"])
+                self.assertIsNone(metric(r,"historical mNAV month",asset)["value"])
+                self.assertEqual(metric(r,"historical mNAV week",asset)["value"],1.018)
+
+    def test_pre_and_post_pack_mismatch_rejected_without_writing_forecast(self):
+        import test_btc_tactical_forecast as tactical
+        f=tactical.TacticalForecastTests();f.setUp()
+        try:
+            pre=freeze_pre(f.store,{**f.pre,"evidence_pack_hash":"b"*64},now_ms=f.now)
+            original=deepcopy(pre)
+            with self.assertRaisesRegex(ValueError,"FORECAST_PACK_MISMATCH"):
+                build_report(pack(f.now),forecast=pre,generated_at_ms=f.now)
+            post_data=f.post(pre);post_data["evidence_pack_hash"]="c"*64
+            post=freeze_post(f.store,post_data,now_ms=post_data["generated_at_ms"])
+            with self.assertRaisesRegex(ValueError,"FORECAST_PACK_MISMATCH"):
+                build_report(pack(post_data["market_cutoff_ms"]),forecast=post,original_pre=pre,
+                    generated_at_ms=post_data["generated_at_ms"])
+            self.assertEqual(pre,original)
+        finally: f.tearDown()
 
 
 if __name__=="__main__": unittest.main()

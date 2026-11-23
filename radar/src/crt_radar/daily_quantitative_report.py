@@ -30,7 +30,7 @@ from .portfolio_allocation_context import build_common_equity_health
 
 SCHEMA = "CRT_DAILY_QUANTITATIVE_REPORT_V0.1"
 SECTIONS = ("BTC 市場", "週線／鏈上", "宏觀", "ETF／現貨", "槓桿",
-            "Strive ①", "Strive ②", "Strive ③", "Strive ④", "Strive ⑤", "結論")
+            "Strategy", "MSTR 六維", "Strive ①", "Strive ②", "Strive ③", "Strive ④", "Strive ⑤", "ASST 六維", "結論")
 DAY = 86_400_000
 COMPARISON_WEEKS = (("quarter", 13), ("month", 4), ("week", 1))
 
@@ -45,19 +45,25 @@ def _iso(ms):
 
 def _provenance(record):
     return {k: deepcopy(record.get(k)) for k in (
-        "source_id", "source_ref", "source_url", "evidence_hash", "source_evidence",
+        "asset_id", "issuer_id", "source_id", "source_ref", "source_url", "evidence_hash", "source_evidence",
         "effective_time", "disclosure_time", "first_seen_time", "retrieval_time",
         "observed_at_ms", "available_at_ms", "retrieved_at_ms", "validated_at_ms",
         "quality_state", "basis_ref", "source_semantic", "share_basis", "currency",
         "unit", "source_as_of_date", "source_as_of_precision", "availability_semantics",
         "dilution_scope", "coverage_state", "raw_sha256", "evidence_authority",
         "share_settlement_scope", "economic_qualification", "field_conflicts",
-        "initial_preferred_claims_scope", "verification_state")}
+        "initial_preferred_claims_scope", "verification_state", "valid_until_ms", "source_class",
+        "period_start_date", "period_end_date", "execution_time", "ct_binding_state",
+        "evidence_qualification", "qualification", "limitation")}
 
 
-def _ct_visible(record, cutoff):
-    return (isinstance(record, dict) and record.get("issuer_id") == ISSUERS["ASST"]
-        and validate_pit_replay(record, issuer_id=ISSUERS["ASST"], replay_at=cutoff,
+def _ct_visible(record, cutoff, *, asset_id, issuer_id):
+    return (ISSUERS.get(asset_id) == issuer_id and isinstance(record, dict)
+        and record.get("issuer_id") == issuer_id and record.get("asset_id") in (None, asset_id, "BTC")
+        and record.get("quality_state") not in {"STALE", "INVALID", "BLOCKED"}
+        and ("valid_until_ms" not in record or (type(record["valid_until_ms"]) is int
+            and cutoff <= record["valid_until_ms"]))
+        and validate_pit_replay(record, issuer_id=issuer_id, replay_at=cutoff,
             mode="AUDIT_REPLAY")["state"] == "AVAILABLE")
 
 
@@ -67,14 +73,62 @@ def _has_raw_hash(record):
     return isinstance(digest,str) and len(digest)==64 and set(digest)<=set("0123456789abcdef")
 
 
-def _fact(pack, kind, section=None):
+def _fact(pack, kind, section=None, *, asset_id, issuer_id):
+    if ISSUERS.get(asset_id) != issuer_id:
+        raise ValueError("REPORT_ASSET_ISSUER_MISMATCH")
     rows = [r for r in pack.get("asset_facts", {}).get("items", [])
-        if r.get("fact_type") == kind and r.get("issuer_id", ISSUERS["ASST"]) == ISSUERS["ASST"]
-        and r.get("asset_id", "ASST") == "ASST"
+        if r.get("fact_type") == kind and r.get("issuer_id") == issuer_id
+        and r.get("asset_id") in (None, asset_id)
         and (section is None or r.get("ct_section") == section)]
     if len(rows) > 1:
         raise ValueError("REPORT_DUPLICATE_ASSET_FACT")
     return rows[0].get("evidence", {}) if rows else {}
+
+
+def _company_view(pack):
+    """Recheck report inputs without changing the sealed pack or the CT model.
+
+    Invalid records stay in the audit copy, not the calculation view. In
+    particular, explicit stale evidence is not rescued by a successful PIT check.
+    """
+    view = deepcopy(pack)
+    excluded = []
+    items = []
+    kinds = {"TREASURY_COMPANY_CT", "TREASURY_VALUATION_CONTEXT", "ISSUER_CT_SOURCE_BINDING"}
+    for fact in pack.get("asset_facts", {}).get("items", []):
+        if fact.get("fact_type") not in kinds:
+            items.append(deepcopy(fact)); continue
+        asset = fact.get("asset_id")
+        if asset is None:
+            asset = next((a for a,i in ISSUERS.items() if i == fact.get("issuer_id")), None)
+        issuer = ISSUERS.get(asset)
+        nested_asset = (fact.get("evidence") or {}).get("asset_id")
+        if not issuer or fact.get("issuer_id") != issuer or nested_asset not in (None,asset):
+            excluded.append(dict(asset_id=asset, issuer_id=fact.get("issuer_id"),
+                reason="REPORT_COMPANY_FACT_IDENTITY_MISMATCH", fact=deepcopy(fact)))
+            continue
+        def clean(value):
+            if isinstance(value, list):
+                return [r for v in value if (r := clean(v)) is not None]
+            if not isinstance(value, dict): return deepcopy(value)
+            if "source_ref" in value and "issuer_id" in value and not _ct_visible(
+                    value, pack["generated_at_ms"], asset_id=asset, issuer_id=issuer):
+                excluded.append(dict(asset_id=asset, issuer_id=issuer,
+                    reason="REPORT_COMPANY_RECORD_NOT_USABLE", evidence=_provenance(value)))
+                return None
+            return {k:clean(v) for k,v in value.items()}
+        checked = deepcopy(fact)
+        # Valuation contexts have an independent content hash. Validate before
+        # filtering and leave that immutable receipt intact for its validator.
+        if fact["fact_type"] == "TREASURY_VALUATION_CONTEXT":
+            material = deepcopy(fact["evidence"]); digest = material.pop("context_hash", None)
+            if digest != content_hash(material):
+                raise ValueError("REPORT_VALUATION_CONTEXT_HASH_INVALID")
+        elif fact["fact_type"] != "ISSUER_CT_SOURCE_BINDING":
+            checked["evidence"] = clean(fact.get("evidence", {})) or {}
+        items.append(checked)
+    view["asset_facts"]["items"] = items
+    return view, excluded
 
 
 def _reference_date(at, days=0):
@@ -124,6 +178,186 @@ def _frozen_forecast(record, original_pre, cutoff, generated):
         "original_pre": deepcopy(original_pre) if record["kind"] == POST else None}
 
 
+def _company_valuation_rows(pack, context, cutoff, asset_id, add):
+    issuer_id = ISSUERS[asset_id]
+    section = "Strive ③" if asset_id == "ASST" else "Strategy"
+    visible = lambda r: _ct_visible(r, cutoff, asset_id=asset_id, issuer_id=issuer_id)
+    organs = {s:_fact(pack, "TREASURY_COMPANY_CT", s, asset_id=asset_id, issuer_id=issuer_id) for s in (
+        "per_share_asset_engine", "capital_burden_resilience", "funding_engine", "capital_conversion")}
+    binding = _fact(pack, "ISSUER_CT_SOURCE_BINDING", asset_id=asset_id, issuer_id=issuer_id)
+    observations = [r for r in binding.get("observations",[]) if visible(r)]
+    snapshots = [r for r in observations if r.get("claim") == "REPORTED_CAPITAL_STRUCTURE_SNAPSHOT" and not r.get("field_conflicts")]
+    snapshots.sort(key=lambda r:r["effective_time"])
+    assets = [r for r in organs["per_share_asset_engine"].get("observations",[]) if visible(r)]
+    if not assets:
+        assets = [{**r, **r.get("reported_fields",{}), "basis_ref":r.get("share_basis"),
+            "btc_per_diluted_share": r["reported_fields"]["btc_holdings"]/r["reported_fields"]["diluted_shares"]}
+            for r in snapshots if _number(r.get("reported_fields",{}).get("btc_holdings"))
+            and _number(r.get("reported_fields",{}).get("diluted_shares")) and r["reported_fields"]["diluted_shares"]>0]
+    current = assets[-1] if assets else {}
+    add(section, "BTC / diluted share", current.get("btc_per_diluted_share"), "BTC/share",
+        evidence=[current] if current else [], basis="公司截面；不與當日價格時鐘混合")
+    for name, weeks in COMPARISON_WEEKS:
+        prev = _exact_reference(assets,current,weeks) if current else None
+        comparable = bool(prev and prev.get("basis_ref") == current.get("basis_ref") and current.get("basis_ref")
+            and "UNRESOLVED" not in current["basis_ref"]
+            and prev.get("share_settlement_scope") == current.get("share_settlement_scope")
+            and _number(prev.get("btc_per_diluted_share")) and prev["btc_per_diluted_share"]>0)
+        add(section, f"BTC/share {name} growth", (current["btc_per_diluted_share"]/prev["btc_per_diluted_share"]-1)*100 if comparable else None,
+            "%", evidence=[r for r in (prev,current) if r], basis=f"{weeks}週={weeks*7}日；同稀釋／交割口徑；無插值",
+            inputs={"weeks":weeks,"reference_date":_reference_date(current["effective_time"],days=weeks*7) if current else None},
+            reason=None if comparable else "EXACT_COMPARABLE_COMPANY_SNAPSHOT_REQUIRED")
+
+    valuation = _fact(pack,"TREASURY_VALUATION_CONTEXT", asset_id=asset_id, issuer_id=issuer_id)
+    if valuation:
+        copied = deepcopy(valuation); vh=copied.pop("context_hash",None)
+        if content_hash(copied) != vh:
+            raise ValueError("REPORT_VALUATION_CONTEXT_HASH_INVALID")
+    history = [r for r in valuation.get("mnav_observations",[]) if r and visible(r)]
+    current_mnav = valuation.get("current_observation") or {}
+    if current_mnav and not visible(current_mnav):
+        current_mnav = {}
+    for name, weeks in COMPARISON_WEEKS:
+        prior = _exact_reference(history,current_mnav,weeks) if current_mnav else None
+        comparable = bool(prior and _same_valuation_basis(prior,current_mnav))
+        add(section, f"historical mNAV {name}", prior["mnav"] if comparable else None, "",
+            evidence=[prior] if prior else [], basis=f"{weeks}週={weeks*7}日公司歷史截面原值；不加X、不加%；不以當日價格重估",
+            inputs={"weeks":weeks,"reference_date":_reference_date(current_mnav["effective_time"],days=weeks*7) if current_mnav else None},
+            reason=None if comparable else "EXACT_COMPARABLE_MNAV_SNAPSHOT_REQUIRED")
+    trial = (context.get("mnav_trials", {}).get(asset_id) or (context.get("mnav_trial") if asset_id == "ASST" else None)) or {k:current_mnav.get(k) for k in (
+        "input_evidence","share_basis_ref","evidence_alignment_state")}
+    trial["input_evidence"] = trial.get("input_evidence") or {}
+    values = {k:trial.get("input_evidence",{}).get(k,{}).get("value") for k in COMPONENTS}
+    checked = build_diluted_equity_mnav(asset_id=asset_id, **values, input_evidence=trial.get("input_evidence"),
+        share_basis_ref=trial.get("share_basis_ref"), semantic_ref=SEMANTIC_REF,
+        evidence_alignment_state=trial.get("evidence_alignment_state"), as_of_ms=cutoff)
+    trial_sources = list(trial.get("input_evidence",{}).values())
+    research = bool(len(trial_sources)==4 and all(_number(v) and v>0 for v in values.values())
+        and all(visible(r) for r in trial_sources)
+        and set(trial["input_evidence"]) == set(COMPONENTS)
+        and all(r.get("asset_id")==("BTC" if k=="btc_price_usd" else asset_id)
+            and (not k.endswith("price_usd") or r.get("currency")=="USD")
+            and r.get("quality_state") not in {"BLOCKED","INVALID","PARTIAL"}
+            and _has_raw_hash(r)
+            for k,r in trial.get("input_evidence",{}).items()))
+    fresh = all(type(trial.get("input_evidence",{}).get(k,{}).get("valid_until_ms")) is int
+        and cutoff < trial["input_evidence"][k]["valid_until_ms"]
+        and trial["input_evidence"][k].get("quality_state")!="STALE" for k in ("equity_price_usd","btc_price_usd"))
+    if not fresh:
+        checked={**checked,"state":"BLOCKED","reason":"REPORT_CURRENT_PRICE_FRESHNESS_UNPROVEN_OR_EXPIRED"}
+    formal = compact_treasury_valuation_context(pack).get(asset_id,{}) if valuation else {}
+    formal_bound = bool(research and checked["state"]=="AVAILABLE" and formal.get("formal_action_critical_state")=="AVAILABLE"
+        and current_mnav.get("input_evidence")==trial["input_evidence"]
+        and all(current_mnav.get(k)==values[k] for k in COMPONENTS)
+        and all(r.get("quality_state")!="RESEARCH_ONLY" and r.get("source_class")!="RESEARCH_SECONDARY" for r in trial_sources))
+    number = checked["mnav"] if research else None
+    if number is None and research:
+        # Display-only substitution of the SAME formal formula; never emit a
+        # receipt or feed the trial back into CT, historical CDF or BUY gates.
+        number = values["diluted_shares"]*values["equity_price_usd"]/(values["btc_holdings"]*values["btc_price_usd"])
+    substitution = (f"({values['diluted_shares']} * {values['equity_price_usd']}) / ({values['btc_holdings']} * {values['btc_price_usd']})"
+        if all(_number(v) for v in values.values()) else "NOT_RUN_MISSING_COMPONENTS")
+    add(section, "current diluted mNAV", number, "", evidence=trial_sources,
+        state="QUALIFIED" if formal_bound else "RESEARCH_ONLY" if research and fresh else "STALE" if research else "BLOCKED",
+        reason=None if formal_bound else "FORMAL_CT_RECEIPT_NOT_BOUND_TO_THIS_TRIAL" if checked["state"]=="AVAILABLE" else checked.get("reason"),
+        basis=FORMULA+" = "+substitution, inputs={"formula_version":FORMULA_VERSION, "substitution":substitution,
+            "values":values, "formal_validation":checked, "buy_eligible":False})
+
+    return organs, observations, snapshots, current
+
+
+def _company_health_rows(pack, company_inputs, cutoff, add):
+    # Use the existing six dimensions, not report-side health arithmetic.
+    calculated = build_common_equity_health(pack)
+    companies = {}
+    for asset_id, issuer_id in ISSUERS.items():
+        organs, observations, snapshots, _ = company_inputs[asset_id]
+        row = calculated["assets"][asset_id]
+        health = row["company_health"]
+        windows = {}
+        for name, section in organs.items():
+            windows[name] = {label: _provenance(section[label]) if section.get(label) else None
+                for label in ("previous", "current")}
+        last_reported = max((r["effective_time"] for r in snapshots), default=None)
+        compared = (organs["per_share_asset_engine"].get("current") or {}).get("effective_time")
+        current_blockers = []
+        if compared is None:
+            current_blockers.append("QUALIFIED_CURRENT_COMPARISON_MISSING")
+        if last_reported is not None and (compared is None or last_reported > compared):
+            current_blockers.append("NEWER_REPORTED_SNAPSHOT_NOT_QUALIFIED_FOR_HEALTH_COMPARISON")
+        for dimension, value in health["dimensions"].items():
+            add(asset_id+" 六維", dimension, value["claims"], "existing claim units",
+                evidence=[r for ref in value["supporting_evidence"]
+                    for r in health.get("provenance",{}).get(ref,[])],
+                state="RESEARCH_ONLY" if value["state"] != "BLOCKED" else "BLOCKED",
+                reason=value["reason"], basis=value["claim_scope"]+"；方向="+value["direction"]
+                    +"；比較結果不是當期公司放行；反證由分析者提出，不由程式捏造",
+                inputs={"dimension":value, "comparison_windows":windows,
+                    "current_health_blockers":current_blockers,
+                    "counterevidence":health["capital_engine"]["contradictions"],
+                    "analyst_counterevidence":"NOT_RUN"})
+        add("結論", "company health contradictions", {"dimensions":{k:{f:v.get(f) for f in (
+            "direction","reason","interpretation_state","missing_evidence")} for k,v in health["dimensions"].items()},
+            "contradictions":health["capital_engine"]["contradictions"],
+            "current_health_blockers":current_blockers},
+            evidence=[r for records in health.get("provenance",{}).values() for r in records],
+            basis=asset_id+"；重用六維；歷史與當期分線；沒有健康總分或自動配置", asset_id=asset_id)
+        # The report's conclusion rows need explicit ownership too.
+        companies[asset_id] = dict(asset_id=asset_id, issuer_id=issuer_id,
+            comparison_windows=windows, latest_reported_effective_time=last_reported,
+            current_comparison_effective_time=compared, current_health_blockers=current_blockers,
+            current_health_state="BLOCKED" if current_blockers else "RESEARCH_COMPARISON_ONLY",
+            health=deepcopy(row))
+        if asset_id != "MSTR": continue
+        # Strategy has its own capital facts. Never reuse Strive's initial
+        # preference coverage or infer missing debt/claims from a BTC total.
+        burden = organs["capital_burden_resilience"].get("current") or {}
+        for field, unit in (("btc_holdings","BTC"),("diluted_shares","shares"),
+                ("debt_principal_usd","USD"),("preferred_liquidation_claims_usd","USD"),
+                ("annual_debt_interest_usd","USD/year"),("annual_preferred_distributions_usd","USD/year"),
+                ("annual_carry_usd","USD/year"),("usd_cash_usd","USD"),("usd_reserve_usd","USD"),
+                ("usable_liquidity_usd","USD"),("carry_coverage_years","years")):
+            r = (organs["per_share_asset_engine"].get("current") or {}) if field in {"btc_holdings","diluted_shares"} else burden
+            add("Strategy",field,r.get(field),unit,evidence=[r] if r else [],
+                basis="MSTR原CT已驗證分項；現金與Reserve分列，未知不反推、不重複相加；靜態覆蓋非生存年限")
+        add("Strategy","diluted share change",row.get("diluted_share_change"),"shares",
+            evidence=[r for r in (organs["per_share_asset_engine"].get("previous"),
+                organs["per_share_asset_engine"].get("current")) if r],
+            basis="原CT可比股數差，不是普通股發行數或融資因果")
+        funding = organs["funding_engine"]
+        add("Strategy","ATM / other financing",funding.get("instruments") or None,"instrument units",
+            evidence=funding.get("instruments",[]),basis="既有融資條款／承接／成本；額度不等於募集款")
+        add("Strategy","period capital uses / STRC repurchases",organs["capital_conversion"].get("events") or None,
+            "event component units",evidence=organs["capital_conversion"].get("events",[]),
+            basis="逐事件來源與期間；execution_time可為null；不加總重疊用途，不推算消滅請求權或節省carry")
+        binding = _fact(pack,"ISSUER_CT_SOURCE_BINDING",asset_id=asset_id,issuer_id=issuer_id)
+        for reported in binding.get("observations",[]):
+            if reported.get("claim")=="DATED_ADSO_RESEARCH_OBSERVATION" and reported.get("issuer_id") is None:
+                add("Strategy","dated ADSO research (not CT)",
+                    {k:reported.get(k) for k in ("previous","current","btc_per_diluted_share_change_pct",
+                        "qualification","public_availability_state","dilution_scope_state","limitations")},
+                    "source research units",evidence=[reported],state="BLOCKED",
+                    reason="DATED_RESEARCH_NOT_CT_BOUND_PUBLIC_DISCLOSURE_UNPROVEN",
+                    basis="原MSTR來源綁定內的研究資料，保留數值與原資格；未補issuer、揭露時間或正式稀釋；不進六維計算")
+                continue
+            if reported.get("issuer_id") != issuer_id: continue
+            times=[reported.get(k) for k in ("disclosure_time","first_seen_time","retrieval_time")]
+            visible=all(type(t) is int and 0<t<=cutoff for t in times) and times==sorted(times)
+            # Period facts deliberately have no execution/effective instant.
+            # Keep that existing narrow source qualification, never pass them
+            # through the CT action/health calculation lane by inventing one.
+            usable=visible and _has_raw_hash(reported) and (reported.get("evidence_qualification")=="VERIFIED_REPORTED_PERIOD_FACT"
+                or _ct_visible(reported,cutoff,asset_id=asset_id,issuer_id=issuer_id))
+            add("Strategy","source-bound reported fact",reported,"reported units",evidence=[reported],
+                state="RESEARCH_ONLY" if usable else "BLOCKED",
+                reason=None if usable else "REPORTED_RESEARCH_ONLY_NOT_CT_QUALIFIED",
+                basis="保留原公告數字與資格；期間不是執行時點；reported date不是ADSO生效日；不推算索取權或carry")
+        fixed=organs["capital_burden_resilience"].get("fixed_obligation_windows",{})
+        add("Strategy","declared / confirmed payments",fixed.get("confirmed"),"USD by due date",
+            evidence=fixed.get("confirmed") or [],basis="已確認付款，不含未行使權利或未宣告情境")
+    return companies
+
+
 def build_report(pack, *, context=None, forecast=None, original_pre=None, generated_at_ms):
     """Project a sealed pack plus explicitly hash-linked local research inputs.
 
@@ -143,14 +377,15 @@ def build_report(pack, *, context=None, forecast=None, original_pre=None, genera
         raise ValueError("REPORT_CONTEXT_PACK_MISMATCH")
     rows = []
     def add(section, metric, value=None, unit="", *, evidence=(), basis="",
-            state=None, reason=None, inputs=None):
+            state=None, reason=None, inputs=None, asset_id=None):
         if type(value) is float and not math.isfinite(value):
             value, reason = None, "NONFINITE_RESULT"
         if state is None:
             state = "RESEARCH_ONLY" if value is not None else "BLOCKED"
         if state == "STALE" and reason is None:
             reason = "ARCHIVE_STALE_AT_REPORT_CUTOFF"
-        rows.append(dict(section=section, metric=metric, value=deepcopy(value), unit=unit,
+        owner = asset_id or ("MSTR" if section in {"Strategy", "MSTR 六維"} else "ASST" if section.startswith("Strive") or section == "ASST 六維" else None)
+        rows.append(dict(section=section, asset_id=owner, issuer_id=ISSUERS.get(owner), metric=metric, value=deepcopy(value), unit=unit,
             qualification=state, reason=reason if reason else None if value is not None else "REQUIRED_EVIDENCE_MISSING",
             basis=basis, evidence=[_provenance(r) for r in evidence], inputs=deepcopy(inputs)))
 
@@ -294,91 +529,23 @@ def build_report(pack, *, context=None, forecast=None, original_pre=None, genera
         for n in (5,20,60):
             add("ETF／現貨", f"ETF {n} completed sessions", unit="USD", reason="TFTC_ARCHIVE_NOT_SUPPLIED")
 
-    # CT normalized facts remain separate from reported snapshots and the
-    # current-price valuation trial. No debt/cash deduction enters mNAV.
-    organs = {s:_fact(pack, "TREASURY_COMPANY_CT", s) for s in (
-        "per_share_asset_engine", "capital_burden_resilience", "funding_engine", "capital_conversion")}
-    binding = _fact(pack, "ISSUER_CT_SOURCE_BINDING")
-    observations = [r for r in binding.get("observations",[]) if _ct_visible(r, cutoff)]
-    snapshots = [r for r in observations if r.get("claim") == "REPORTED_CAPITAL_STRUCTURE_SNAPSHOT" and not r.get("field_conflicts")]
-    snapshots.sort(key=lambda r:r["effective_time"])
-    assets = [r for r in organs["per_share_asset_engine"].get("observations",[]) if _ct_visible(r, cutoff)]
-    if not assets:
-        assets = [{**r, **r.get("reported_fields",{}), "basis_ref":r.get("share_basis"),
-            "btc_per_diluted_share": r["reported_fields"]["btc_holdings"]/r["reported_fields"]["diluted_shares"]}
-            for r in snapshots if _number(r.get("reported_fields",{}).get("btc_holdings"))
-            and _number(r.get("reported_fields",{}).get("diluted_shares")) and r["reported_fields"]["diluted_shares"]>0]
-    current = assets[-1] if assets else {}
-    add("Strive ③", "BTC / diluted share", current.get("btc_per_diluted_share"), "BTC/share",
-        evidence=[current] if current else [], basis="公司截面；不與當日價格時鐘混合")
-    for name, weeks in COMPARISON_WEEKS:
-        prev = _exact_reference(assets,current,weeks) if current else None
-        comparable = bool(prev and prev.get("basis_ref") == current.get("basis_ref") and current.get("basis_ref")
-            and "UNRESOLVED" not in current["basis_ref"]
-            and prev.get("share_settlement_scope") == current.get("share_settlement_scope")
-            and _number(prev.get("btc_per_diluted_share")) and prev["btc_per_diluted_share"]>0)
-        add("Strive ③", f"BTC/share {name} growth", (current["btc_per_diluted_share"]/prev["btc_per_diluted_share"]-1)*100 if comparable else None,
-            "%", evidence=[r for r in (prev,current) if r], basis=f"{weeks}週={weeks*7}日；同稀釋／交割口徑；無插值",
-            inputs={"weeks":weeks,"reference_date":_reference_date(current["effective_time"],days=weeks*7) if current else None},
-            reason=None if comparable else "EXACT_COMPARABLE_COMPANY_SNAPSHOT_REQUIRED")
-
-    valuation = _fact(pack,"TREASURY_VALUATION_CONTEXT")
-    if valuation:
-        copied = deepcopy(valuation); vh=copied.pop("context_hash",None)
-        if content_hash(copied) != vh:
-            raise ValueError("REPORT_VALUATION_CONTEXT_HASH_INVALID")
-    history = [r for r in valuation.get("mnav_observations",[]) if r and _ct_visible(r,cutoff)]
-    current_mnav = valuation.get("current_observation") or {}
-    for name, weeks in COMPARISON_WEEKS:
-        prior = _exact_reference(history,current_mnav,weeks) if current_mnav else None
-        comparable = bool(prior and _same_valuation_basis(prior,current_mnav))
-        add("Strive ③", f"historical mNAV {name}", prior["mnav"] if comparable else None, "",
-            evidence=[prior] if prior else [], basis=f"{weeks}週={weeks*7}日公司歷史截面原值；不加X、不加%；不以當日價格重估",
-            inputs={"weeks":weeks,"reference_date":_reference_date(current_mnav["effective_time"],days=weeks*7) if current_mnav else None},
-            reason=None if comparable else "EXACT_COMPARABLE_MNAV_SNAPSHOT_REQUIRED")
-    trial = context.get("mnav_trial") or {k:current_mnav.get(k) for k in (
-        "input_evidence","share_basis_ref","evidence_alignment_state")}
-    trial["input_evidence"] = trial.get("input_evidence") or {}
-    values = {k:trial.get("input_evidence",{}).get(k,{}).get("value") for k in COMPONENTS}
-    checked = build_diluted_equity_mnav(asset_id="ASST", **values, input_evidence=trial.get("input_evidence"),
-        share_basis_ref=trial.get("share_basis_ref"), semantic_ref=SEMANTIC_REF,
-        evidence_alignment_state=trial.get("evidence_alignment_state"), as_of_ms=cutoff)
-    trial_sources = list(trial.get("input_evidence",{}).values())
-    research = bool(len(trial_sources)==4 and all(_number(v) and v>0 for v in values.values())
-        and all(_ct_visible(r,cutoff) for r in trial_sources)
-        and all(r.get("asset_id")==("BTC" if k=="btc_price_usd" else "ASST")
-            and (not k.endswith("price_usd") or r.get("currency")=="USD")
-            and r.get("quality_state") not in {"BLOCKED","INVALID","PARTIAL"}
-            and _has_raw_hash(r)
-            for k,r in trial.get("input_evidence",{}).items()))
-    fresh = all(type(trial.get("input_evidence",{}).get(k,{}).get("valid_until_ms")) is int
-        and cutoff < trial["input_evidence"][k]["valid_until_ms"]
-        and trial["input_evidence"][k].get("quality_state")!="STALE" for k in ("equity_price_usd","btc_price_usd"))
-    if not fresh:
-        checked={**checked,"state":"BLOCKED","reason":"REPORT_CURRENT_PRICE_FRESHNESS_UNPROVEN_OR_EXPIRED"}
-    formal = compact_treasury_valuation_context(pack).get("ASST",{}) if valuation else {}
-    formal_bound = bool(checked["state"]=="AVAILABLE" and formal.get("formal_action_critical_state")=="AVAILABLE"
-        and current_mnav.get("input_evidence")==trial["input_evidence"]
-        and all(current_mnav.get(k)==values[k] for k in COMPONENTS)
-        and all(r.get("quality_state")!="RESEARCH_ONLY" and r.get("source_class")!="RESEARCH_SECONDARY" for r in trial_sources))
-    number = checked["mnav"]
-    if number is None and research:
-        # Display-only substitution of the SAME formal formula; never emit a
-        # receipt or feed the trial back into CT, historical CDF or BUY gates.
-        number = values["diluted_shares"]*values["equity_price_usd"]/(values["btc_holdings"]*values["btc_price_usd"])
-    substitution = (f"({values['diluted_shares']} * {values['equity_price_usd']}) / ({values['btc_holdings']} * {values['btc_price_usd']})"
-        if all(_number(v) for v in values.values()) else "NOT_RUN_MISSING_COMPONENTS")
-    add("Strive ③", "current diluted mNAV", number, "", evidence=trial_sources,
-        state="QUALIFIED" if formal_bound else "RESEARCH_ONLY" if research and fresh else "STALE" if research else "BLOCKED",
-        reason=None if formal_bound else "FORMAL_CT_RECEIPT_NOT_BOUND_TO_THIS_TRIAL" if checked["state"]=="AVAILABLE" else checked.get("reason"),
-        basis=FORMULA+" = "+substitution, inputs={"formula_version":FORMULA_VERSION, "substitution":substitution,
-            "values":values, "formal_validation":checked, "buy_eligible":False})
-
+    # Same report boundary, original sealed pack retained for audit.
+    company_pack, excluded_company_evidence = _company_view(pack)
+    company_inputs = {}
+    for asset_id in ISSUERS:
+        company_inputs[asset_id] = _company_valuation_rows(company_pack, context, cutoff, asset_id, add)
+    organs, observations, snapshots, current = company_inputs["ASST"]
+    visible = lambda r: _ct_visible(r, cutoff, asset_id="ASST", issuer_id=ISSUERS["ASST"])
     burden = organs["capital_burden_resilience"].get("current") or {}
-    if not _ct_visible(burden,cutoff): burden={}
+    if not visible(burden): burden={}
     reported = snapshots[-1] if snapshots else {}
     add("Strive ②", "reported cash and cash equivalents", reported.get("reported_fields",{}).get("cash_and_cash_equivalents_usd"),
         "USD", evidence=[reported] if reported else [], basis="來源截面歷史事實；不是目前可部署資本")
+    for security in ("SATA","SATS"):
+        field=security.lower()+"_shares"
+        add("Strive ②",security+" reported outstanding shares",reported.get("reported_fields",{}).get(field),
+            "shares",evidence=[reported] if reported else [],
+            basis="各證券分列；股數不是已驗證清算索取額、初始優先額或可用現金")
     for field, unit in (("usd_cash_usd","USD"),("usd_reserve_usd","USD"),
                         ("annual_preferred_distributions_usd","USD/year"),("usable_liquidity_usd","USD"),
                         ("carry_coverage_years","years")):
@@ -442,7 +609,7 @@ def build_report(pack, *, context=None, forecast=None, original_pre=None, genera
         basis=coverage_basis+"；僅代入明示價格假設，其他資產不變；不自創交易門檻")
     funding = organs["funding_engine"]
     for r in funding.get("reported_financing_facts",[]):
-        if not _ct_visible(r,cutoff): continue
+        if not visible(r): continue
         for field in ("commission_cap_pct", "authorized_capacity_usd"):
             if field in r:
                 add("Strive ④", field, r[field], "%" if field.endswith("pct") else "USD capacity",
@@ -456,6 +623,7 @@ def build_report(pack, *, context=None, forecast=None, original_pre=None, genera
     for event in events:
         terms=event.get("conditional_terms") or {}
         add("Strive ④", "reported offering stage", {"stage":event["funding_stage"],
+            "instrument_id":event.get("instrument_id"), "security_id":event.get("security_id"),
             **{k:terms[k] for k in ("reported_closed_shares","conditional_gross_proceeds_usd","conditional_annual_dividends_usd") if k in terms}},
             "reported / conditional", evidence=[event], basis="條款與發行階段；不是已驗證淨額或當期完整索取權")
         add("Strive ④", "verified net proceeds", event.get("calculation_inputs",{}).get("verified_net_proceeds_usd"), "USD",
@@ -471,6 +639,8 @@ def build_report(pack, *, context=None, forecast=None, original_pre=None, genera
         "USD by comparable period", basis="既有公司健康市場承接；不以ATM額度或股價代替")
     add("Strive ⑤", "BTC price / whole-company acquisition cost", reason="MATCHED_TOTAL_ACQUISITION_COST_AND_HOLDINGS_REQUIRED",
         basis="不能以單次購幣成本冒充整體取得成本")
+    if forecast and forecast.get("content", {}).get("evidence_pack_hash") not in (None, digest):
+        raise ValueError("REPORT_FORECAST_PACK_MISMATCH")
     narrative = _frozen_forecast(forecast,original_pre,cutoff,generated_at_ms)
     text=narrative.get("record",{}).get("content",{})
     summary={k:text[k] for k in ("main_scenario","invalidation_line","strongest_counterevidence","change_conditions","reviews") if k in text}
@@ -478,16 +648,14 @@ def build_report(pack, *, context=None, forecast=None, original_pre=None, genera
         state=narrative["state"], reason=narrative.get("reason"), basis="原文、錨、反證、改判與到期保持凍結；不產生新預測")
     add("結論", "market direction / invalidation / capital posture", summary or None,
         state=narrative["state"], reason=narrative.get("reason"), basis="分析者原判斷；無機器交易資格")
-    health=build_common_equity_health(pack)["assets"]["ASST"]["company_health"]
-    add("結論", "company health contradictions", {"dimensions":{k:{f:v.get(f) for f in (
-        "direction","reason","interpretation_state","missing_evidence")} for k,v in health["dimensions"].items()},
-        "contradictions":health["capital_engine"]["contradictions"]},
-        evidence=[r for records in health.get("provenance",{}).values() for r in records],
-        basis="重用既有六維公司健康；沒有新健康分數或固定配置結論")
+    companies = _company_health_rows(company_pack, company_inputs, cutoff, add)
     result=dict(schema_version=SCHEMA, evidence_pack_hash=digest, market_cutoff_ms=cutoff,
         generated_at_ms=generated_at_ms, context_hash=content_hash(context), rows=rows,
         report_state="PARTIAL_WITH_BLOCKERS" if any(r["qualification"] in {"BLOCKED","STALE","NOT_RUN"} for r in rows) else "RESEARCH_PRESENTATION_READY",
         upstream_pack_state=pack.get("pack_state"),
+        companies=companies, excluded_company_evidence=excluded_company_evidence,
+        company_source_audit=[deepcopy(f) for f in pack.get("asset_facts",{}).get("items",[])
+            if f.get("fact_type") in {"TREASURY_COMPANY_CT","TREASURY_VALUATION_CONTEXT","ISSUER_CT_SOURCE_BINDING"}],
         forecast=narrative, execution_mode="FROZEN_RESEARCH_PRESENTATION" if forecast else "AUDIT_REPLAY_NOT_PROSPECTIVE",
         forecast_access="CALLER_RECORD_HASH_ONLY_NOT_DATABASE_READBACK" if forecast else "NOT_RUN",
         cloud_shared_access="BLOCKED", cloud_two_task_read_write="NOT_RUN", reasoning_state="NOT_YET_PROVEN",
@@ -531,7 +699,7 @@ def render_markdown(report):
             qualification=row["qualification"]+(":"+row["reason"] if row["reason"] else "")
             shown=display(row)
             if row["metric"]=="company health contradictions" and row["value"]:
-                shown="；".join(f"{k}: {v.get('direction')} / {v.get('reason')}" for k,v in row["value"]["dimensions"].items())
+                shown=(row.get("asset_id") or "")+"；"+"；".join(f"{k}: {v.get('direction')} / {v.get('reason')}" for k,v in row["value"]["dimensions"].items())
                 shown+="；矛盾="+str(row["value"]["contradictions"])
             lines.append("| "+" | ".join(map(cell,(row["metric"],shown,row["unit"],qualification+"；"+row["basis"])))+" |")
             if row["metric"].startswith("ETF ") and row.get("inputs"):
@@ -554,7 +722,20 @@ def render_markdown(report):
     table(selected("ETF／現貨"))
     lines.append("## 5. 槓桿、Funding、強平及逐項解讀\n")
     table(selected("槓桿"))
-    lines.append("## 6. Strive 五項健康度\n")
+    lines.append("## 6. 雙公司六維健康與 Strive 五項\n")
+    def company_window(asset):
+        company=report["companies"][asset]
+        window=company["comparison_windows"]["per_share_asset_engine"]
+        endpoints=[(window.get(k) or {}).get("effective_time") for k in ("previous","current")]
+        shown=" → ".join(_iso(t) if type(t) is int else "UNKNOWN" for t in endpoints)
+        lines.append(f"{asset} 已驗證每股比較窗口：{shown}；當期資格：{company['current_health_state']}；"
+            +"限制："+cell(company["current_health_blockers"])+"。各維度另保留其原始比較窗口與反證。\n")
+    lines.append("### Strategy（MSTR）｜六維健康與獨立資本事實\n")
+    company_window("MSTR")
+    table(selected("MSTR 六維", "Strategy"))
+    lines.append("### Strive（ASST）｜六維健康\n")
+    company_window("ASST")
+    table(selected("ASST 六維"))
     for section,title in (("Strive ①","資產覆蓋與價格壓力"),("Strive ②","現金、股息與已宣告付款"),
             ("Strive ③","每股BTC與稀釋mNAV"),("Strive ④","融資、成本、市場承接與資本轉換"),
             ("Strive ⑤","BTC市價與整體取得成本")):
@@ -581,7 +762,7 @@ def render_markdown(report):
     else:
         lines.append("NOT_RUN：沒有本次已凍結 PRE／POST；不產生預測、改判或核驗結論。")
     lines.extend(["", "## 詳細量化證據稽核附表", "",
-        "| 區塊 | 指標 | 數值 | 單位 | 資格／限制 | 觀測／公開／取得 | 依據與來源 |",
+        "| 區塊 | 指標 | 數值 | 單位 | 資格／限制 | 觀測／公開／首次取得／擷取／驗證 | 依據與來源 |",
         "|---|---|---|---|---|---|---|"])
     for section in SECTIONS:
         for row in (r for r in report["rows"] if r["section"]==section):
@@ -593,7 +774,8 @@ def render_markdown(report):
             clocks=[]
             for ref in row["evidence"]:
                 t=[ref.get(a) or ref.get(b) for a,b in (("effective_time","observed_at_ms"),
-                    ("disclosure_time","available_at_ms"),("retrieval_time","retrieved_at_ms"))]
+                    ("disclosure_time","available_at_ms"),("first_seen_time","first_seen_time"),
+                    ("retrieval_time","retrieved_at_ms"),("validated_at_ms","validated_at_ms"))]
                 if "NOT_EXACT_PUBLICATION" in (ref.get("availability_semantics") or ""):
                     t[1]=None
                 clocks.append(" / ".join(_iso(v) if type(v) is int else "UNKNOWN" for v in t))
