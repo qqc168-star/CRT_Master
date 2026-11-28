@@ -49,7 +49,7 @@ class BtcEtfIntakeTests(unittest.TestCase):
         self.assertEqual(r['breadth']['positive_fund_count'], 1)
         self.assertEqual(r['breadth']['negative_fund_count'], 1)
         self.assertEqual(r['breadth']['reported_zero_fund_count'], 10)
-        self.assertEqual(r['balance']['coverage_state'], 'BLOCKED')
+        self.assertNotIn('balance', r)
 
     def test_null_is_not_zero_and_missing_fund_scope_is_constant(self):
         d = fixture(); d['days'][-2]['perEtfUsd']['IBIT'] = None
@@ -118,7 +118,7 @@ class BtcEtfIntakeTests(unittest.TestCase):
         self.assertEqual(len(r['horizons']['1D']['scope_ids']), 12)
         self.assertNotIn('MSBT', r['horizons']['7D']['scope_ids'])
 
-    def test_pack_wiring_hash_formal_firewall_and_claim_scoped_balance(self):
+    def test_pack_wiring_hash_formal_firewall_without_retired_balance(self):
         with tempfile.TemporaryDirectory() as td:
             kwargs = dict(observation_db=Path(td)/'test.db', generated_at_ms=NOW)
             before = build_evidence_pack(gate(0), **kwargs)
@@ -127,7 +127,7 @@ class BtcEtfIntakeTests(unittest.TestCase):
             self.assertEqual(before[field], after[field])
         self.assertEqual(len([f for f in after['asset_facts']['items'] if f.get('source_id') == intake.SOURCE]), 2)
         b = [b for b in after['blockers']['items'] if b.get('source_id') == intake.SOURCE]
-        self.assertEqual([x['affected_ids'] for x in b], [[intake.BALANCE]])
+        self.assertEqual(b, [])
         supplied = after.pop('evidence_pack_hash')
         self.assertEqual(supplied, _sha256(after))
 
@@ -135,9 +135,10 @@ class BtcEtfIntakeTests(unittest.TestCase):
         p = {'generated_at_ms': NOW, 'asset_facts': {'items': []}, 'blockers': {'items': []}}
         intake.add_to_pack(p, {'raw_json': 'bad'})
         self.assertFalse(p['asset_facts']['items'])
-        self.assertEqual(len(p['blockers']['items']), 3)
+        self.assertEqual(len(p['blockers']['items']), 2)
+        self.assertFalse(any('BTC_ETF_BALANCE_BTC' in x['affected_ids'] for x in p['blockers']['items']))
 
-    def test_downstream_preserves_facts_balance_warning_and_payload_limit(self):
+    def test_downstream_preserves_flow_without_retired_balance(self):
         p = bridge_pack(wake_pack(evidence_hash='a'*64, requested=True))
         p.update(generated_at_ms=NOW, asset_facts={'items': []}, blockers={'items': []})
         intake.add_to_pack(p, envelope())
@@ -147,7 +148,7 @@ class BtcEtfIntakeTests(unittest.TestCase):
         etf = bridge['market_context']['btc_etf_evidence']
         self.assertEqual(etf[intake.FLOW]['30D'][0], 1680)
         self.assertEqual(etf[intake.BREADTH][0], 1)
-        self.assertTrue(etf[intake.BALANCE].startswith('BLOCKED:'))
+        self.assertNotIn('BTC_ETF_BALANCE_BTC', etf)
         self.assertIn('research only', etf['semantics'])
         self.assertIn('not historical publication proof', etf['semantics'])
         self.assertLess(len(json.dumps(bridge, ensure_ascii=False, separators=(',', ':')).encode()), 16384)
