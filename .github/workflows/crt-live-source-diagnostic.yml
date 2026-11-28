@@ -1,0 +1,39 @@
+name: CRT Live Source Gate Diagnostic
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/crt-live-source-diagnostic.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: radar
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --requirement requirements.txt
+      - name: Collect source gate evidence
+        env:
+          PYTHONPATH: src
+        run: |
+          mkdir -p diagnostic
+          python -m crt_radar.source_gate_runner > diagnostic/source-gate.json
+          python -m json.tool diagnostic/source-gate.json > /dev/null
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crt-live-source-gate
+          path: radar/diagnostic/source-gate.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Reject blocked source gate
+        run: |
+          python -c 'import json; d=json.load(open("diagnostic/source-gate.json")); print(d.get("formal_state"), d.get("blocked_reasons")); assert d.get("formal_state") == "OBSERVATION_ONLY"'
