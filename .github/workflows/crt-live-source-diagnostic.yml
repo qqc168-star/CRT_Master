@@ -45,6 +45,14 @@ jobs:
           python scripts/weekly_btc_diagnostic.py > diagnostic/weekly-btc.json
           cat diagnostic/weekly-btc.json
         continue-on-error: true
+      - name: Capture locked ETF flow source
+        env:
+          PYTHONPATH: src
+        run: |
+          mkdir -p diagnostic
+          python -m crt_radar.btc_etf_intake --capture diagnostic/etf-raw.json > diagnostic/etf-normalized.json
+          cat diagnostic/etf-normalized.json
+        continue-on-error: true
       - name: Test registered liquidation collector
         env:
           PYTHONPATH: src
@@ -67,6 +75,8 @@ jobs:
         with:
           name: crt-live-source-gate
           path: |
+            radar/diagnostic/etf-raw.json
+            radar/diagnostic/etf-normalized.json
             radar/diagnostic/weekly-btc.json
             radar/diagnostic/source-gate.json
             radar/diagnostic/liquidation/snapshots/latest.json
