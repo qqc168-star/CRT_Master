@@ -39,6 +39,32 @@ jobs:
               except (OSError, ValueError) as exc:
                   print(path, type(exc).__name__, str(exc))
           PY
+      - name: Qualify independent Kraken derivatives candidate
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json, time, urllib.request, urllib.parse, urllib.error
+          from pathlib import Path
+          now = int(time.time())
+          end = now // 300 * 300
+          start = end - 86400
+          output = {"scope": "KRAKEN_PF_XBTUSD_RESEARCH_ONLY", "formal_authority": "NONE", "retrieved_at": now, "families": {}}
+          for family in ("open-interest", "funding", "liquidation-volume"):
+              url = "https://futures.kraken.com/api/charts/v1/analytics/PF_XBTUSD/" + family + "?" + urllib.parse.urlencode({"since": start, "to": end, "interval": 300})
+              try:
+                  with urllib.request.urlopen(url, timeout=20) as response:
+                      obj = json.load(response)
+                  result = obj["result"]
+                  ts = result["timestamp"]
+                  expected = set(range(start, end, 300))
+                  actual = set(ts)
+                  output["families"][family] = {"state": "RESPONSE_RECEIVED_NOT_QUALIFIED", "coverage": len(expected & actual)/len(expected), "duplicates": len(ts)-len(actual), "more": result.get("more"), "latest": max(ts) if ts else None, "data_shape": str(type(result["data"])), "errors": obj.get("errors")}
+              except (OSError, ValueError, KeyError, TypeError) as exc:
+                  output["families"][family] = {"state": "BLOCKED", "reason": str(exc)}
+          Path("diagnostic").mkdir(exist_ok=True)
+          Path("diagnostic/kraken-candidate.json").write_text(json.dumps(output))
+          print(json.dumps(output))
+          PY
       - name: Collect Coinbase completed weekly diagnostic
         run: |
           mkdir -p diagnostic
@@ -99,6 +125,7 @@ jobs:
         with:
           name: crt-live-source-gate
           path: |
+            radar/diagnostic/kraken-candidate.json
             radar/diagnostic/observation-index.json
             radar/diagnostic/etf-raw.json
             radar/diagnostic/etf-normalized.json
