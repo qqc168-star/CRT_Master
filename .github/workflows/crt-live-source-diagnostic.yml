@@ -70,12 +70,36 @@ jobs:
           mkdir -p diagnostic
           python -m crt_radar.source_gate_runner > diagnostic/source-gate.json
           python -m json.tool diagnostic/source-gate.json > /dev/null
+      - name: Build public observation index
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, hashlib
+          from pathlib import Path
+          from datetime import datetime, timezone
+          root = Path("diagnostic")
+          root.mkdir(exist_ok=True)
+          files = {}
+          for name in ("source-gate.json", "weekly-btc.json", "etf-normalized.json"):
+              p = root / name
+              try:
+                  raw = p.read_bytes()
+                  value = json.loads(raw)
+                  if not isinstance(value, dict):
+                      raise ValueError("expected object")
+                  files[name] = {"state": "CAPTURED_NOT_FORMALLY_QUALIFIED", "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+              except (OSError, ValueError) as exc:
+                  files[name] = {"state": "BLOCKED", "reason": type(exc).__name__}
+          result = {"schema": "CRT_PUBLIC_DIAGNOSTIC_INDEX_V1", "generated_at_utc": datetime.now(timezone.utc).isoformat(), "files": files, "formal_authority": "NONE", "capital_authority": "USER_ONLY"}
+          (root / "observation-index.json").write_text(json.dumps(result, indent=2))
+          PY
       - name: Upload diagnostic evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: crt-live-source-gate
           path: |
+            radar/diagnostic/observation-index.json
             radar/diagnostic/etf-raw.json
             radar/diagnostic/etf-normalized.json
             radar/diagnostic/weekly-btc.json
