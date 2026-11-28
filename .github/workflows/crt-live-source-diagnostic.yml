@@ -39,6 +39,15 @@ jobs:
               except (OSError, ValueError) as exc:
                   print(path, type(exc).__name__, str(exc))
           PY
+      - name: Test registered liquidation collector
+        env:
+          PYTHONPATH: src
+        run: |
+          mkdir -p diagnostic
+          python -m crt_radar.liquidation_collector collect --runtime-root diagnostic/liquidation --max-runtime-s 75
+          python -m json.tool diagnostic/liquidation/snapshots/latest.json > /dev/null
+          mkdir -p runtime/snapshots
+          cp diagnostic/liquidation/snapshots/latest.json runtime/snapshots/latest.json
       - name: Collect source gate evidence
         env:
           PYTHONPATH: src
@@ -51,7 +60,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: crt-live-source-gate
-          path: radar/diagnostic/source-gate.json
+          path: |
+            radar/diagnostic/source-gate.json
+            radar/diagnostic/liquidation/snapshots/latest.json
           if-no-files-found: error
           retention-days: 3
       - name: Report source-level diagnostics
