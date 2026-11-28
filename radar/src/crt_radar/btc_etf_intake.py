@@ -216,7 +216,7 @@ def add_to_pack(pack, envelope):
             **({k: result["metadata"][k] for k in ("retrieved_at_ms", "evidence_hash")}
                if "metadata" in result else {})})
     if "error" in result:
-        for metric in (FLOW, BREADTH, BALANCE):
+        for metric in (FLOW, BREADTH):
             block(metric, result["error"])
     else:
         common = {"asset": "BTC", **result["metadata"]}
@@ -226,11 +226,10 @@ def add_to_pack(pack, envelope):
             facts["items"].append({**common, "asset_fact_id": SOURCE+":"+metric,
                 "fact_type": metric, "metric_id": metric, "evidence": evidence,
                 "coverage_state": coverage,
-                "limitation": "PARTIAL_IS_SCOPED_NOT_TOTAL;BALANCE_IS_NOT_DERIVED_FROM_FLOW_OR_AUM"})
+                "limitation": "PARTIAL_IS_SCOPED_NOT_TOTAL"})
         for horizon, value in result["horizons"].items():
             if value["coverage_state"] != "COMPLETE":
                 block(FLOW+":"+horizon, value["reason"])
-        block(BALANCE, result["balance"]["reason"])
         if result["breadth"]["coverage_state"] != "COMPLETE":
             block(BREADTH, result["horizons"]["1D"]["reason"])
     for section in (facts, blockers):
@@ -244,7 +243,7 @@ def add_to_pack(pack, envelope):
         facts["coverage_state"] = "PARTIAL"
         if "reason_code" in facts:
             facts["upstream_reason_code"] = facts["reason_code"]
-        facts["reason_code"] = "BTC_ETF_FLOW_AVAILABLE_BALANCE_BLOCKED"
+        facts["reason_code"] = "BTC_ETF_FLOW_AVAILABLE"
     blockers["section_state"] = "BLOCKED"
 
 
@@ -274,9 +273,7 @@ def compact_for_bridge(pack):
         FLOW: rows,
         "breadth_columns": ["positive_fund_count", "negative_fund_count", "reported_zero_fund_count", "coverage_state", "scope_index"],
         BREADTH: [breadth[k] for k in ("positive_fund_count", "negative_fund_count", "reported_zero_fund_count", "coverage_state")]+[scope_index(breadth)],
-        BALANCE: "BLOCKED:RELIABLE_FREE_BTC_BALANCE_HISTORY_UNAVAILABLE",
-        "semantics": "Calendar-window sums; research only; retrieval vintage, not historical publication proof; balance not derived from flow/AUM/price.",
-        "farside": "NON_BLOCKING:LOCAL_FETCH_BLOCKED",
+        "semantics": "Calendar-window sums; research only; retrieval vintage, not historical publication proof.",
     })
     gaps = {h: {"missing_fund_ids": r["missing_fund_ids"], "reason": r["reason"]}
             for h, r in flow["evidence"].items() if r["coverage_state"] != "COMPLETE"}
