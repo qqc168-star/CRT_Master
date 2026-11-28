@@ -1,0 +1,166 @@
+name: CRT Live Source Gate Diagnostic
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/crt-live-source-diagnostic.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: radar
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python -m pip install --requirement requirements.txt
+      - name: Diagnose registered futures endpoint availability
+        run: |
+          python - <<'PY'
+          import urllib.request, urllib.error, json
+          paths = [
+              "/fapi/v1/openInterest?symbol=BTCUSDT",
+              "/fapi/v1/fundingRate?symbol=BTCUSDT&limit=9",
+              "/futures/data/openInterestHist?symbol=BTCUSDT&period=5m&limit=1",
+          ]
+          for path in paths:
+              url = "https://fapi.binance.com" + path
+              try:
+                  with urllib.request.urlopen(url, timeout=15) as response:
+                      data = json.load(response)
+                      print(path, response.status, type(data).__name__)
+              except urllib.error.HTTPError as exc:
+                  print(path, "HTTP", exc.code, exc.read(512).decode("utf-8", "replace"))
+              except (OSError, ValueError) as exc:
+                  print(path, type(exc).__name__, str(exc))
+          PY
+      - name: Qualify independent Kraken derivatives candidate
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json, time, urllib.request, urllib.parse, urllib.error
+          from pathlib import Path
+          now = int(time.time())
+          end = now // 300 * 300
+          start = end - 86400
+          output = {"scope": "KRAKEN_PF_XBTUSD_RESEARCH_ONLY", "formal_authority": "NONE", "retrieved_at": now, "families": {}}
+          for family in ("open-interest", "funding", "liquidation-volume"):
+              url = "https://futures.kraken.com/api/charts/v1/analytics/PF_XBTUSD/" + family + "?" + urllib.parse.urlencode({"since": start, "to": end, "interval": 300})
+              try:
+                  with urllib.request.urlopen(url, timeout=20) as response:
+                      obj = json.load(response)
+                  result = obj["result"]
+                  raw_ts = result["timestamp"]
+                  if not all(isinstance(t, int) and not isinstance(t, bool) for t in raw_ts):
+                      raise ValueError("noninteger timestamp")
+                  units = {"ms" if t >= 10**12 else "s" for t in raw_ts}
+                  if len(units) != 1:
+                      raise ValueError("empty or mixed timestamp units")
+                  if units == {"ms"} and any(t % 1000 for t in raw_ts):
+                      raise ValueError("subsecond timestamp")
+                  ts = [t // 1000 if units == {"ms"} else t for t in raw_ts]
+                  data = result["data"]
+                  shape = {k: len(v) if isinstance(v, list) else type(v).__name__ for k,v in data.items()} if isinstance(data, dict) else {"rows": len(data), "first_row_type": type(data[0]).__name__ if data else None}
+                  print(json.dumps({"family": family, "timestamp_unit": next(iter(units)), "data_shape": shape, "sample": {k:v[-2:] if isinstance(v,list) else v for k,v in data.items()} if isinstance(data,dict) else data[-2:]}))
+                  expected = set(range(start, end, 300))
+                  actual = set(ts)
+                  output["families"][family] = {"state": "RESPONSE_RECEIVED_NOT_QUALIFIED", "coverage": len(expected & actual)/len(expected), "duplicates": len(ts)-len(actual), "more": result.get("more"), "latest": max(ts) if ts else None, "data_shape": str(type(result["data"])), "errors": obj.get("errors")}
+              except (OSError, ValueError, KeyError, TypeError) as exc:
+                  output["families"][family] = {"state": "BLOCKED", "reason": str(exc)}
+          Path("diagnostic").mkdir(exist_ok=True)
+          Path("diagnostic/kraken-candidate.json").write_text(json.dumps(output))
+          print(json.dumps(output))
+          PY
+      - name: Collect Coinbase completed weekly diagnostic
+        run: |
+          mkdir -p diagnostic
+          python scripts/weekly_btc_diagnostic.py > diagnostic/weekly-btc.json
+          cat diagnostic/weekly-btc.json
+        continue-on-error: true
+      - name: Capture locked ETF flow source
+        env:
+          PYTHONPATH: src
+        run: |
+          mkdir -p diagnostic
+          python -m crt_radar.btc_etf_intake --capture diagnostic/etf-raw.json > diagnostic/etf-normalized.json
+          cat diagnostic/etf-normalized.json
+        continue-on-error: true
+      - name: Test registered liquidation collector
+        env:
+          PYTHONPATH: src
+        run: |
+          mkdir -p diagnostic
+          python -m crt_radar.liquidation_collector collect --runtime-root diagnostic/liquidation --max-runtime-s 75
+          python -m json.tool diagnostic/liquidation/snapshots/latest.json > /dev/null
+          mkdir -p runtime/snapshots
+          cp diagnostic/liquidation/snapshots/latest.json runtime/snapshots/latest.json
+        continue-on-error: true
+      - name: Collect source gate evidence
+        env:
+          PYTHONPATH: src
+        run: |
+          mkdir -p diagnostic
+          python -m crt_radar.source_gate_runner > diagnostic/source-gate.json
+          python -m json.tool diagnostic/source-gate.json > /dev/null
+      - name: Build public observation index
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, hashlib
+          from pathlib import Path
+          from datetime import datetime, timezone
+          root = Path("diagnostic")
+          root.mkdir(exist_ok=True)
+          files = {}
+          for name in ("source-gate.json", "weekly-btc.json", "etf-normalized.json"):
+              p = root / name
+              try:
+                  raw = p.read_bytes()
+                  value = json.loads(raw)
+                  if not isinstance(value, dict):
+                      raise ValueError("expected object")
+                  files[name] = {"state": "CAPTURED_NOT_FORMALLY_QUALIFIED", "sha256": hashlib.sha256(raw).hexdigest(), "bytes": len(raw)}
+              except (OSError, ValueError) as exc:
+                  files[name] = {"state": "BLOCKED", "reason": type(exc).__name__}
+          result = {"schema": "CRT_PUBLIC_DIAGNOSTIC_INDEX_V1", "generated_at_utc": datetime.now(timezone.utc).isoformat(), "files": files, "formal_authority": "NONE", "capital_authority": "USER_ONLY"}
+          (root / "observation-index.json").write_text(json.dumps(result, indent=2))
+          PY
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: crt-live-source-gate
+          path: |
+            radar/diagnostic/kraken-candidate.json
+            radar/diagnostic/observation-index.json
+            radar/diagnostic/etf-raw.json
+            radar/diagnostic/etf-normalized.json
+            radar/diagnostic/weekly-btc.json
+            radar/diagnostic/source-gate.json
+            radar/diagnostic/liquidation/snapshots/latest.json
+          if-no-files-found: error
+          retention-days: 3
+      - name: Report source-level diagnostics
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("diagnostic/source-gate.json")
+          if p.exists():
+              d = json.loads(p.read_text())
+              for key in ("formal_state", "blocked_reasons", "l6_candidate_state", "l6_candidate_blocked_reasons"):
+                  print(key, d.get(key))
+              for item in d.get("evidence", []):
+                  print("QUALITY", {k: item.get(k) for k in ("input_family", "source_id", "quality_state", "quality_error", "as_of_ms", "error")})
+              for family, value in d.get("parsed", {}).items():
+                  print(family, json.dumps(value, ensure_ascii=False)[:2000])
+          PY
+      - name: Reject blocked source gate
+        run: |
+          python -c 'import json; d=json.load(open("diagnostic/source-gate.json")); print(d.get("formal_state"), d.get("blocked_reasons")); assert d.get("formal_state") == "OBSERVATION_ONLY"'
