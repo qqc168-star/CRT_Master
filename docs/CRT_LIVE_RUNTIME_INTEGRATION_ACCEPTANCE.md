@@ -1,22 +1,19 @@
-# CRT live runtime integration — consolidated acceptance
+# CRT live runtime integration — focused acceptance
 
-Status: draft engineering scope, not production approval. Existing main contracts prevail. No capital authority or source promotion.
+User-directed scope reduction 2026-11-28. Active engineering scope replaces the previous A–L backlog. Historical records remain immutable. Formal source/model changes require compatible implementation and regression before merge; capital authority USER_ONLY.
 
-| Work package | Implementation / dependency | Acceptance |
+| Core decision | Required evidence | Acceptance |
 |---|---|---|
-| A Public market | Registered spot, completed UTC daily structure, CVD20, RVOL20, taker share; Coinbase USD anchor distinct from USDT proxy | Live values, source IDs, units, four clocks, freshness and missing reasons |
-| B Weekly | Existing PR Coinbase 260 completed weeks; Wilder RSI14, SMA50/200; TradingView INDEX comparison separate | Independent arithmetic tests, gap/unfinished week rejection, live result and scope |
-| C ETF | Reuse btc_etf_intake, TFTC locked research role; 1/7/30 calendar and 5/20/60 session comparisons | Actual coverage, basket, freshness, hashes; BTC balance stays blocked without reliable BTC-unit history |
-| D Onchain | Registered Coin Metrics MVRV; separately qualify realized cap, market cap history, MVRV Z, SOPR, Glassnode spot, CVDD and Pi Cycle | Formula/version/window and source rights; no ratio/Z substitution; no stale carry-forward |
-| E Macro | Registered dollar, macro, rates, credit/liquidity families | Each family independently qualified with release and retrieval clocks |
-| F Derivatives | Binance OI/funding/notional HTTP 451 confirmed; compliant authorized runtime or explicitly approved alternate scope | Live fresh observations, same venue/contract/units, no geographic restriction evasion |
-| G Liquidation | Existing persistent collector and store; authorized continuously running environment | Both 1h and 24h coverage >=95%; no zero imputation, reconnect gaps visible |
-| H L6 | Existing locked Coinbase/Bitstamp/Kraken and Binance archive capture | 201 completed consecutive UTC days and verified archive/checksum obligations; no substitute promotion |
-| I Company | Strategy/Strive official filings, BTC/AFDS/debt/preferred claims/cash, CRT diluted mNAV and historical percentile, four health metrics, annual distribution burden | Same-time price and balance inputs, verified filing clocks, exact formula and historical sample; issuer gaps isolated |
-| J Delivery | Public diagnostic index, existing Evidence Pack and handoff, private data excluded from public repository | Hash verified retrieval, freshness and independent family blockers; no artifact equated with ObservationStore |
-| K PRE/POST | Doctrine 14, existing freeze_pre/freeze_post/revise_price_anchor | Actual two-task write/read receipt for same PRE ID/hash; original claims immutable; NY calendar and early close, 7–21 day pending |
-| L Release | Offline regression plus real live acceptance, review and merge | No false green; partial research and formal readiness separate; no production or capital authorization |
+| Cycle | completed weekly RSI14, 200WMA, MVRV Z | fresh qualified inputs, formula and completed windows |
+| Entry | BTC USD price, 200DMA, 50WMA | live price and completed candles, no currency substitution |
+| Demand | CVD20, RVOL20, ETF 1/7/30 calendar flows | scope, units, coverage, clocks; taker share derived within CVD, no extra vote |
+| Leverage | OI change, funding, 1h/24h liquidation | same venue/contract, qualified coverage and semantics; notional part of OI; Kraken candidate separate from Binance |
+| Relative value | MSTR/ASST diluted mNAV, historical percentile, diluted BTC/share | official filings and aligned prices, existing formula; BTC exposure per dollar derived |
+| Issuer health | asset coverage, available cash/payment runway, net-cost per-share accretion, annual interest and preferred distributions/assets | complete claims and cash bridge, issuer-specific freshness |
+| Macro modifier | existing dollar/rates/credit/liquidity evidence | one contextual risk modifier, no independent votes |
 
-External dependencies: lawful futures endpoint access, persistent collector host, source entitlement and verified shared PRE/POST storage. Do not declare these deployed merely because a PR exists. Public repository must not contain private portfolio or broker records. No new paid subscription or source authority change without approval.
+Active retirement: NUPL standalone, SOPR, CVDD, Pi Cycle, Glassnode-specific acquisition, ETF BTC balance, ETF 5/20/60 session flows. MVRV ratio is an intermediate only, not an independent signal. No active acquisition, reporting row, missing-data alarm, new test obligation or remediation backlog for retired items. Preserve historical artifacts only for reproducibility. No provider brand or hosting platform is an investment indicator. Do not pursue Binance HTTP451 circumvention or persistent collector hosting as independent objectives; qualify necessary leverage observations by lawful sources. Existing formal L6 contracts remain until explicitly migrated and tested; do not block independent research observations on L6 gaps.
 
-Release evidence must identify commit SHA, CI run, test results, per-family state and remaining blockers. Earlier unverified numerical claims are not acceptance evidence.
+Delivery: retain immutable PRE/POST and actual shared read/write verification, claim-scoped missing evidence, four clocks, source hashes, privacy and regression. No paid service without approval. No false green or automatic trade. Report BUY/SELL/HOLD/WAIT/ROTATE conditional reasoning, invalidation, risk and portfolio effect. Compare net BTC purchasing power and drawdown against simple baselines; unvalidated thresholds are hypotheses.
+
+Implementation acceptance: inventory active consumers, remove retired fields from current report/gates/backlog and tests where applicable, migrate versioned contracts without rewriting historical records, verify live core inputs and offline regression, then review merge. A document edit alone does not prove runtime retirement.
