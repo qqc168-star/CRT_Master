@@ -145,10 +145,7 @@ def normalize(envelope, *, as_of_ms):
                "reported_zero_fund_count": None if state == "BLOCKED" else sum(values[t] == 0 for t in scope)}
     return {"metadata": common, "horizons": horizons, "breadth": breadth,
             "provider_aggregate_usd": rows[latest].get("netFlowUsd"),
-            "excluded_provider_fund_ids": excluded,
-            "balance": {"coverage_state": "BLOCKED", "current_level": None,
-                        "7D_delta": None, "30D_delta": None, "reason": "RELIABLE_FREE_BTC_BALANCE_HISTORY_UNAVAILABLE"},
-            "farside": {"role": "NON_BLOCKING_CROSS_CHECK", "state": "LOCAL_FETCH_BLOCKED"}}
+            "excluded_provider_fund_ids": excluded}
 
 
 def trading_session_windows(envelope, *, as_of_ms):
