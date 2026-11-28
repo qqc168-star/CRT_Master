@@ -55,7 +55,18 @@ jobs:
                   with urllib.request.urlopen(url, timeout=20) as response:
                       obj = json.load(response)
                   result = obj["result"]
-                  ts = result["timestamp"]
+                  raw_ts = result["timestamp"]
+                  if not all(isinstance(t, int) and not isinstance(t, bool) for t in raw_ts):
+                      raise ValueError("noninteger timestamp")
+                  units = {"ms" if t >= 10**12 else "s" for t in raw_ts}
+                  if len(units) != 1:
+                      raise ValueError("empty or mixed timestamp units")
+                  if units == {"ms"} and any(t % 1000 for t in raw_ts):
+                      raise ValueError("subsecond timestamp")
+                  ts = [t // 1000 if units == {"ms"} else t for t in raw_ts]
+                  data = result["data"]
+                  shape = {k: len(v) if isinstance(v, list) else type(v).__name__ for k,v in data.items()} if isinstance(data, dict) else {"rows": len(data), "first_row_type": type(data[0]).__name__ if data else None}
+                  print(json.dumps({"family": family, "timestamp_unit": next(iter(units)), "data_shape": shape, "sample": {k:v[-2:] if isinstance(v,list) else v for k,v in data.items()} if isinstance(data,dict) else data[-2:]}))
                   expected = set(range(start, end, 300))
                   actual = set(ts)
                   output["families"][family] = {"state": "RESPONSE_RECEIVED_NOT_QUALIFIED", "coverage": len(expected & actual)/len(expected), "duplicates": len(ts)-len(actual), "more": result.get("more"), "latest": max(ts) if ts else None, "data_shape": str(type(result["data"])), "errors": obj.get("errors")}
