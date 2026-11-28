@@ -383,7 +383,8 @@ class FullBridgeBudgetTests(unittest.TestCase):
                 self.assertEqual(dvol[key], pack["dvol_regime_watch"][key])
             self.assertIn("btc_etf_evidence", market)
             serialized = canonical_bytes(payload).decode("utf-8")
-            self.assertIn("RELIABLE_FREE_BTC_BALANCE_HISTORY_UNAVAILABLE", serialized)
+            self.assertNotIn("RELIABLE_FREE_BTC_BALANCE_HISTORY_UNAVAILABLE", serialized)
+            self.assertNotIn("BTC_ETF_BALANCE_BTC", serialized)
             for key in ("btc_season_router", "locked_formal_scoring", "six_layer_evidence"):
                 expected = pack["model_status"][key]
                 actual = market["model_status"][key]
