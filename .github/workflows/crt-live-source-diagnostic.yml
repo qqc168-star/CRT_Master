@@ -34,6 +34,20 @@ jobs:
           path: radar/diagnostic/source-gate.json
           if-no-files-found: error
           retention-days: 3
+      - name: Report source-level diagnostics
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("diagnostic/source-gate.json")
+          if p.exists():
+              d = json.loads(p.read_text())
+              for key in ("formal_state", "blocked_reasons", "l6_candidate_state", "l6_candidate_blocked_reasons"):
+                  print(key, d.get(key))
+              for family, value in d.get("parsed", {}).items():
+                  print(family, json.dumps(value, ensure_ascii=False)[:2000])
+          PY
       - name: Reject blocked source gate
         run: |
           python -c 'import json; d=json.load(open("diagnostic/source-gate.json")); print(d.get("formal_state"), d.get("blocked_reasons")); assert d.get("formal_state") == "OBSERVATION_ONLY"'
