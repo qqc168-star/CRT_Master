@@ -39,6 +39,12 @@ jobs:
               except (OSError, ValueError) as exc:
                   print(path, type(exc).__name__, str(exc))
           PY
+      - name: Collect Coinbase completed weekly diagnostic
+        run: |
+          mkdir -p diagnostic
+          python scripts/weekly_btc_diagnostic.py > diagnostic/weekly-btc.json
+          cat diagnostic/weekly-btc.json
+        continue-on-error: true
       - name: Test registered liquidation collector
         env:
           PYTHONPATH: src
@@ -61,6 +67,7 @@ jobs:
         with:
           name: crt-live-source-gate
           path: |
+            radar/diagnostic/weekly-btc.json
             radar/diagnostic/source-gate.json
             radar/diagnostic/liquidation/snapshots/latest.json
           if-no-files-found: error
